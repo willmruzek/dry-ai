@@ -102,5 +102,5 @@ git push origin v0.1.0
 Install from the release tarball with:
 
 ```sh
-npm install -g https://github.com/willmruzek/share-ai-config/releases/download/v0.1.0/agents-installer-0.1.0.tgz
+npm install -g https://github.com/willmruzek/share-ai-config/releases/download/v0.1.0/share-ai-config-0.1.0.tgz
 ```
