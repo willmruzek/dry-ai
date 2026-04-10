@@ -1,13 +1,17 @@
 {
   "name": "agents-installer",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
+  "files": [
+    "dest"
+  ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "setup:editor": "effect-language-service patch",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "dev:saic": "node ./dest/main.js",
-    "prepare": "effect-language-service patch",
-    "typecheck": "tsc --noEmit",
+    "tsc": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest"
   },

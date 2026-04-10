@@ -63,7 +63,10 @@ The lockfile records:
 
 For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:saic --test install` to run the built CLI.
 
+Run `pnpm run setup:editor` after installing dependencies if you want the Effect language service workspace patch applied locally.
+
 ```sh
+pnpm run setup:editor
 pnpm run build
 pnpm run dev
 pnpm run test
@@ -73,4 +76,31 @@ pnpm dev:saic install
 pnpm dev:saic --test install
 pnpm dev:saic --output ./tmp/install-root install
 pnpm dev:saic --input ./config install
+```
+
+## CI and Release
+
+- On pull request open or update
+  - Run CI validation with build, test, and `npm pack --dry-run`.
+- On changes landing on `main`
+  - Run the same CI validation with build, test, and `npm pack --dry-run`.
+- On `v*` tag pushed to `main`
+  - Verify the tag matches the checked-in `package.json` version.
+  - Verify the tagged commit is on `main`.
+  - Build and test the CLI.
+  - Create a tarball with `npm pack`.
+  - Create or update the matching GitHub Release.
+  - Upload the tarball as a release asset.
+
+Example release flow:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Install from the release tarball with:
+
+```sh
+npm install -g https://github.com/willmruzek/share-ai-config/releases/download/v0.1.0/agents-installer-0.1.0.tgz
 ```

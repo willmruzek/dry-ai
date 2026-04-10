@@ -1,42 +1,12 @@
 {
-  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
+  "files": [],
 
-  "compilerOptions": {
-    // Runtime and module resolution
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "moduleDetection": "force",
-
-    // Project layout
-    "rootDir": "./src",
-    "outDir": "./dest",
-
-    // Emit
-    "noEmit": false,
-    "incremental": true,
-    "sourceMap": true,
-
-    // Type safety
-    "strict": true,
-    "exactOptionalPropertyTypes": true,
-
-    // Lint-like checks
-    "noUnusedLocals": true,
-    "noImplicitOverride": true,
-
-    // Import behavior and compiler ergonomics
-    "verbatimModuleSyntax": true,
-    "rewriteRelativeImportExtensions": true,
-    "skipLibCheck": true,
-
-    // Effect language service
-    "plugins": [
-      {
-        "name": "@effect/language-service"
-      }
-    ]
-  },
-
-  "include": ["src/**/*.ts", "tests/main.test.ts"]
+  "references": [
+    {
+      "path": "./tsconfig.build.json"
+    },
+    {
+      "path": "./tsconfig.tests.json"
+    }
+  ]
 }
