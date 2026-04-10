@@ -53,9 +53,18 @@ export function createTargetRoots(baseDir: string): TargetRoots {
       baseDir,
       ...DEFAULT_TARGET_ROOT_SEGMENTS.copilotInstructions,
     ),
-    copilotSkills: path.join(baseDir, ...DEFAULT_TARGET_ROOT_SEGMENTS.copilotSkills),
-    cursorRules: path.join(baseDir, ...DEFAULT_TARGET_ROOT_SEGMENTS.cursorRules),
-    cursorSkills: path.join(baseDir, ...DEFAULT_TARGET_ROOT_SEGMENTS.cursorSkills),
+    copilotSkills: path.join(
+      baseDir,
+      ...DEFAULT_TARGET_ROOT_SEGMENTS.copilotSkills,
+    ),
+    cursorRules: path.join(
+      baseDir,
+      ...DEFAULT_TARGET_ROOT_SEGMENTS.cursorRules,
+    ),
+    cursorSkills: path.join(
+      baseDir,
+      ...DEFAULT_TARGET_ROOT_SEGMENTS.cursorSkills,
+    ),
   };
 }
 
@@ -132,12 +141,10 @@ export function resolveOutputContext(
  * Creates the base CLI context with repository, input, and output paths
  * resolved.
  */
-export function createAgentsContext(
-  options?: {
-    inputRoot?: string;
-    outputRoot?: string;
-  },
-): AgentsContext {
+export function createAgentsContext(options?: {
+  inputRoot?: string;
+  outputRoot?: string;
+}): AgentsContext {
   const homeDir = os.homedir();
   const inputRoot = options?.inputRoot
     ? path.resolve(expandHomePath(options.inputRoot, homeDir))
