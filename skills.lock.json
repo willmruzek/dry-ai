@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "commit": "98669c11ca63e9c81c11501e1437e5c47b556621",
+      "importedAt": "2026-04-07T10:56:32.392Z",
+      "name": "skill-creator",
+      "path": "skills/skill-creator",
+      "repo": "https://github.com/anthropics/skills",
+      "updatedAt": "2026-04-07T10:56:32.392Z"
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+#!/usr/bin/env node
+
+import { Command } from 'commander';
+import { z } from 'zod';
+import { runInstallCommand } from './commands/install.js';
+import { addSkillsCommand } from './commands/skills/index.js';
+import {
+  nonEmptyOptionStringSchema,
+  parseOptionValue,
+  parseOptionsObject,
+} from './lib/command-options.js';
+import {
+  createAgentsContext,
+  resolveRequestedOutputRoot,
+  type AgentsContext,
+} from './lib/context.js';
+
+const rootOptionsSchema = z.object({
+  test: z.boolean().optional().default(false),
+  input: nonEmptyOptionStringSchema.optional(),
+  output: nonEmptyOptionStringSchema.optional(),
+});
+
+type RootOptions = z.output<typeof rootOptionsSchema>;
+
+/**
+ * Parses the top-level CLI options into a validated shape.
+ */
+function getRootOptions(program: Command): RootOptions {
+  return parseOptionsObject({
+    schema: rootOptionsSchema,
+    options: program.opts(),
+    optionsLabel: 'root options',
+  });
+}
+
+/**
+ * Returns the active context after applying root-level input and output
+ * overrides.
+ */
+function resolveActiveContext(program: Command): AgentsContext {
+  const rootOptions = getRootOptions(program);
+  const requestedOutputRoot = resolveRequestedOutputRoot({
+    test: rootOptions.test,
+    ...(rootOptions.output ? { outputRoot: rootOptions.output } : {}),
+  });
+  const context = createAgentsContext({
+    ...(rootOptions.input ? { inputRoot: rootOptions.input } : {}),
+    ...(requestedOutputRoot ? { outputRoot: requestedOutputRoot } : {}),
+  });
+
+  return context;
+}
+
+/**
+ * Configures and runs the agents CLI entrypoint.
+ */
+async function main(): Promise<void> {
+  const executableName = 'saic';
+  const program = new Command();
+
+  program
+    .name(executableName)
+    .usage('[options] <command> [args]')
+    .helpOption('-h, --help', 'Display this message')
+    .option(
+      '--test',
+      'Shortcut for writing generated output into ./output-test unless --output is also provided',
+    )
+    .option(
+      '--input <path>',
+      'Read input configs from a different root instead of ~/.config/agents',
+      parseOptionValue({
+        schema: nonEmptyOptionStringSchema,
+        optionLabel: '--input',
+      }),
+    )
+    .option(
+      '--output <path>',
+      'Write generated output under a different root instead of the default home directory',
+      parseOptionValue({
+        schema: nonEmptyOptionStringSchema,
+        optionLabel: '--output',
+      }),
+    )
+    .helpCommand(false)
+    .action(() => {
+      program.outputHelp();
+    });
+
+  program
+    .command('install')
+    .description('Install generated output into Copilot and Cursor targets')
+    .usage('install')
+    .action(async () => {
+      const activeContext = resolveActiveContext(program);
+      await runInstallCommand(activeContext);
+
+      if (requestedOutputRootWasUsed(program)) {
+        console.log(`Generated output written to ${activeContext.outputRoot}`);
+      }
+    });
+
+  addSkillsCommand({
+    parent: program,
+    commandName: `${executableName} skills`,
+    resolveContext: () => resolveActiveContext(program),
+  });
+
+  await program.parseAsync(process.argv);
+}
+
+/**
+ * Returns whether the current invocation requested a non-default output root.
+ */
+function requestedOutputRootWasUsed(program: Command): boolean {
+  const rootOptions = getRootOptions(program);
+  return (
+    resolveRequestedOutputRoot({
+      test: rootOptions.test,
+      ...(rootOptions.output ? { outputRoot: rootOptions.output } : {}),
+    }) !== undefined
+  );
+}
+
+try {
+  await main();
+} catch (error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.log(message);
+  process.exitCode = 1;
+}
