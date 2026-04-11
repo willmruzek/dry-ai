@@ -24,6 +24,94 @@ Live output is written to:
 - `~/.cursor/rules`
 - `~/.cursor/skills`
 
+## Example Configs
+
+One input root can contain all three source types:
+
+```text
+~/.config/agents/
+├── commands/
+│   └── gen-commit-msg.md
+├── rules/
+│   └── say-yes-captain.md
+└── skills/
+    └── review-helper/
+        └── SKILL.md
+```
+
+### Example Rule
+
+Rules are markdown files under `rules/`. `dryai` recognizes these rule frontmatter fields:
+
+- `description`
+- `copilot.applyTo`
+- `cursor.alwaysApply`
+- `cursor.globs`
+
+`cursor.globs` should be provided as one comma-separated glob string.
+
+```md
+---
+description: Reply with "Yes, Captain!" before answering when the user says "Make it so" or "Engage".
+copilot:
+  applyTo: '**/*.tsx, **/*.ts, src/**/*.ts, src/**/*.tsx, src/**/*.js, src/**/*.jsx'
+cursor:
+  alwaysApply: false
+  globs: '**/*.tsx, **/*.ts, src/**/*.ts, src/**/*.tsx, src/**/*.js, src/**/*.jsx'
+---
+
+# Say Yes Captain
+
+When the user says "Make it so" or "Engage", start your response with "Yes, Captain!".
+```
+
+### Example Command
+
+Commands are markdown files under `commands/`. `dryai` recognizes these command frontmatter fields:
+
+- `name`
+- `description`
+- `cursor.disable-model-invocation`
+
+```md
+---
+name: gen-commit-msg
+description: Generate a conventional commit message from the current staged git diff.
+cursor:
+  disable-model-invocation: true
+---
+
+# Generate Commit Message
+
+Read the staged diff and produce a conventional commit message with a concise subject and optional body.
+```
+
+### Example Skill
+
+Skills live in directories under `skills/`. The directory is copied as-is into the Copilot and Cursor skills targets.
+
+Unlike commands and rules, `dryai` does not define or validate a fixed skill frontmatter schema. Skill files are passed through unchanged, so the allowed frontmatter fields depend on the skill format expected by the target editor or agent.
+
+```text
+skills/
+└── review-helper/
+    └── SKILL.md
+```
+
+```md
+---
+name: review-helper
+description: Use this skill when the user asks for a code review, PR review, or wants bugs and risks called out first.
+---
+
+# Review Helper
+
+Focus on findings first.
+
+- Identify bugs, regressions, and missing tests before summarizing.
+- Keep the overview brief unless the user asks for a deeper walkthrough.
+```
+
 ## Commands
 
 ```sh

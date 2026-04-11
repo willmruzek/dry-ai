@@ -1,7 +1,13 @@
 {
   "name": "dryai",
   "version": "0.2.1",
+  "description": "CLI for installing shared AI commands, rules, and skills into Copilot and Cursor.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com:willmruzek/dryai.git"
+  },
+  "license": "MIT",
   "files": [
     "dest/**/*.js",
     "dest/**/*.d.ts"
