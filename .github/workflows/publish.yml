@@ -1,0 +1,49 @@
+name: Publish
+
+on:
+  workflow_run:
+    workflows:
+      - Release
+    types:
+      - completed
+
+permissions:
+  actions: read
+  id-token: write
+
+jobs:
+  publish:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install latest npm
+        run: npm install --global npm@latest
+
+      - name: Download release tarball artifact
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-tarball-*
+          path: ./release-tarball
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Publish to npm
+        shell: bash
+        run: |
+          TARBALL_PATH="$(find ./release-tarball -maxdepth 1 -name '*.tgz' -print -quit)"
+
+          if [[ -z "$TARBALL_PATH" ]]; then
+            echo "No release tarball was downloaded from the Release workflow." >&2
+            exit 1
+          fi
+
+          npm publish "$TARBALL_PATH"

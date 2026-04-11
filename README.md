@@ -182,14 +182,16 @@ pnpm dev:dryai --input ./config install
   - Run CI validation with build, test, and `npm pack --dry-run`.
 - On changes landing on `main`
   - Run the same CI validation with build, test, and `npm pack --dry-run`.
-- On `v*` tag pushed to `main`
+- On `v*` tag pushed to `main`, the release workflow will:
   - Verify the tag matches the checked-in `package.json` version.
   - Verify the tagged commit is on `main`.
   - Build and test the CLI.
   - Create a tarball with `npm pack`.
-  - Publish the package to npm using npm trusted publishing.
   - Create or update the matching GitHub Release.
   - Upload the tarball as a release asset.
+- After the release workflow succeeds, the publish workflow will:
+  - Download the tarball artifact produced by the release workflow.
+  - Publish that exact tarball to npm using npm trusted publishing.
 
 Example release flow:
 
