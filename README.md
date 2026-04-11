@@ -27,12 +27,12 @@ Live output is written to:
 ## Commands
 
 ```sh
-saic install
-saic skills list                                 List local skills
-saic skills add [options] <repo>                 Add managed skills from a remote repository
-saic skills remove <name>                        Remove a managed skill
-saic skills update <name>                        Update a managed skill from its tracked source
-saic skills update-all                           Update all managed skills from their tracked sources
+dryai install
+dryai skills list                                 List local skills
+dryai skills add [options] <repo>                 Add managed skills from a remote repository
+dryai skills remove <name>                        Remove a managed skill
+dryai skills update <name>                        Update a managed skill from its tracked source
+dryai skills update-all                           Update all managed skills from their tracked sources
 ```
 
 `<repo>` may be a full git remote URL or a GitHub `owner/repo` shorthand such as `anthropics/skills`.
@@ -48,9 +48,9 @@ Use `--as <name>` to choose a different local managed skill name when importing 
 Examples:
 
 ```sh
-saic skills add anthropics/skills --skill skill-creator
-saic skills add vercel-labs/agent-skills --skill pr-review commit
-saic skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
+dryai skills add anthropics/skills --skill skill-creator
+dryai skills add vercel-labs/agent-skills --skill pr-review commit
+dryai skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
 ```
 
 By default, imports track the requested ref. With no `--ref`, that means the remote default branch `HEAD` is tracked. Use `--pin` to store the currently resolved commit instead, so later `skills update` operations stay pinned to that commit.
@@ -71,7 +71,7 @@ The lockfile records:
 
 ## Development
 
-For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:saic --test install` to run the built CLI.
+For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:dryai --test install` to run the built CLI.
 
 Run `pnpm run setup:editor` after installing dependencies if you want the Effect language service workspace patch applied locally.
 
@@ -82,10 +82,10 @@ pnpm run dev
 pnpm run test
 pnpm run test:watch
 
-pnpm dev:saic install
-pnpm dev:saic --test install
-pnpm dev:saic --output ./tmp/install-root install
-pnpm dev:saic --input ./config install
+pnpm dev:dryai install
+pnpm dev:dryai --test install
+pnpm dev:dryai --output ./tmp/install-root install
+pnpm dev:dryai --input ./config install
 ```
 
 ## CI and Release
@@ -99,8 +99,11 @@ pnpm dev:saic --input ./config install
   - Verify the tagged commit is on `main`.
   - Build and test the CLI.
   - Create a tarball with `npm pack`.
+  - Publish the package to npm using the repository `NPM_TOKEN` secret.
   - Create or update the matching GitHub Release.
   - Upload the tarball as a release asset.
+
+Set the repository `NPM_TOKEN` secret to an npm automation token with publish access before pushing a release tag.
 
 Example release flow:
 

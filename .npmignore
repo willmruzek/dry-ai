@@ -1,0 +1,22 @@
+# package.json already whitelists dest/, but keep npmignore as defense in depth
+# against accidental package bloat if the whitelist changes later.
+
+.git
+.github
+.vscode
+node_modules
+src
+tests
+config
+output-test
+
+.gitignore
+AGENTS.md
+pnpm-lock.yaml
+skills.lock.json
+vitest.config.ts
+tsconfig*.json
+*.tsbuildinfo
+
+dest/**/*.d.ts.map
+dest/**/*.tsbuildinfo

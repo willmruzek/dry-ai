@@ -24,6 +24,8 @@ const rootOptionsSchema = z.object({
   output: nonEmptyOptionStringSchema.optional(),
 });
 
+const EXECUTABLE_NAME = 'dryai';
+
 type RootOptions = z.output<typeof rootOptionsSchema>;
 
 /**
@@ -79,12 +81,11 @@ function resolveActiveContext(program: Command): AgentsContext {
  * Configures and runs the agents CLI entrypoint.
  */
 async function main(): Promise<void> {
-  const executableName = 'saic';
   const program = new Command();
   const cliVersion = await readCliVersion();
 
   program
-    .name(executableName)
+    .name(EXECUTABLE_NAME)
     .usage('[options] <command> [args]')
     .helpOption('-h, --help', 'Display this message')
     .version(cliVersion, '-v, --version', 'Display the current version')
@@ -128,7 +129,7 @@ async function main(): Promise<void> {
 
   addSkillsCommand({
     parent: program,
-    commandName: `${executableName} skills`,
+    commandName: `${EXECUTABLE_NAME} skills`,
     resolveContext: () => resolveActiveContext(program),
   });
 

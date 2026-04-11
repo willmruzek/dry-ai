@@ -1,22 +1,25 @@
 {
-  "name": "share-ai-config",
-  "private": true,
+  "name": "dryai",
   "version": "0.2.0",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
-    "dest"
+    "dest/**/*.js",
+    "dest/**/*.d.ts"
   ],
   "scripts": {
     "setup:editor": "effect-language-service patch",
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "dev:saic": "node ./dest/main.js",
+    "dev:dryai": "node ./dest/main.js",
     "tsc": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "bin": {
-    "saic": "./dest/main.js"
+    "dryai": "./dest/main.js"
   },
   "dependencies": {
     "@effect/cli": "^0.75.0",
