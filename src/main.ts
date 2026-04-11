@@ -14,14 +14,15 @@ import {
 } from './lib/command-options.js';
 import {
   createAgentsContext,
+  resolveRequestedConfigRoot,
   resolveRequestedOutputRoot,
   type AgentsContext,
 } from './lib/context.js';
 
 const rootOptionsSchema = z.object({
   test: z.boolean().optional().default(false),
-  input: nonEmptyOptionStringSchema.optional(),
-  output: nonEmptyOptionStringSchema.optional(),
+  configRoot: nonEmptyOptionStringSchema.optional(),
+  outputRoot: nonEmptyOptionStringSchema.optional(),
 });
 
 const EXECUTABLE_NAME = 'dryai';
@@ -65,12 +66,15 @@ function getRootOptions(program: Command): RootOptions {
  */
 function resolveActiveContext(program: Command): AgentsContext {
   const rootOptions = getRootOptions(program);
+  const requestedConfigRoot = resolveRequestedConfigRoot({
+    ...(rootOptions.configRoot ? { configRoot: rootOptions.configRoot } : {}),
+  });
   const requestedOutputRoot = resolveRequestedOutputRoot({
     test: rootOptions.test,
-    ...(rootOptions.output ? { outputRoot: rootOptions.output } : {}),
+    ...(rootOptions.outputRoot ? { outputRoot: rootOptions.outputRoot } : {}),
   });
   const context = createAgentsContext({
-    ...(rootOptions.input ? { inputRoot: rootOptions.input } : {}),
+    ...(requestedConfigRoot ? { inputRoot: requestedConfigRoot } : {}),
     ...(requestedOutputRoot ? { outputRoot: requestedOutputRoot } : {}),
   });
 
@@ -91,22 +95,22 @@ async function main(): Promise<void> {
     .version(cliVersion, '-v, --version', 'Display the current version')
     .option(
       '--test',
-      'Shortcut for writing generated output into ./output-test unless --output is also provided',
+      'Shortcut for writing generated output into ./output-test unless --output-root is also provided',
     )
     .option(
-      '--input <path>',
-      'Read input configs from a different root instead of ~/.config/dryai',
+      '--config-root <path>',
+      'Read configs from a different root instead of ~/.config/dryai',
       parseOptionValue({
         schema: nonEmptyOptionStringSchema,
-        optionLabel: '--input',
+        optionLabel: '--config-root',
       }),
     )
     .option(
-      '--output <path>',
+      '--output-root <path>',
       'Write generated output under a different root instead of the default home directory',
       parseOptionValue({
         schema: nonEmptyOptionStringSchema,
-        optionLabel: '--output',
+        optionLabel: '--output-root',
       }),
     )
     .helpCommand(false)
@@ -144,7 +148,7 @@ function requestedOutputRootWasUsed(program: Command): boolean {
   return (
     resolveRequestedOutputRoot({
       test: rootOptions.test,
-      ...(rootOptions.output ? { outputRoot: rootOptions.output } : {}),
+      ...(rootOptions.outputRoot ? { outputRoot: rootOptions.outputRoot } : {}),
     }) !== undefined
   );
 }

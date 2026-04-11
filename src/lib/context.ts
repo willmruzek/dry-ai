@@ -109,6 +109,15 @@ export function resolveRequestedOutputRoot(input: {
 }
 
 /**
+ * Returns the requested config root derived from CLI-style options.
+ */
+export function resolveRequestedConfigRoot(input: {
+  configRoot?: string;
+}): string | undefined {
+  return input.configRoot;
+}
+
+/**
  * Returns the filesystem path to use for generated output.
  */
 export function resolveOutputRoot(input: {

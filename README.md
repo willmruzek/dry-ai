@@ -2,11 +2,11 @@
 
 Installs command, rule, and skill sources from `~/.config/dryai` by default into Copilot and Cursor targets.
 
-Pass `--input <path>` to read configs from a different root such as `./config`.
+Pass `--config-root <path>` to read configs from a different root such as `./config`.
 
-Pass `--output <path>` to write generated output somewhere other than your home directory.
+Pass `--output-root <path>` to write generated output somewhere other than your home directory.
 
-`--test` is a shortcut for `--output ./output-test`, and if both are provided, `--output` wins.
+`--test` is a shortcut for `--output-root ./output-test`, and if both are provided, `--output-root` wins.
 
 ## Input
 
@@ -129,6 +129,8 @@ dryai skills update-all                           Update all managed skills from
 
 Imported skills are copied into `config/skills/<name>/` and tracked in `skills.lock.json`.
 
+When you run `skills` commands, local skill directories and `skills.lock.json` are read from and written to the selected config root.
+
 `skills add` requires at least one `--skill <name>` value. Each requested skill is always resolved from `<repo root>/skills/<name>`.
 
 Use `--as <name>` to choose a different local managed skill name when importing exactly one skill.
@@ -172,8 +174,8 @@ pnpm run test:watch
 
 pnpm dev:dryai install
 pnpm dev:dryai --test install
-pnpm dev:dryai --output ./tmp/install-root install
-pnpm dev:dryai --input ./config install
+pnpm dev:dryai --output-root ./tmp/install-root install
+pnpm dev:dryai --config-root ./config install
 ```
 
 ## CI and Release
