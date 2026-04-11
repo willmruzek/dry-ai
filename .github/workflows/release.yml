@@ -75,9 +75,7 @@ jobs:
           path: ${{ env.TARBALL_NAME }}
 
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+        run: npm publish
 
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2

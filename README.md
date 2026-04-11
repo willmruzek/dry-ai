@@ -99,11 +99,9 @@ pnpm dev:dryai --input ./config install
   - Verify the tagged commit is on `main`.
   - Build and test the CLI.
   - Create a tarball with `npm pack`.
-  - Publish the package to npm using the repository `NPM_TOKEN` secret.
+  - Publish the package to npm using npm trusted publishing.
   - Create or update the matching GitHub Release.
   - Upload the tarball as a release asset.
-
-Set the repository `NPM_TOKEN` secret to an npm automation token with publish access before pushing a release tag.
 
 Example release flow:
 

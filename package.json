@@ -2,9 +2,6 @@
   "name": "dryai",
   "version": "0.2.1",
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
   "files": [
     "dest/**/*.js",
     "dest/**/*.d.ts"
