@@ -23,7 +23,7 @@ export type AgentsContext = {
   targetRoots: TargetRoots;
 };
 
-export const DEFAULT_INPUT_ROOT_SEGMENTS = ['.config', 'agents'] as const;
+export const DEFAULT_INPUT_ROOT_SEGMENTS = ['.config', 'dryai'] as const;
 export const DEFAULT_TEST_OUTPUT_DIR_NAME = 'output-test';
 
 export const DEFAULT_SOURCE_ROOT_NAMES = {

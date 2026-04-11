@@ -95,7 +95,7 @@ async function main(): Promise<void> {
     )
     .option(
       '--input <path>',
-      'Read input configs from a different root instead of ~/.config/agents',
+      'Read input configs from a different root instead of ~/.config/dryai',
       parseOptionValue({
         schema: nonEmptyOptionStringSchema,
         optionLabel: '--input',

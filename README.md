@@ -1,6 +1,6 @@
 # Share AI config CLI
 
-Installs command, rule, and skill sources from `~/.config/agents` by default into Copilot and Cursor targets.
+Installs command, rule, and skill sources from `~/.config/dryai` by default into Copilot and Cursor targets.
 
 Pass `--input <path>` to read configs from a different root such as `./config`.
 
@@ -29,7 +29,7 @@ Live output is written to:
 One input root can contain all three source types:
 
 ```text
-~/.config/agents/
+~/.config/dryai/
 ├── commands/
 │   └── gen-commit-msg.md
 ├── rules/
@@ -182,6 +182,7 @@ pnpm dev:dryai --input ./config install
   - Run CI validation with build, test, and `npm pack --dry-run`.
 - On changes landing on `main`
   - Run the same CI validation with build, test, and `npm pack --dry-run`.
+
 - On `v*` tag pushed to `main`, the release workflow will:
   - Verify the tag matches the checked-in `package.json` version.
   - Verify the tagged commit is on `main`.
