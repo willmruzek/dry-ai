@@ -1,6 +1,6 @@
 {
   "name": "dryai",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "CLI for installing shared AI commands, rules, and skills into Copilot and Cursor.",
   "type": "module",
   "repository": {
