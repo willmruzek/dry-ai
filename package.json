@@ -5,7 +5,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com:willmruzek/dryai.git"
+    "url": "git+ssh://git@github.com/willmruzek/dryai.git"
   },
   "license": "MIT",
   "files": [
@@ -22,7 +22,7 @@
     "test:watch": "vitest"
   },
   "bin": {
-    "dryai": "./dest/main.js"
+    "dryai": "dest/main.js"
   },
   "dependencies": {
     "@effect/cli": "^0.75.0",

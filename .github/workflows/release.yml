@@ -20,10 +20,10 @@ jobs:
           fetch-depth: 0
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -69,7 +69,7 @@ jobs:
           echo "TARBALL_NAME=$TARBALL_NAME" >> "$GITHUB_ENV"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-tarball-${{ env.PACKAGE_VERSION }}
           path: ${{ env.TARBALL_NAME }}
