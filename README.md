@@ -29,7 +29,7 @@ Live output is written to:
 ```sh
 saic install
 saic skills list                                 List local skills
-saic skills import [options] <repo> [skillPath]  Import a managed skill
+saic skills add [options] <repo>                 Add managed skills from a remote repository
 saic skills remove <name>                        Remove a managed skill
 saic skills update <name>                        Update a managed skill from its tracked source
 saic skills update-all                           Update all managed skills from their tracked sources
@@ -41,7 +41,17 @@ saic skills update-all                           Update all managed skills from 
 
 Imported skills are copied into `config/skills/<name>/` and tracked in `skills.lock.json`.
 
-`skills import` derives `<name>` from the imported skill path by default. Use `--as <name>` to choose a different local managed skill name.
+`skills add` requires at least one `--skill <name>` value. Each requested skill is always resolved from `<repo root>/skills/<name>`.
+
+Use `--as <name>` to choose a different local managed skill name when importing exactly one skill.
+
+Examples:
+
+```sh
+saic skills add anthropics/skills --skill skill-creator
+saic skills add vercel-labs/agent-skills --skill pr-review commit
+saic skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
+```
 
 By default, imports track the requested ref. With no `--ref`, that means the remote default branch `HEAD` is tracked. Use `--pin` to store the currently resolved commit instead, so later `skills update` operations stay pinned to that commit.
 

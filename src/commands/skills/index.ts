@@ -7,13 +7,14 @@ import {
   parseOptionValue,
 } from '../../lib/command-options.js';
 import { type AgentsContext } from '../../lib/context.js';
-import { runSkillsImportCommand } from './import.js';
+import { runSkillsAddCommand } from './add.js';
 import { runSkillsListCommand } from './list.js';
 import { runSkillsRemoveCommand } from './remove.js';
 import { runSkillsUpdateAllCommand } from './update-all.js';
 import { runSkillsUpdateCommand } from './update.js';
 
 const skillsImportOptionsSchema = z.object({
+  skill: z.array(z.string()).optional(),
   as: nonEmptyOptionStringSchema.optional(),
   pin: z.boolean().optional().default(false),
   ref: nonEmptyOptionStringSchema.optional(),
@@ -40,7 +41,8 @@ export function addSkillsCommand(input: {
       dedent`
         Examples:
           ${commandName} list
-          ${commandName} import anthropics/skills skills/skill-creator
+          ${commandName} add anthropics/skills --skill skill-creator
+          ${commandName} add vercel-labs/agent-skills --skill pr-review commit
           ${commandName} update skill-creator
       `,
     )
@@ -56,8 +58,12 @@ export function addSkillsCommand(input: {
     });
 
   skills
-    .command('import <repo> [skillPath]')
-    .description('Import a managed skill')
+    .command('add <repo>')
+    .description('Add managed skills from a remote repository')
+    .option(
+      '--skill <names...>',
+      'Import one or more skills from the repository root skills/ directory',
+    )
     .option(
       '--as <name>',
       'Store the imported skill under a different local managed name',
@@ -78,16 +84,16 @@ export function addSkillsCommand(input: {
         optionLabel: '--ref',
       }),
     )
-    .action(async (repo: string, skillPath: string | undefined, options) => {
+    .action(async (repo: string, options) => {
       const parsedOptions: SkillsImportOptions = parseOptionsObject({
         schema: skillsImportOptionsSchema,
         options,
-        optionsLabel: 'skills import options',
+        optionsLabel: 'skills add options',
       });
 
-      await runSkillsImportCommand(resolveContext(), {
+      await runSkillsAddCommand(resolveContext(), {
         repo,
-        skillPath,
+        skillNames: parsedOptions.skill ?? [],
         asName: parsedOptions.as,
         pin: parsedOptions.pin,
         ref: parsedOptions.ref,

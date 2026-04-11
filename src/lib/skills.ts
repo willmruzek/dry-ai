@@ -46,6 +46,12 @@ export type RemoteSkillSnapshot = {
   sourceDir: string;
 };
 
+export type RemoteRepoCheckout = {
+  checkoutDir: string;
+  cleanup: () => Promise<void>;
+  commit: string;
+};
+
 export function createEmptySkillsLockfile(): SkillsLockfile {
   return {
     version: 1,
@@ -202,6 +208,29 @@ export function normalizeRemoteRepo(repo: string): string {
   return trimmedRepo;
 }
 
+/**
+ * Builds the canonical remote path for a managed skill under the repository `skills/` directory.
+ */
+export function resolveManagedSkillImportPath({
+  skillName,
+}: {
+  skillName: string;
+}): string {
+  const trimmedSkillName = skillName.trim();
+
+  if (
+    trimmedSkillName.length === 0 ||
+    trimmedSkillName === '.' ||
+    trimmedSkillName === '..' ||
+    trimmedSkillName.includes('/') ||
+    trimmedSkillName.includes('\\')
+  ) {
+    throw new Error(`Invalid skill name: ${skillName}`);
+  }
+
+  return `skills/${trimmedSkillName}`;
+}
+
 export function normalizeImportedSkillPath(
   skillPath: string | undefined,
 ): string {
@@ -240,11 +269,13 @@ export function createUpdatedSkillRecord(input: {
   };
 }
 
-export async function fetchRemoteSkillSnapshot(input: {
+/**
+ * Clones a remote repository into a temporary checkout and resolves the fetched commit.
+ */
+export async function cloneRemoteRepo(input: {
   ref: string | undefined;
   repo: string;
-  skillPath: string;
-}): Promise<RemoteSkillSnapshot> {
+}): Promise<RemoteRepoCheckout> {
   const normalizedRepo = normalizeRemoteRepo(input.repo);
   const checkoutDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agents-skill.'));
 
@@ -262,11 +293,67 @@ export async function fetchRemoteSkillSnapshot(input: {
 
     await git.checkout(['--quiet', 'FETCH_HEAD']);
 
-    const commit = await git.revparse(['HEAD']);
-    const sourceDir = resolveRemoteSkillDirectory({
+    return {
       checkoutDir,
+      cleanup: async () => {
+        await fs.remove(checkoutDir);
+      },
+      commit: await git.revparse(['HEAD']),
+    };
+  } catch (error: unknown) {
+    await fs.remove(checkoutDir);
+    throw toError({
+      prefix: `Failed to fetch repository from ${normalizedRepo}`,
+      error,
+    });
+  }
+}
+
+/**
+ * Resolves and validates a managed skill directory from a temporary repository checkout.
+ */
+export async function resolveSkillSourceDir(input: {
+  checkoutDir: string;
+  repo: string;
+  skillName: string;
+}): Promise<string> {
+  const skillPath = resolveManagedSkillImportPath({
+    skillName: input.skillName,
+  });
+  const sourceDir = resolveRemoteSkillDirectory({
+    checkoutDir: input.checkoutDir,
+    skillPath,
+  });
+
+  await validateRemoteSkillDirectory({
+    sourceDir,
+    skillPath,
+    repo: normalizeRemoteRepo(input.repo),
+  });
+
+  return sourceDir;
+}
+
+/**
+ * Fetches a validated remote skill directory snapshot for a specific repository path.
+ */
+export async function fetchRemoteSkillSnapshot(input: {
+  ref: string | undefined;
+  repo: string;
+  skillPath: string;
+}): Promise<RemoteSkillSnapshot> {
+  const normalizedRepo = normalizeRemoteRepo(input.repo);
+  const checkout = await cloneRemoteRepo({
+    ref: input.ref,
+    repo: normalizedRepo,
+  });
+
+  try {
+    const sourceDir = resolveRemoteSkillDirectory({
+      checkoutDir: checkout.checkoutDir,
       skillPath: input.skillPath,
     });
+
     await validateRemoteSkillDirectory({
       sourceDir,
       skillPath: input.skillPath,
@@ -274,14 +361,12 @@ export async function fetchRemoteSkillSnapshot(input: {
     });
 
     return {
-      cleanup: async () => {
-        await fs.remove(checkoutDir);
-      },
-      commit,
+      cleanup: checkout.cleanup,
+      commit: checkout.commit,
       sourceDir,
     };
   } catch (error: unknown) {
-    await fs.remove(checkoutDir);
+    await checkout.cleanup();
     throw toError({
       prefix: `Failed to fetch skill from ${normalizedRepo}`,
       error,
