@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { runInstallCommand } from './commands/install.js';
 import { addSkillsCommand } from './commands/skills/index.js';
@@ -22,6 +25,26 @@ const rootOptionsSchema = z.object({
 });
 
 type RootOptions = z.output<typeof rootOptionsSchema>;
+
+/**
+ * Reads the CLI version from the package manifest at the repository root.
+ */
+async function readCliVersion(): Promise<string> {
+  const currentFilePath = fileURLToPath(import.meta.url);
+  const packageJsonPath = path.resolve(
+    currentFilePath,
+    '..',
+    '..',
+    'package.json',
+  );
+  const rawPackageJson = await fs.readFile(packageJsonPath, 'utf8');
+  const parsedPackageJson: unknown = JSON.parse(rawPackageJson);
+  const packageJsonSchema = z.object({
+    version: z.string().min(1),
+  });
+
+  return packageJsonSchema.parse(parsedPackageJson).version;
+}
 
 /**
  * Parses the top-level CLI options into a validated shape.
@@ -58,11 +81,13 @@ function resolveActiveContext(program: Command): AgentsContext {
 async function main(): Promise<void> {
   const executableName = 'saic';
   const program = new Command();
+  const cliVersion = await readCliVersion();
 
   program
     .name(executableName)
     .usage('[options] <command> [args]')
     .helpOption('-h, --help', 'Display this message')
+    .version(cliVersion, '-v, --version', 'Display the current version')
     .option(
       '--test',
       'Shortcut for writing generated output into ./output-test unless --output is also provided',
