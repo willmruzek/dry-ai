@@ -1,9 +1,12 @@
 import fs from 'fs-extra';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import { z } from 'zod';
 import type { AgentsContext } from './context.js';
+
+const managedSkillFilesSchema = z.record(z.string(), z.string());
 
 const skillLockEntrySchema = z.object({
   name: z.string().min(1),
@@ -11,6 +14,7 @@ const skillLockEntrySchema = z.object({
   path: z.string().min(1),
   ref: z.string().min(1).optional(),
   commit: z.string().min(1),
+  files: managedSkillFilesSchema.optional(),
   importedAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
 });
@@ -39,6 +43,7 @@ const skillsLockfileSchema = z
 
 export type ManagedSkill = z.infer<typeof skillLockEntrySchema>;
 export type SkillsLockfile = z.infer<typeof skillsLockfileSchema>;
+export type ManagedSkillFiles = z.infer<typeof managedSkillFilesSchema>;
 
 export type RemoteSkillSnapshot = {
   cleanup: () => Promise<void>;
@@ -238,8 +243,12 @@ export function normalizeImportedSkillPath(
   return path.normalize(normalizedPath);
 }
 
+/**
+ * Creates the lockfile record for a newly imported managed skill.
+ */
 export function createImportedSkillRecord(input: {
   commit: string;
+  files: ManagedSkillFiles;
   importedAt: string;
   name: string;
   path: string;
@@ -248,6 +257,7 @@ export function createImportedSkillRecord(input: {
 }): ManagedSkill {
   return {
     commit: input.commit,
+    files: input.files,
     importedAt: input.importedAt,
     name: input.name,
     path: input.path,
@@ -257,15 +267,75 @@ export function createImportedSkillRecord(input: {
   };
 }
 
+/**
+ * Creates the next lockfile record for a managed skill after its local contents have been refreshed.
+ */
 export function createUpdatedSkillRecord(input: {
   commit: string;
   existingSkill: ManagedSkill;
+  files: ManagedSkillFiles;
   updatedAt: string;
 }): ManagedSkill {
   return {
     ...input.existingSkill,
     commit: input.commit,
+    files: input.files,
     updatedAt: input.updatedAt,
+  };
+}
+
+/**
+ * Computes stable SHA-256 hashes for every file within a managed skill directory.
+ */
+export async function computeDirectoryHashes(
+  directoryPath: string,
+): Promise<ManagedSkillFiles> {
+  const relativeFilePaths = await listRelativeFilePaths(directoryPath);
+  const hashEntries = await Promise.all(
+    relativeFilePaths.map(async (relativeFilePath) => {
+      const fileBuffer = await fs.readFile(
+        path.join(directoryPath, relativeFilePath),
+      );
+
+      return [
+        toPortableRelativePath(relativeFilePath),
+        createHash('sha256').update(fileBuffer).digest('hex'),
+      ] as const;
+    }),
+  );
+
+  return Object.fromEntries(hashEntries);
+}
+
+/**
+ * Detects whether a managed skill directory has local content changes relative to the lockfile snapshot.
+ */
+export async function detectLocalSkillEdits(input: {
+  skillDir: string;
+  storedFiles: ManagedSkillFiles | undefined;
+}): Promise<{ changedFiles: string[]; modified: boolean }> {
+  if (!input.storedFiles) {
+    return {
+      changedFiles: [],
+      modified: false,
+    };
+  }
+
+  if (!(await fs.pathExists(input.skillDir))) {
+    return {
+      changedFiles: [],
+      modified: false,
+    };
+  }
+
+  const currentFiles = await computeDirectoryHashes(input.skillDir);
+  const changedFiles = [...new Set([...Object.keys(input.storedFiles), ...Object.keys(currentFiles)])]
+    .filter((relativeFilePath) => input.storedFiles?.[relativeFilePath] !== currentFiles[relativeFilePath])
+    .sort((left, right) => left.localeCompare(right));
+
+  return {
+    changedFiles,
+    modified: changedFiles.length > 0,
   };
 }
 
@@ -414,6 +484,43 @@ export function shortCommit(commit: string): string {
 
 export function timestampNow(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Recursively lists all file paths inside a directory relative to that directory root.
+ */
+async function listRelativeFilePaths(directoryPath: string): Promise<string[]> {
+  const directoryEntries = await fs.readdir(directoryPath, {
+    withFileTypes: true,
+  });
+  const relativeFilePaths: string[] = [];
+
+  for (const directoryEntry of directoryEntries) {
+    const entryPath = path.join(directoryPath, directoryEntry.name);
+
+    if (directoryEntry.isDirectory()) {
+      const nestedFilePaths = await listRelativeFilePaths(entryPath);
+
+      for (const nestedFilePath of nestedFilePaths) {
+        relativeFilePaths.push(path.join(directoryEntry.name, nestedFilePath));
+      }
+
+      continue;
+    }
+
+    if (directoryEntry.isFile()) {
+      relativeFilePaths.push(directoryEntry.name);
+    }
+  }
+
+  return relativeFilePaths.sort((left, right) => left.localeCompare(right));
+}
+
+/**
+ * Normalizes a relative path to use forward slashes for lockfile portability.
+ */
+function toPortableRelativePath(relativePath: string): string {
+  return relativePath.split(path.sep).join('/');
 }
 
 function sortSkillsLockfile(lockfile: SkillsLockfile): SkillsLockfile {

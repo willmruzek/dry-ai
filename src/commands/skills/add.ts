@@ -2,6 +2,7 @@ import fs from 'fs-extra';
 import type { AgentsContext } from '../../lib/context.js';
 import {
   cloneRemoteRepo,
+  computeDirectoryHashes,
   createImportedSkillRecord,
   ensureSkillsLockfile,
   ensureSkillsRoot,
@@ -114,8 +115,11 @@ export async function runSkillsAddCommand(
         sourceDir,
       });
 
+      const installedFiles = await computeDirectoryHashes(targetDir);
+
       const importedSkill = createImportedSkillRecord({
         commit: checkout.commit,
+        files: installedFiles,
         importedAt: timestampNow(),
         name: skillName,
         path: importedSkillPath,

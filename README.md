@@ -119,8 +119,10 @@ dryai install
 dryai skills list                                 List local skills
 dryai skills add [options] <repo>                 Add managed skills from a remote repository
 dryai skills remove <name>                        Remove a managed skill
-dryai skills update <name>                        Update a managed skill from its tracked source
-dryai skills update-all                           Update all managed skills from their tracked sources
+dryai skills rehash <name>                        Refresh stored file hashes for one managed skill
+dryai skills rehash-all                           Refresh stored file hashes for all managed skills
+dryai skills update [options] <name>              Update a managed skill from its tracked source
+dryai skills update-all [options]                 Update all managed skills from their tracked sources
 ```
 
 `<repo>` may be a full git remote URL or a GitHub `owner/repo` shorthand such as `anthropics/skills`.
@@ -152,12 +154,31 @@ The lockfile records:
 - the source path within that repository
 - the requested git ref, when one was provided
 - the resolved commit that was imported
+- the last installed content hash for each file in the managed skill directory
 
 `skills update` and `skills update-all` re-fetch the tracked repository snapshot and replace the local copied skill directory.
+
+Before replacing a managed skill, `dryai` compares the current local files against the hashes stored in `skills.lock.json`. If any file was added, removed, or edited locally, the update is skipped and a warning is printed so you do not lose your customizations by accident.
+
+For skills imported before hash tracking existed, use `rehash` to store hashes from the current local directory without fetching from the remote source:
+
+```sh
+dryai skills rehash review-helper
+dryai skills rehash-all
+```
+
+Use `--force` to intentionally overwrite local edits:
+
+```sh
+dryai skills update review-helper --force
+dryai skills update-all --force
+```
 
 `skills remove` deletes the local copied skill directory and removes its lockfile entry.
 
 `skills list` reports local skill directories, annotating managed entries from the lockfile and flagging managed entries whose local directory is missing.
+
+`skills rehash` updates the stored file hashes for one managed skill using its current local contents. `skills rehash-all` does the same for every managed skill and skips any managed entry whose local directory is missing.
 
 ## Development
 

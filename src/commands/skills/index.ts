@@ -9,6 +9,8 @@ import {
 import { type AgentsContext } from '../../lib/context.js';
 import { runSkillsAddCommand } from './add.js';
 import { runSkillsListCommand } from './list.js';
+import { runSkillsRehashAllCommand } from './rehash-all.js';
+import { runSkillsRehashCommand } from './rehash.js';
 import { runSkillsRemoveCommand } from './remove.js';
 import { runSkillsUpdateAllCommand } from './update-all.js';
 import { runSkillsUpdateCommand } from './update.js';
@@ -20,6 +22,12 @@ const skillsImportOptionsSchema = z.object({
   ref: nonEmptyOptionStringSchema.optional(),
 });
 type SkillsImportOptions = z.output<typeof skillsImportOptionsSchema>;
+
+const skillsUpdateOptionsSchema = z.object({
+  force: z.boolean().optional().default(false),
+});
+
+type SkillsUpdateOptions = z.output<typeof skillsUpdateOptionsSchema>;
 
 /**
  * Registers the managed skills command tree on the parent CLI program.
@@ -43,6 +51,7 @@ export function addSkillsCommand(input: {
           ${commandName} list
           ${commandName} add anthropics/skills --skill skill-creator
           ${commandName} add vercel-labs/agent-skills --skill pr-review commit
+          ${commandName} rehash skill-creator
           ${commandName} update skill-creator
       `,
     )
@@ -108,17 +117,50 @@ export function addSkillsCommand(input: {
     });
 
   skills
+    .command('rehash <name>')
+    .description('Refresh stored file hashes for one managed skill')
+    .action(async (skillName: string) => {
+      await runSkillsRehashCommand(resolveContext(), { skillName });
+    });
+
+  skills
+    .command('rehash-all')
+    .description('Refresh stored file hashes for all managed skills')
+    .action(async () => {
+      await runSkillsRehashAllCommand(resolveContext());
+    });
+
+  skills
     .command('update <name>')
     .description('Update a managed skill from its tracked source')
-    .action(async (skillName: string) => {
-      await runSkillsUpdateCommand(resolveContext(), { skillName });
+    .option('--force', 'Overwrite local skill edits with the fetched remote copy')
+    .action(async (skillName: string, options) => {
+      const parsedOptions: SkillsUpdateOptions = parseOptionsObject({
+        schema: skillsUpdateOptionsSchema,
+        options,
+        optionsLabel: 'skills update options',
+      });
+
+      await runSkillsUpdateCommand(resolveContext(), {
+        force: parsedOptions.force,
+        skillName,
+      });
     });
 
   skills
     .command('update-all')
     .description('Update all managed skills from their tracked sources')
-    .action(async () => {
-      await runSkillsUpdateAllCommand(resolveContext());
+    .option('--force', 'Overwrite local skill edits with the fetched remote copy')
+    .action(async (options) => {
+      const parsedOptions: SkillsUpdateOptions = parseOptionsObject({
+        schema: skillsUpdateOptionsSchema,
+        options,
+        optionsLabel: 'skills update-all options',
+      });
+
+      await runSkillsUpdateAllCommand(resolveContext(), {
+        force: parsedOptions.force,
+      });
     });
 
   return skills;

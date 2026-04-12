@@ -1,6 +1,8 @@
 import type { AgentsContext } from '../../lib/context.js';
 import {
+  computeDirectoryHashes,
   createUpdatedSkillRecord,
+  detectLocalSkillEdits,
   fetchRemoteSkillSnapshot,
   formatManagedSkillSummary,
   getManagedSkillDirectory,
@@ -16,6 +18,9 @@ import {
  */
 export async function runSkillsUpdateAllCommand(
   context: AgentsContext,
+  input: {
+    force: boolean;
+  },
 ): Promise<void> {
   let lockfile = await loadSkillsLockfile(context);
 
@@ -25,8 +30,24 @@ export async function runSkillsUpdateAllCommand(
   }
 
   const updatedLines: string[] = [];
+  const skippedLines: string[] = [];
 
   for (const managedSkill of lockfile.skills) {
+    const targetDir = getManagedSkillDirectory(context, {
+      skillName: managedSkill.name,
+    });
+    const localEditState = await detectLocalSkillEdits({
+      skillDir: targetDir,
+      storedFiles: managedSkill.files,
+    });
+
+    if (localEditState.modified && !input.force) {
+      skippedLines.push(
+        `- ${managedSkill.name} local edits detected in ${localEditState.changedFiles.join(', ')}`,
+      );
+      continue;
+    }
+
     const snapshot = await fetchRemoteSkillSnapshot({
       ref: managedSkill.ref,
       repo: managedSkill.repo,
@@ -35,27 +56,39 @@ export async function runSkillsUpdateAllCommand(
 
     try {
       await replaceManagedSkillDirectory({
-        targetDir: getManagedSkillDirectory(context, {
-          skillName: managedSkill.name,
-        }),
+        targetDir,
         sourceDir: snapshot.sourceDir,
       });
+
+      const installedFiles = await computeDirectoryHashes(targetDir);
+
+      const updatedSkill = createUpdatedSkillRecord({
+        commit: snapshot.commit,
+        existingSkill: managedSkill,
+        files: installedFiles,
+        updatedAt: timestampNow(),
+      });
+
+      lockfile = upsertManagedSkill(lockfile, { updatedSkill });
+      updatedLines.push(`- ${formatManagedSkillSummary(updatedSkill)}`);
     } finally {
       await snapshot.cleanup();
     }
-
-    const updatedSkill = createUpdatedSkillRecord({
-      commit: snapshot.commit,
-      existingSkill: managedSkill,
-      updatedAt: timestampNow(),
-    });
-
-    lockfile = upsertManagedSkill(lockfile, { updatedSkill });
-    updatedLines.push(`- ${formatManagedSkillSummary(updatedSkill)}`);
   }
 
   await saveSkillsLockfile(context, { lockfile });
-  console.log(
-    `Updated ${updatedLines.length} managed skills:\n${updatedLines.join('\n')}`,
-  );
+
+  if (updatedLines.length > 0) {
+    console.log(
+      `Updated ${updatedLines.length} managed skills:\n${updatedLines.join('\n')}`,
+    );
+  } else {
+    console.log('No managed skills were updated.');
+  }
+
+  if (skippedLines.length > 0) {
+    console.warn(
+      `Skipped ${skippedLines.length} managed skills due to local edits. Re-run with --force to overwrite local changes:\n${skippedLines.join('\n')}`,
+    );
+  }
 }
