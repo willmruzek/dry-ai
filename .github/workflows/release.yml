@@ -63,7 +63,7 @@ jobs:
       - name: Pack release tarball
         shell: bash
         run: |
-          TARBALL_NAME="$(npm pack)"
+          TARBALL_NAME="$(npm pack --json | jq -r '.[0].filename')"
           echo "TARBALL_NAME=$TARBALL_NAME" >> "$GITHUB_ENV"
 
       - name: Upload workflow artifact
