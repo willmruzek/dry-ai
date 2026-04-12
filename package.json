@@ -19,7 +19,8 @@
     "dev:dryai": "node ./dest/main.js",
     "tsc": "tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "husky"
   },
   "bin": {
     "dryai": "dest/main.js"
@@ -37,10 +38,13 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
     "@effect/language-service": "^0.85.0",
     "@effect/vitest": "^0.29.0",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^24.0.0",
+    "husky": "^9.1.7",
     "typescript": "^5.8.3",
     "vitest": "^4.1.4"
   },
