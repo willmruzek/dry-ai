@@ -4,16 +4,19 @@ import {
   cloneRemoteRepo,
   computeDirectoryHashes,
   createImportedSkillRecord,
+  deriveSkillName,
   ensureSkillsLockfile,
   ensureSkillsRoot,
   findManagedSkill,
   formatManagedSkillSummary,
   getManagedSkillDirectory,
   loadSkillsLockfile,
+  normalizeImportedSkillPath,
   normalizeRemoteRepo,
   replaceManagedSkillDirectory,
   resolveManagedSkillImportPath,
-  resolveSkillSourceDir,
+  resolveManagedSkillImportPathFromBase,
+  resolveSkillSourceDirByPath,
   saveSkillsLockfile,
   timestampNow,
   upsertManagedSkill,
@@ -44,12 +47,28 @@ function normalizeRequestedSkillNames(skillNames: string[]): string[] {
 }
 
 /**
- * Imports one or more managed skills from a remote repository `skills/` directory into the local skills directory.
+ * Resolves the remote repository path for one managed skill import request.
+ */
+function resolveRequestedImportPath(input: {
+  basePath: string | undefined;
+  requestedSkillName: string;
+}): string {
+  const importPath = resolveManagedSkillImportPathFromBase({
+    basePath: input.basePath,
+    skillName: input.requestedSkillName,
+  });
+
+  return normalizeImportedSkillPath(importPath) ?? importPath;
+}
+
+/**
+ * Imports one or more managed skills from a remote repository into the local skills directory.
  */
 export async function runSkillsAddCommand(
   context: AgentsContext,
   input: {
     repo: string;
+    repoPath: string | undefined;
     skillNames: string[];
     asName: string | undefined;
     pin: boolean;
@@ -57,6 +76,7 @@ export async function runSkillsAddCommand(
   },
 ): Promise<void> {
   const repo = normalizeRemoteRepo(input.repo);
+  const normalizedBasePath = normalizeImportedSkillPath(input.repoPath);
 
   if (input.skillNames.length === 0) {
     throw new Error('At least one skill name must be provided with --skill');
@@ -85,9 +105,14 @@ export async function runSkillsAddCommand(
 
   try {
     for (const requestedSkillName of requestedSkillNames) {
-      const skillName = input.asName ?? requestedSkillName;
-      const importedSkillPath = resolveManagedSkillImportPath({
-        skillName: requestedSkillName,
+      const importedSkillPath = resolveRequestedImportPath({
+        basePath: normalizedBasePath,
+        requestedSkillName,
+      });
+      const skillName = deriveSkillName({
+        repo,
+        skillPath: importedSkillPath,
+        explicitName: input.asName,
       });
       const existingManagedSkill = findManagedSkill(lockfile, {
         name: skillName,
@@ -104,10 +129,10 @@ export async function runSkillsAddCommand(
         throw new Error(`A local skill directory already exists: ${targetDir}`);
       }
 
-      const sourceDir = await resolveSkillSourceDir({
+      const sourceDir = await resolveSkillSourceDirByPath({
         checkoutDir: checkout.checkoutDir,
         repo,
-        skillName: requestedSkillName,
+        skillPath: importedSkillPath,
       });
 
       await replaceManagedSkillDirectory({

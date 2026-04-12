@@ -2,15 +2,17 @@
 
 Installs command, rule, and skill sources from `~/.config/dryai` by default into Copilot and Cursor targets.
 
-Pass `--config-root <path>` to read configs from a different root such as `./config`.
+Global CLI options:
 
-Pass `--output-root <path>` to write generated output somewhere other than your home directory.
+- `--config-root <path>` reads configs from a different root such as `./config`.
+- `--output-root <path>` writes generated output somewhere other than your home directory.
+- `--test` is a shortcut for `--output-root ./output-test`, and if both are provided, `--output-root` wins.
 
-`--test` is a shortcut for `--output-root ./output-test`, and if both are provided, `--output-root` wins.
+These are root-level options for the CLI. They modify command behavior for any given command.
 
-## Input
+## Config Layout
 
-Input config files live under the selected input root:
+Input config files live under the selected config root:
 
 - `commands`
 - `rules`
@@ -24,9 +26,7 @@ Live output is written to:
 - `~/.cursor/rules`
 - `~/.cursor/skills`
 
-## Example Configs
-
-One input root can contain all three source types:
+One config root can contain all three source types:
 
 ```text
 ~/.config/dryai/
@@ -38,6 +38,106 @@ One input root can contain all three source types:
     └── review-helper/
         └── SKILL.md
 ```
+
+See VS Code editor setup note below.
+
+## Commands
+
+### `install`
+
+- Purpose: Install commands, rules, and skills from the selected config root into the Copilot and Cursor target directories.
+- Input roots: Reads from `commands`, `rules`, and `skills` under the selected config root.
+- Output roots: Writes to `~/.copilot/prompts`, `~/.copilot/instructions`, `~/.copilot/skills`, `~/.cursor/rules`, and `~/.cursor/skills` by default.
+
+### `skills add`
+
+- Purpose: Import one or more managed skills from a remote repository.
+- Repository argument: `<repo>` may be a full git remote URL or a GitHub `owner/repo` shorthand such as `anthropics/skills`.
+- Storage: Imported skills are copied into `config/skills/<name>/` and tracked in `skills.lock.json`.
+- Config root: Local skill directories and `skills.lock.json` are read from and written to the selected config root.
+- Required: `--skill <name>` is required at least once.
+- Default resolution: Each requested skill resolves from `<repo root>/skills/<name>`.
+- `--path <repoPath>`: Resolves each requested skill from a different base directory.
+- `--path .`: Resolves each requested skill from the repository root itself.
+- `--as <name>`: Stores the imported skill under a different local managed name when importing exactly one skill.
+- `--ref <gitRef>`: Fetches a specific branch, tag, or commit instead of the remote default branch.
+- `--pin`: Stores the resolved commit instead of tracking a moving ref.
+- Examples:
+
+```sh
+# Resolves from <repo root>/skills/skill-creator
+dryai skills add anthropics/skills --skill skill-creator
+
+# Resolves from <repo root>/review-helper
+dryai skills add anthropics/skills --path . --skill review-helper
+
+# Resolves from <repo root>/tools/review-helper
+dryai skills add anthropics/skills --path tools --skill review-helper
+
+# Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
+dryai skills add vercel-labs/agent-skills --skill pr-review commit
+
+# Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
+dryai skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
+```
+
+By default, imports track the requested ref. With no `--ref`, that means the remote default branch `HEAD` is tracked.
+
+### `skills update`
+
+- Purpose: Re-fetch one managed skill from its tracked source and replace the local copied directory.
+- `--force`: Overwrites local edits instead of skipping the update.
+
+### `skills update-all`
+
+- Purpose: Re-fetch all managed skills from their tracked sources and replace the local copied directories.
+- `--force`: Overwrites local edits instead of skipping the update.
+
+### `skills rehash`
+
+- Purpose: Refresh the stored file hashes for one managed skill using its current local contents.
+
+### `skills rehash-all`
+
+- Purpose: Refresh the stored file hashes for every managed skill using their current local contents.
+- Behavior: Skips managed entries whose local directory is missing.
+
+### `skills remove`
+
+- Purpose: Delete a managed skill's local copied directory and remove its lockfile entry.
+
+### `skills list`
+
+- Purpose: Report local skill directories, annotate managed entries from the lockfile, and flag managed entries whose local directory is missing.
+
+### `skills` lockfile
+
+The lockfile records:
+
+- the local skill name
+- the source repository
+- the source path within that repository
+- the requested git ref, when one was provided
+- the resolved commit that was imported
+- the last installed content hash for each file in the managed skill directory
+
+Before replacing a managed skill, `dryai` compares the current local files against the hashes stored in `skills.lock.json`. If any file was added, removed, or edited locally, the update is skipped and a warning is printed so you do not lose your customizations by accident.
+
+For skills imported before hash tracking existed, use these commands to store hashes from the current local directory without fetching from the remote source:
+
+```sh
+dryai skills rehash review-helper
+dryai skills rehash-all
+```
+
+Use these commands to intentionally overwrite local edits:
+
+```sh
+dryai skills update review-helper --force
+dryai skills update-all --force
+```
+
+## Example Configs
 
 ### Example Rule
 
@@ -112,77 +212,9 @@ Focus on findings first.
 - Keep the overview brief unless the user asks for a deeper walkthrough.
 ```
 
-## Commands
-
-```sh
-dryai install
-dryai skills list                                 List local skills
-dryai skills add [options] <repo>                 Add managed skills from a remote repository
-dryai skills remove <name>                        Remove a managed skill
-dryai skills rehash <name>                        Refresh stored file hashes for one managed skill
-dryai skills rehash-all                           Refresh stored file hashes for all managed skills
-dryai skills update [options] <name>              Update a managed skill from its tracked source
-dryai skills update-all [options]                 Update all managed skills from their tracked sources
-```
-
-`<repo>` may be a full git remote URL or a GitHub `owner/repo` shorthand such as `anthropics/skills`.
-
-## Managed Skills
-
-Imported skills are copied into `config/skills/<name>/` and tracked in `skills.lock.json`.
-
-When you run `skills` commands, local skill directories and `skills.lock.json` are read from and written to the selected config root.
-
-`skills add` requires at least one `--skill <name>` value. Each requested skill is always resolved from `<repo root>/skills/<name>`.
-
-Use `--as <name>` to choose a different local managed skill name when importing exactly one skill.
-
-Examples:
-
-```sh
-dryai skills add anthropics/skills --skill skill-creator
-dryai skills add vercel-labs/agent-skills --skill pr-review commit
-dryai skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
-```
-
-By default, imports track the requested ref. With no `--ref`, that means the remote default branch `HEAD` is tracked. Use `--pin` to store the currently resolved commit instead, so later `skills update` operations stay pinned to that commit.
-
-The lockfile records:
-
-- the local skill name
-- the source repository
-- the source path within that repository
-- the requested git ref, when one was provided
-- the resolved commit that was imported
-- the last installed content hash for each file in the managed skill directory
-
-`skills update` and `skills update-all` re-fetch the tracked repository snapshot and replace the local copied skill directory.
-
-Before replacing a managed skill, `dryai` compares the current local files against the hashes stored in `skills.lock.json`. If any file was added, removed, or edited locally, the update is skipped and a warning is printed so you do not lose your customizations by accident.
-
-For skills imported before hash tracking existed, use `rehash` to store hashes from the current local directory without fetching from the remote source:
-
-```sh
-dryai skills rehash review-helper
-dryai skills rehash-all
-```
-
-Use `--force` to intentionally overwrite local edits:
-
-```sh
-dryai skills update review-helper --force
-dryai skills update-all --force
-```
-
-`skills remove` deletes the local copied skill directory and removes its lockfile entry.
-
-`skills list` reports local skill directories, annotating managed entries from the lockfile and flagging managed entries whose local directory is missing.
-
-`skills rehash` updates the stored file hashes for one managed skill using its current local contents. `skills rehash-all` does the same for every managed skill and skips any managed entry whose local directory is missing.
-
 ## Development
 
-For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:dryai --test install` to run the built CLI.
+For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:dryai <...>` to run the built CLI.
 
 Run `pnpm run setup:editor` after installing dependencies if you want the Effect language service workspace patch applied locally.
 
@@ -193,39 +225,21 @@ pnpm run dev
 pnpm run test
 pnpm run test:watch
 
-pnpm dev:dryai install
-pnpm dev:dryai --test install
-pnpm dev:dryai --output-root ./tmp/install-root install
-pnpm dev:dryai --config-root ./config install
+pnpm dev:dryai <...>
 ```
 
-## CI and Release
+---
 
-- On pull request open or update
-  - Run CI validation with build, test, and `npm pack --dry-run`.
-- On changes landing on `main`
-  - Run the same CI validation with build, test, and `npm pack --dry-run`.
+## VS Code Setup
 
-- On `v*` tag pushed to `main`, the release workflow will:
-  - Verify the tag matches the checked-in `package.json` version.
-  - Verify the tagged commit is on `main`.
-  - Build and test the CLI.
-  - Create a tarball with `npm pack`.
-  - Create or update the matching GitHub Release.
-  - Upload the tarball as a release asset.
-- After the release workflow succeeds, the publish workflow will:
-  - Download the tarball artifact produced by the release workflow.
-  - Publish that exact tarball to npm using npm trusted publishing.
+VS Code Copilot does not automatically discover prompt files from `~/.copilot/prompts`.
 
-Example release flow:
+Add this to your VS Code user settings so prompt files installed by `dryai` are picked up:
 
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Install from the release tarball with:
-
-```sh
-npm install -g https://github.com/willmruzek/share-ai-config/releases/download/v0.1.0/share-ai-config-0.1.0.tgz
+```json
+{
+  "chat.promptFilesLocations": {
+    "~/.copilot/prompts": true
+  }
+}
 ```

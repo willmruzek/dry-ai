@@ -236,11 +236,40 @@ export function resolveManagedSkillImportPath({
   return `skills/${trimmedSkillName}`;
 }
 
+/**
+ * Normalizes an explicitly provided repository-relative skill path.
+ */
 export function normalizeImportedSkillPath(
   skillPath: string | undefined,
-): string {
-  const normalizedPath = skillPath && skillPath.length > 0 ? skillPath : '.';
-  return path.normalize(normalizedPath);
+): string | undefined {
+  if (skillPath === undefined) {
+    return undefined;
+  }
+
+  return path.normalize(skillPath);
+}
+
+/**
+ * Joins an optional base repository path with a requested managed skill name.
+ */
+export function resolveManagedSkillImportPathFromBase(input: {
+  basePath: string | undefined;
+  skillName: string;
+}): string {
+  const normalizedBasePath = normalizeImportedSkillPath(input.basePath);
+  const defaultSkillPath = resolveManagedSkillImportPath({
+    skillName: input.skillName,
+  });
+
+  if (normalizedBasePath === '.') {
+    return path.normalize(input.skillName);
+  }
+
+  if (normalizedBasePath === undefined) {
+    return defaultSkillPath;
+  }
+
+  return path.normalize(path.join(normalizedBasePath, input.skillName));
 }
 
 /**
@@ -398,6 +427,34 @@ export async function resolveSkillSourceDir(input: {
   await validateRemoteSkillDirectory({
     sourceDir,
     skillPath,
+    repo: normalizeRemoteRepo(input.repo),
+  });
+
+  return sourceDir;
+}
+
+/**
+ * Resolves and validates an arbitrary managed skill directory path from a temporary repository checkout.
+ */
+export async function resolveSkillSourceDirByPath(input: {
+  checkoutDir: string;
+  repo: string;
+  skillPath: string;
+}): Promise<string> {
+  const normalizedSkillPath = normalizeImportedSkillPath(input.skillPath);
+
+  if (normalizedSkillPath === undefined) {
+    throw new Error('Skill path may not be empty');
+  }
+
+  const sourceDir = resolveRemoteSkillDirectory({
+    checkoutDir: input.checkoutDir,
+    skillPath: normalizedSkillPath,
+  });
+
+  await validateRemoteSkillDirectory({
+    sourceDir,
+    skillPath: normalizedSkillPath,
     repo: normalizeRemoteRepo(input.repo),
   });
 

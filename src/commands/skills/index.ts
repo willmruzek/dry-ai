@@ -19,6 +19,7 @@ const skillsImportOptionsSchema = z.object({
   skill: z.array(z.string()).optional(),
   as: nonEmptyOptionStringSchema.optional(),
   pin: z.boolean().optional().default(false),
+  path: nonEmptyOptionStringSchema.optional(),
   ref: nonEmptyOptionStringSchema.optional(),
 });
 type SkillsImportOptions = z.output<typeof skillsImportOptionsSchema>;
@@ -50,6 +51,8 @@ export function addSkillsCommand(input: {
         Examples:
           ${commandName} list
           ${commandName} add anthropics/skills --skill skill-creator
+          ${commandName} add anthropics/skills --path . --skill review-helper
+          ${commandName} add anthropics/skills --path tools --skill review-helper
           ${commandName} add vercel-labs/agent-skills --skill pr-review commit
           ${commandName} rehash skill-creator
           ${commandName} update skill-creator
@@ -71,7 +74,15 @@ export function addSkillsCommand(input: {
     .description('Add managed skills from a remote repository')
     .option(
       '--skill <names...>',
-      'Import one or more skills from the repository root skills/ directory',
+      'Import one or more skills by directory name',
+    )
+    .option(
+      '--path <repoPath>',
+      'Resolve each --skill from a different repository subdirectory; use . for the repository root instead of the default skills/ directory',
+      parseOptionValue({
+        schema: nonEmptyOptionStringSchema,
+        optionLabel: '--path',
+      }),
     )
     .option(
       '--as <name>',
@@ -102,6 +113,7 @@ export function addSkillsCommand(input: {
 
       await runSkillsAddCommand(resolveContext(), {
         repo,
+        repoPath: parsedOptions.path,
         skillNames: parsedOptions.skill ?? [],
         asName: parsedOptions.as,
         pin: parsedOptions.pin,
