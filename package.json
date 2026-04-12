@@ -40,6 +40,7 @@
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
+    "@commitlint/types": "^20.5.0",
     "@effect/language-service": "^0.85.0",
     "@effect/vitest": "^0.29.0",
     "@types/fs-extra": "^11.0.4",
