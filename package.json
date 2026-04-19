@@ -1,7 +1,7 @@
 {
   "name": "dryai",
   "version": "2.2.0",
-  "description": "CLI for installing shared AI commands, rules, and skills into Copilot and Cursor.",
+  "description": "CLI for syncing shared AI commands, rules, and skills into supported agent targets.",
   "type": "module",
   "repository": {
     "type": "git",

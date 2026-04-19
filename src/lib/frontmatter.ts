@@ -1,41 +1,55 @@
 import matter from 'gray-matter';
 import { z } from 'zod';
+import type { CLIRuntime } from '../cli.js';
+import { AGENT_DEFINITIONS } from './agent-definitions.js';
 
 export { compactObject } from './object-helpers.js';
 
 export const nonEmptyStringSchema = z.string().trim().min(1);
 
+export const agentFrontmatterSectionSchema = z.object({}).catchall(z.unknown());
+
+export const agentFrontmatterSectionsSchema = z
+  .record(z.string(), agentFrontmatterSectionSchema)
+  .optional();
+
+/**
+ * Builds the Zod schema for the `agents:` frontmatter section by combining each agent's per-kind source schema from the registry.
+ */
+export function createAgentFrontmatterSectionsSchema(kind: 'command' | 'rule') {
+  const shape: Record<string, z.ZodType<unknown>> = {};
+
+  for (const [agent, definition] of Object.entries(AGENT_DEFINITIONS)) {
+    shape[agent] = definition[kind].frontmatterSection.schema;
+  }
+
+  return z.object(shape).catchall(agentFrontmatterSectionSchema).optional();
+}
+
+export const commandAgentFrontmatterSectionsSchema =
+  createAgentFrontmatterSectionsSchema('command');
+
+export const ruleAgentFrontmatterSectionsSchema =
+  createAgentFrontmatterSectionsSchema('rule');
+
 export const commandFrontmatterSchema = z
   .object({
     name: nonEmptyStringSchema,
     description: nonEmptyStringSchema,
-    cursor: z
-      .object({
-        'disable-model-invocation': z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
+    agents: commandAgentFrontmatterSectionsSchema,
   })
   .strict();
 
 export const ruleFrontmatterSchema = z
   .object({
     description: nonEmptyStringSchema,
-    copilot: z
-      .object({
-        applyTo: nonEmptyStringSchema,
-      })
-      .strict(),
-    cursor: z
-      .object({
-        alwaysApply: z.boolean().optional(),
-        globs: nonEmptyStringSchema.optional(),
-      })
-      .strict()
-      .optional(),
+    agents: ruleAgentFrontmatterSectionsSchema,
   })
   .strict();
 
+export type AgentFrontmatterSections = z.infer<
+  typeof agentFrontmatterSectionsSchema
+>;
 export type CommandFrontmatter = z.infer<typeof commandFrontmatterSchema>;
 export type RuleFrontmatter = z.infer<typeof ruleFrontmatterSchema>;
 
@@ -65,15 +79,18 @@ export function parseFrontmatter(fileContent: string): {
 /**
  * Validates parsed frontmatter against a schema and logs a skip message when validation fails.
  */
-export function validateFrontmatter<T>({
-  filePath,
-  metadata,
-  schema,
-}: {
-  filePath: string;
-  metadata: Record<string, unknown>;
-  schema: z.ZodType<T>;
-}): T | null {
+export function validateFrontmatter<T>(
+  runtime: CLIRuntime,
+  {
+    filePath,
+    metadata,
+    schema,
+  }: {
+    filePath: string;
+    metadata: Record<string, unknown>;
+    schema: z.ZodType<T>;
+  },
+): T | null {
   const result = schema.safeParse(metadata);
 
   if (result.success) {
@@ -88,34 +105,12 @@ export function validateFrontmatter<T>({
     })
     .join('; ');
 
-  console.log(`Skipping invalid frontmatter in ${filePath}: ${issues}`);
+  runtime.logInfo(`Skipping invalid frontmatter in ${filePath}: ${issues}`);
   return null;
 }
 
 /**
- * Normalizes rule frontmatter into the apply settings used by downstream generators.
- */
-export function normalizeRuleMetadata(metadata: RuleFrontmatter): {
-  alwaysApply: boolean;
-  globs: string | undefined;
-  applyTo: string;
-} {
-  const copilotApplyTo = metadata.copilot.applyTo;
-  const explicitAlwaysApply = metadata.cursor?.alwaysApply;
-  const scopedGlobs = metadata.cursor?.globs ?? copilotApplyTo;
-  const alwaysApply =
-    explicitAlwaysApply ?? (scopedGlobs === undefined || scopedGlobs === '**');
-  const globs = alwaysApply ? undefined : scopedGlobs;
-
-  return {
-    alwaysApply,
-    globs,
-    applyTo: copilotApplyTo,
-  };
-}
-
-/**
- * Renders metadata and markdown body content back into a frontmatter document string.
+ * Serializes metadata as YAML frontmatter and combines it with the markdown body into a single document string.
  */
 export function renderMarkdown({
   metadata,

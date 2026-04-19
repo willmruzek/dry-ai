@@ -1,6 +1,6 @@
 # Share AI config CLI
 
-Installs command, rule, and skill sources from `~/.config/dryai` by default into Copilot and Cursor targets.
+Syncs command, rule, and skill sources from `~/.config/dryai` by default into supported agent targets.
 
 Global CLI options:
 
@@ -18,7 +18,7 @@ Input config files live under the selected config root:
 - `rules`
 - `skills`
 
-Live output is written to:
+The current built-in agent config writes live output to these default roots:
 
 - `~/.copilot/prompts`
 - `~/.copilot/instructions`
@@ -43,11 +43,13 @@ See VS Code editor setup note below.
 
 ## Commands
 
-### `install`
+### `sync`
 
-- Purpose: Install commands, rules, and skills from the selected config root into the Copilot and Cursor target directories.
+- Purpose: Sync commands, rules, and skills from the selected config root into the configured agent target directories.
 - Input roots: Reads from `commands`, `rules`, and `skills` under the selected config root.
-- Output roots: Writes to `~/.copilot/prompts`, `~/.copilot/instructions`, `~/.copilot/skills`, `~/.cursor/rules`, and `~/.cursor/skills` by default.
+- Output roots: Writes to the live output paths listed in Config Layout by default.
+- Pruning: Removes stale dryai-managed outputs that were written by earlier sync runs but are no longer present in the selected config root.
+- Safety: Only prunes outputs tracked in `sync-manifest.json`; unrelated user files in target roots are left alone.
 
 ### `skills add`
 
@@ -144,20 +146,21 @@ dryai skills update-all --force
 Rules are markdown files under `rules/`. `dryai` recognizes these rule frontmatter fields:
 
 - `description`
-- `copilot.applyTo`
-- `cursor.alwaysApply`
-- `cursor.globs`
+- `agents.copilot.applyTo`
+- `agents.cursor.alwaysApply`
+- `agents.cursor.globs`
 
-`cursor.globs` should be provided as one comma-separated glob string.
+`agents.cursor.globs` should be provided as one comma-separated glob string.
 
 ```md
 ---
 description: Reply with "Yes, Captain!" before answering when the user says "Make it so" or "Engage".
-copilot:
-  applyTo: '**/*.tsx, **/*.ts, src/**/*.ts, src/**/*.tsx, src/**/*.js, src/**/*.jsx'
-cursor:
-  alwaysApply: false
-  globs: '**/*.tsx, **/*.ts, src/**/*.ts, src/**/*.tsx, src/**/*.js, src/**/*.jsx'
+agents:
+  copilot:
+    applyTo: '**/*.tsx, **/*.ts, src/**/*.ts, src/**/*.tsx, src/**/*.js, src/**/*.jsx'
+  cursor:
+    alwaysApply: false
+    globs: '**/*.tsx, **/*.ts, src/**/*.ts, src/**/*.tsx, src/**/*.js, src/**/*.jsx'
 ---
 
 # Say Yes Captain
@@ -171,14 +174,15 @@ Commands are markdown files under `commands/`. `dryai` recognizes these command 
 
 - `name`
 - `description`
-- `cursor.disable-model-invocation`
+- `agents.cursor.disable-model-invocation`
 
 ```md
 ---
 name: gen-commit-msg
 description: Generate a conventional commit message from the current staged git diff.
-cursor:
-  disable-model-invocation: true
+agents:
+  cursor:
+    disable-model-invocation: true
 ---
 
 # Generate Commit Message
@@ -188,9 +192,9 @@ Read the staged diff and produce a conventional commit message with a concise su
 
 ### Example Skill
 
-Skills live in directories under `skills/`. The directory is copied as-is into the Copilot and Cursor skills targets.
+Skills live in directories under `skills/`. The directory is copied as-is into the configured agent skill targets.
 
-Unlike commands and rules, `dryai` does not define or validate a fixed skill frontmatter schema. Skill files are passed through unchanged, so the allowed frontmatter fields depend on the skill format expected by the target editor or agent.
+Unlike commands and rules, `dryai` does not define or validate a fixed skill frontmatter schema. Skill files are passed through unchanged, so the allowed frontmatter fields depend on the skill format expected by the target agent.
 
 ```text
 skills/
@@ -232,9 +236,9 @@ pnpm dev:dryai <...>
 
 ## VS Code Setup
 
-VS Code Copilot does not automatically discover prompt files from `~/.copilot/prompts`.
+One current editor-specific note: VS Code does not automatically discover prompt files from the Copilot prompt target at `~/.copilot/prompts`.
 
-Add this to your VS Code user settings so prompt files installed by `dryai` are picked up:
+Add this to your VS Code user settings if you want prompt files installed by `dryai` into that target to be picked up:
 
 ```json
 {

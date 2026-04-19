@@ -1,12 +1,6 @@
 import { Command } from 'commander';
 import dedent from 'dedent';
 import { z } from 'zod';
-import {
-  nonEmptyOptionStringSchema,
-  parseOptionsObject,
-  parseOptionValue,
-} from '../../lib/command-options.js';
-import { type AgentsContext } from '../../lib/context.js';
 import { runSkillsAddCommand } from './add.js';
 import { runSkillsListCommand } from './list.js';
 import { runSkillsRehashAllCommand } from './rehash-all.js';
@@ -14,6 +8,12 @@ import { runSkillsRehashCommand } from './rehash.js';
 import { runSkillsRemoveCommand } from './remove.js';
 import { runSkillsUpdateAllCommand } from './update-all.js';
 import { runSkillsUpdateCommand } from './update.js';
+import type { CommandEnv } from '../../cli.js';
+import {
+  nonEmptyOptionStringSchema,
+  parseOptionsObject,
+  parseOptionValue,
+} from '../../lib/command-options.js';
 
 const skillsImportOptionsSchema = z.object({
   skill: z.array(z.string()).optional(),
@@ -34,12 +34,12 @@ type SkillsUpdateOptions = z.output<typeof skillsUpdateOptionsSchema>;
  * Registers the managed skills command tree on the parent CLI program.
  */
 export function addSkillsCommand(input: {
-  parent: Command;
+  program: Command;
   commandName: string;
-  resolveContext: () => AgentsContext;
+  resolveEnv: () => CommandEnv;
 }): Command {
-  const { parent, commandName, resolveContext } = input;
-  const skills = parent
+  const { program, commandName, resolveEnv } = input;
+  const skills = program
     .command('skills')
     .description('Manage imported skills')
     .usage('<subcommand> [args]')
@@ -66,16 +66,13 @@ export function addSkillsCommand(input: {
     .command('list')
     .description('List local skills')
     .action(async () => {
-      await runSkillsListCommand(resolveContext());
+      await runSkillsListCommand(resolveEnv());
     });
 
   skills
     .command('add <repo>')
     .description('Add managed skills from a remote repository')
-    .option(
-      '--skill <names...>',
-      'Import one or more skills by directory name',
-    )
+    .option('--skill <names...>', 'Import one or more skills by directory name')
     .option(
       '--path <repoPath>',
       'Resolve each --skill from a different repository subdirectory; use . for the repository root instead of the default skills/ directory',
@@ -111,7 +108,7 @@ export function addSkillsCommand(input: {
         optionsLabel: 'skills add options',
       });
 
-      await runSkillsAddCommand(resolveContext(), {
+      await runSkillsAddCommand(resolveEnv(), {
         repo,
         repoPath: parsedOptions.path,
         skillNames: parsedOptions.skill ?? [],
@@ -125,27 +122,30 @@ export function addSkillsCommand(input: {
     .command('remove <name>')
     .description('Remove a managed skill')
     .action(async (skillName: string) => {
-      await runSkillsRemoveCommand(resolveContext(), { skillName });
+      await runSkillsRemoveCommand(resolveEnv(), { skillName });
     });
 
   skills
     .command('rehash <name>')
     .description('Refresh stored file hashes for one managed skill')
     .action(async (skillName: string) => {
-      await runSkillsRehashCommand(resolveContext(), { skillName });
+      await runSkillsRehashCommand(resolveEnv(), { skillName });
     });
 
   skills
     .command('rehash-all')
     .description('Refresh stored file hashes for all managed skills')
     .action(async () => {
-      await runSkillsRehashAllCommand(resolveContext());
+      await runSkillsRehashAllCommand(resolveEnv());
     });
 
   skills
     .command('update <name>')
     .description('Update a managed skill from its tracked source')
-    .option('--force', 'Overwrite local skill edits with the fetched remote copy')
+    .option(
+      '--force',
+      'Overwrite local skill edits with the fetched remote copy',
+    )
     .action(async (skillName: string, options) => {
       const parsedOptions: SkillsUpdateOptions = parseOptionsObject({
         schema: skillsUpdateOptionsSchema,
@@ -153,7 +153,7 @@ export function addSkillsCommand(input: {
         optionsLabel: 'skills update options',
       });
 
-      await runSkillsUpdateCommand(resolveContext(), {
+      await runSkillsUpdateCommand(resolveEnv(), {
         force: parsedOptions.force,
         skillName,
       });
@@ -162,7 +162,10 @@ export function addSkillsCommand(input: {
   skills
     .command('update-all')
     .description('Update all managed skills from their tracked sources')
-    .option('--force', 'Overwrite local skill edits with the fetched remote copy')
+    .option(
+      '--force',
+      'Overwrite local skill edits with the fetched remote copy',
+    )
     .action(async (options) => {
       const parsedOptions: SkillsUpdateOptions = parseOptionsObject({
         schema: skillsUpdateOptionsSchema,
@@ -170,7 +173,7 @@ export function addSkillsCommand(input: {
         optionsLabel: 'skills update-all options',
       });
 
-      await runSkillsUpdateAllCommand(resolveContext(), {
+      await runSkillsUpdateAllCommand(resolveEnv(), {
         force: parsedOptions.force,
       });
     });

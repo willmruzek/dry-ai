@@ -1,5 +1,5 @@
 import fs from 'fs-extra';
-import type { AgentsContext } from '../../lib/context.js';
+import type { CommandEnv } from '../../cli.js';
 import {
   computeDirectoryHashes,
   createUpdatedSkillRecord,
@@ -15,12 +15,13 @@ import {
  * Refreshes the stored file hashes for every managed skill using current local directory contents.
  */
 export async function runSkillsRehashAllCommand(
-  context: AgentsContext,
+  env: CommandEnv,
 ): Promise<void> {
+  const { context, runtime } = env;
   let lockfile = await loadSkillsLockfile(context);
 
   if (lockfile.skills.length === 0) {
-    console.log('No managed skills to rehash.');
+    runtime.logInfo('No managed skills to rehash.');
     return;
   }
 
@@ -54,15 +55,15 @@ export async function runSkillsRehashAllCommand(
   await saveSkillsLockfile(context, { lockfile });
 
   if (rehashedLines.length > 0) {
-    console.log(
+    runtime.logInfo(
       `Rehashed ${rehashedLines.length} managed skills:\n${rehashedLines.join('\n')}`,
     );
   } else {
-    console.log('No managed skills were rehashed.');
+    runtime.logInfo('No managed skills were rehashed.');
   }
 
   if (skippedLines.length > 0) {
-    console.warn(
+    runtime.logWarn(
       `Skipped ${skippedLines.length} managed skills because the local directory is missing:\n${skippedLines.join('\n')}`,
     );
   }

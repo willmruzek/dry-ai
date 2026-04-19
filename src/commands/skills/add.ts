@@ -1,6 +1,7 @@
 import fs from 'fs-extra';
-import type { AgentsContext } from '../../lib/context.js';
+import type { CommandEnv } from '../../cli.js';
 import {
+  cleanupRemoteRepoCheckout,
   cloneRemoteRepo,
   computeDirectoryHashes,
   createImportedSkillRecord,
@@ -47,7 +48,22 @@ function normalizeRequestedSkillNames(skillNames: string[]): string[] {
 }
 
 /**
- * Resolves the remote repository path for one managed skill import request.
+ * Returns the resolved repository-relative import path for a single requested skill.
+ *
+ * @example
+ * // No base path — defaults to the repository `skills/` directory
+ * resolveRequestedImportPath({ basePath: undefined, requestedSkillName: 'my-skill' });
+ * // → 'skills/my-skill'
+ *
+ * @example
+ * // With a base path — skill is resolved relative to that directory
+ * resolveRequestedImportPath({ basePath: 'tools', requestedSkillName: 'my-skill' });
+ * // → 'tools/my-skill'
+ *
+ * @example
+ * // Base path of '.' — skill is resolved from the repository root
+ * resolveRequestedImportPath({ basePath: '.', requestedSkillName: 'my-skill' });
+ * // → 'my-skill'
  */
 function resolveRequestedImportPath(input: {
   basePath: string | undefined;
@@ -65,7 +81,7 @@ function resolveRequestedImportPath(input: {
  * Imports one or more managed skills from a remote repository into the local skills directory.
  */
 export async function runSkillsAddCommand(
-  context: AgentsContext,
+  env: CommandEnv,
   input: {
     repo: string;
     repoPath: string | undefined;
@@ -75,6 +91,7 @@ export async function runSkillsAddCommand(
     ref: string | undefined;
   },
 ): Promise<void> {
+  const { context, runtime } = env;
   const repo = normalizeRemoteRepo(input.repo);
   const normalizedBasePath = normalizeImportedSkillPath(input.repoPath);
 
@@ -159,20 +176,20 @@ export async function runSkillsAddCommand(
       importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
     }
   } finally {
-    await checkout.cleanup();
+    await cleanupRemoteRepoCheckout(checkout);
   }
 
   for (const importedSkillSummary of importedSkillSummaries) {
-    console.log(`Imported ${importedSkillSummary}`);
+    runtime.logInfo(`Imported ${importedSkillSummary}`);
   }
 
   if (skippedSkillNames.length > 0) {
-    console.warn(
+    runtime.logWarn(
       `Skipped already-imported skills: ${skippedSkillNames.join(', ')}`,
     );
   }
 
   if (importedSkillSummaries.length === 0) {
-    console.log('No skills were imported.');
+    runtime.logInfo('No skills were imported.');
   }
 }

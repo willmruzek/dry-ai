@@ -33,7 +33,7 @@ function parseWithSchema<TSchema extends z.ZodTypeAny>({
 }
 
 /**
- * Parses one Commander option value with a Zod schema.
+ * Returns a Commander option parser function that validates the raw string value with the given Zod schema.
  */
 export function parseOptionValue<TSchema extends z.ZodTypeAny>({
   schema,

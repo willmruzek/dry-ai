@@ -1,4 +1,4 @@
-import type { AgentsContext } from '../../lib/context.js';
+import type { CommandEnv } from '../../cli.js';
 import {
   findManagedSkill,
   formatManagedSkillSummary,
@@ -12,11 +12,12 @@ import {
  * Removes a managed skill from the local directory and updates the lockfile.
  */
 export async function runSkillsRemoveCommand(
-  context: AgentsContext,
+  env: CommandEnv,
   input: {
     skillName: string;
   },
 ): Promise<void> {
+  const { context, runtime } = env;
   const { skillName } = input;
 
   const lockfile = await loadSkillsLockfile(context);
@@ -31,5 +32,5 @@ export async function runSkillsRemoveCommand(
     lockfile: removeManagedSkill(lockfile, { name: skillName }),
   });
 
-  console.log(`Removed ${formatManagedSkillSummary(managedSkill)}`);
+  runtime.logInfo(`Removed ${formatManagedSkillSummary(managedSkill)}`);
 }

@@ -1,5 +1,5 @@
 import fs from 'fs-extra';
-import type { AgentsContext } from '../../lib/context.js';
+import type { CommandEnv } from '../../cli.js';
 import {
   computeDirectoryHashes,
   createUpdatedSkillRecord,
@@ -16,11 +16,12 @@ import {
  * Refreshes the stored file hashes for one managed skill using the current local directory contents.
  */
 export async function runSkillsRehashCommand(
-  context: AgentsContext,
+  env: CommandEnv,
   input: {
     skillName: string;
   },
 ): Promise<void> {
+  const { context, runtime } = env;
   const { skillName } = input;
   const lockfile = await loadSkillsLockfile(context);
   const managedSkill = findManagedSkill(lockfile, { name: skillName });
@@ -47,5 +48,5 @@ export async function runSkillsRehashCommand(
     lockfile: upsertManagedSkill(lockfile, { updatedSkill }),
   });
 
-  console.log(`Rehashed ${formatManagedSkillSummary(updatedSkill)}`);
+  runtime.logInfo(`Rehashed ${formatManagedSkillSummary(updatedSkill)}`);
 }

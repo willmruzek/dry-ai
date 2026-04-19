@@ -1,5 +1,6 @@
-import type { AgentsContext } from '../../lib/context.js';
+import type { CommandEnv } from '../../cli.js';
 import {
+  cleanupRemoteSkillSnapshot,
   computeDirectoryHashes,
   createUpdatedSkillRecord,
   detectLocalSkillEdits,
@@ -17,15 +18,16 @@ import {
  * Updates every managed skill from its tracked remote source and saves the refreshed lockfile.
  */
 export async function runSkillsUpdateAllCommand(
-  context: AgentsContext,
+  env: CommandEnv,
   input: {
     force: boolean;
   },
 ): Promise<void> {
+  const { context, runtime } = env;
   let lockfile = await loadSkillsLockfile(context);
 
   if (lockfile.skills.length === 0) {
-    console.log('No managed skills to update.');
+    runtime.logInfo('No managed skills to update.');
     return;
   }
 
@@ -72,22 +74,22 @@ export async function runSkillsUpdateAllCommand(
       lockfile = upsertManagedSkill(lockfile, { updatedSkill });
       updatedLines.push(`- ${formatManagedSkillSummary(updatedSkill)}`);
     } finally {
-      await snapshot.cleanup();
+      await cleanupRemoteSkillSnapshot(snapshot);
     }
   }
 
   await saveSkillsLockfile(context, { lockfile });
 
   if (updatedLines.length > 0) {
-    console.log(
+    runtime.logInfo(
       `Updated ${updatedLines.length} managed skills:\n${updatedLines.join('\n')}`,
     );
   } else {
-    console.log('No managed skills were updated.');
+    runtime.logInfo('No managed skills were updated.');
   }
 
   if (skippedLines.length > 0) {
-    console.warn(
+    runtime.logWarn(
       `Skipped ${skippedLines.length} managed skills due to local edits. Re-run with --force to overwrite local changes:\n${skippedLines.join('\n')}`,
     );
   }

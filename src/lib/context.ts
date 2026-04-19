@@ -1,13 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-
-export type TargetRoots = {
-  copilotPrompts: string;
-  copilotInstructions: string;
-  copilotSkills: string;
-  cursorRules: string;
-  cursorSkills: string;
-};
+import { createTargetRoots, type TargetRoots } from './agents.js';
 
 export type SourceRoots = {
   commands: string;
@@ -19,54 +12,20 @@ export type AgentsContext = {
   inputRoot: string;
   outputRoot: string;
   skillsLockfilePath: string;
+  syncManifestPath: string;
   sourceRoots: SourceRoots;
   targetRoots: TargetRoots;
 };
 
 export const DEFAULT_INPUT_ROOT_SEGMENTS = ['.config', 'dryai'] as const;
 export const DEFAULT_TEST_OUTPUT_DIR_NAME = 'output-test';
+export const DEFAULT_SYNC_MANIFEST_FILE_NAME = 'sync-manifest.json';
 
 export const DEFAULT_SOURCE_ROOT_NAMES = {
   commands: 'commands',
   rules: 'rules',
   skills: 'skills',
 } as const;
-
-export const DEFAULT_TARGET_ROOT_SEGMENTS = {
-  copilotPrompts: ['.copilot', 'prompts'],
-  copilotInstructions: ['.copilot', 'instructions'],
-  copilotSkills: ['.copilot', 'skills'],
-  cursorRules: ['.cursor', 'rules'],
-  cursorSkills: ['.cursor', 'skills'],
-} as const;
-
-/**
- * Creates the Copilot and Cursor output root paths under one base directory.
- */
-export function createTargetRoots(baseDir: string): TargetRoots {
-  return {
-    copilotPrompts: path.join(
-      baseDir,
-      ...DEFAULT_TARGET_ROOT_SEGMENTS.copilotPrompts,
-    ),
-    copilotInstructions: path.join(
-      baseDir,
-      ...DEFAULT_TARGET_ROOT_SEGMENTS.copilotInstructions,
-    ),
-    copilotSkills: path.join(
-      baseDir,
-      ...DEFAULT_TARGET_ROOT_SEGMENTS.copilotSkills,
-    ),
-    cursorRules: path.join(
-      baseDir,
-      ...DEFAULT_TARGET_ROOT_SEGMENTS.cursorRules,
-    ),
-    cursorSkills: path.join(
-      baseDir,
-      ...DEFAULT_TARGET_ROOT_SEGMENTS.cursorSkills,
-    ),
-  };
-}
 
 /**
  * Creates the commands, rules, and skills input roots under one base directory.
@@ -95,7 +54,7 @@ export function expandHomePath(inputPath: string, homeDir: string): string {
 }
 
 /**
- * Returns the requested output-root override derived from CLI-style options.
+ * Returns the explicit output root if --output-root or --test was passed, or undefined if neither was set.
  */
 export function resolveRequestedOutputRoot(input: {
   test: boolean;
@@ -109,7 +68,7 @@ export function resolveRequestedOutputRoot(input: {
 }
 
 /**
- * Returns the requested config root derived from CLI-style options.
+ * Returns the --config-root value if provided, or undefined.
  */
 export function resolveRequestedConfigRoot(input: {
   configRoot?: string;
@@ -118,7 +77,7 @@ export function resolveRequestedConfigRoot(input: {
 }
 
 /**
- * Returns the filesystem path to use for generated output.
+ * Resolves the absolute output root path, expanding ~ and defaulting to homeDir when no override is given.
  */
 export function resolveOutputRoot(input: {
   homeDir: string;
@@ -132,8 +91,7 @@ export function resolveOutputRoot(input: {
 }
 
 /**
- * Returns a copy of the context with generated output redirected under one
- * explicit output root.
+ * Returns a shallow copy of context with outputRoot and targetRoots updated to the given path.
  */
 export function resolveOutputContext(
   context: AgentsContext,
@@ -147,8 +105,7 @@ export function resolveOutputContext(
 }
 
 /**
- * Creates the base CLI context with repository, input, and output paths
- * resolved.
+ * Builds the AgentsContext by resolving input and output roots, applying ~ expansion and test-mode defaults.
  */
 export function createAgentsContext(options?: {
   inputRoot?: string;
@@ -173,6 +130,7 @@ export function createAgentsContext(options?: {
     inputRoot,
     outputRoot,
     skillsLockfilePath: path.join(inputRoot, 'skills.lock.json'),
+    syncManifestPath: path.join(inputRoot, DEFAULT_SYNC_MANIFEST_FILE_NAME),
     sourceRoots: createSourceRoots(inputRoot),
     targetRoots: createTargetRoots(outputRoot),
   };

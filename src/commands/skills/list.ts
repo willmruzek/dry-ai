@@ -1,4 +1,4 @@
-import type { AgentsContext } from '../../lib/context.js';
+import type { CommandEnv } from '../../cli.js';
 import {
   ensureSkillsRoot,
   findManagedSkill,
@@ -11,8 +11,9 @@ import {
  * Lists local skills and annotates which ones are managed by the lockfile.
  */
 export async function runSkillsListCommand(
-  context: AgentsContext,
+  env: CommandEnv,
 ): Promise<void> {
+  const { context, runtime } = env;
   await ensureSkillsRoot(context);
 
   const [localSkillDirectories, lockfile] = await Promise.all([
@@ -39,9 +40,9 @@ export async function runSkillsListCommand(
   const outputLines = [...localSkillLines, ...missingManagedLines];
 
   if (outputLines.length === 0) {
-    console.log('No local skills found.');
+    runtime.logInfo('No local skills found.');
     return;
   }
 
-  console.log(outputLines.join('\n'));
+  runtime.logInfo(outputLines.join('\n'));
 }

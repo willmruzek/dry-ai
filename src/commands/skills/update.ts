@@ -1,5 +1,6 @@
-import type { AgentsContext } from '../../lib/context.js';
+import type { CommandEnv } from '../../cli.js';
 import {
+  cleanupRemoteSkillSnapshot,
   computeDirectoryHashes,
   createUpdatedSkillRecord,
   detectLocalSkillEdits,
@@ -18,12 +19,13 @@ import {
  * Updates one managed skill from its tracked remote source and refreshes the lockfile.
  */
 export async function runSkillsUpdateCommand(
-  context: AgentsContext,
+  env: CommandEnv,
   input: {
     force: boolean;
     skillName: string;
   },
 ): Promise<void> {
+  const { context, runtime } = env;
   const { force, skillName } = input;
 
   const lockfile = await loadSkillsLockfile(context);
@@ -40,7 +42,7 @@ export async function runSkillsUpdateCommand(
   });
 
   if (localEditState.modified && !force) {
-    console.warn(
+    runtime.logWarn(
       `Skipped ${skillName} because local edits were detected in: ${localEditState.changedFiles.join(', ')}. Re-run with --force to overwrite local changes.`,
     );
     return;
@@ -71,8 +73,8 @@ export async function runSkillsUpdateCommand(
       lockfile: upsertManagedSkill(lockfile, { updatedSkill }),
     });
 
-    console.log(`Updated ${formatManagedSkillSummary(updatedSkill)}`);
+    runtime.logInfo(`Updated ${formatManagedSkillSummary(updatedSkill)}`);
   } finally {
-    await snapshot.cleanup();
+    await cleanupRemoteSkillSnapshot(snapshot);
   }
 }
