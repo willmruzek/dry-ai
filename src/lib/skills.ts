@@ -214,7 +214,7 @@ export function normalizeRemoteRepo(repo: string): string {
 }
 
 /**
- * Builds the canonical remote path for a managed skill under the repository `skills/` directory.
+ * Returns the canonical remote path for a managed skill under the repository `skills/` directory.
  */
 export function resolveManagedSkillImportPath({
   skillName,
@@ -297,7 +297,7 @@ export function createImportedSkillRecord(input: {
 }
 
 /**
- * Creates the next lockfile record for a managed skill after its local contents have been refreshed.
+ * Returns an updated lockfile record for an existing managed skill after a successful remote refresh.
  */
 export function createUpdatedSkillRecord(input: {
   commit: string;
@@ -314,7 +314,7 @@ export function createUpdatedSkillRecord(input: {
 }
 
 /**
- * Computes stable SHA-256 hashes for every file within a managed skill directory.
+ * Returns a map of relative file path → SHA-256 hash for every file in directoryPath.
  */
 export async function computeDirectoryHashes(
   directoryPath: string,
@@ -358,8 +358,17 @@ export async function detectLocalSkillEdits(input: {
   }
 
   const currentFiles = await computeDirectoryHashes(input.skillDir);
-  const changedFiles = [...new Set([...Object.keys(input.storedFiles), ...Object.keys(currentFiles)])]
-    .filter((relativeFilePath) => input.storedFiles?.[relativeFilePath] !== currentFiles[relativeFilePath])
+  const changedFiles = [
+    ...new Set([
+      ...Object.keys(input.storedFiles),
+      ...Object.keys(currentFiles),
+    ]),
+  ]
+    .filter(
+      (relativeFilePath) =>
+        input.storedFiles?.[relativeFilePath] !==
+        currentFiles[relativeFilePath],
+    )
     .sort((left, right) => left.localeCompare(right));
 
   return {
@@ -409,7 +418,16 @@ export async function cloneRemoteRepo(input: {
 }
 
 /**
- * Resolves and validates a managed skill directory from a temporary repository checkout.
+ * Removes one temporary repository checkout returned by `cloneRemoteRepo`.
+ */
+export async function cleanupRemoteRepoCheckout(
+  checkout: RemoteRepoCheckout,
+): Promise<void> {
+  await checkout.cleanup();
+}
+
+/**
+ * Returns the source directory path for a skill at its default location (`skills/<skillName>`), confirming the directory and SKILL.md exist.
  */
 export async function resolveSkillSourceDir(input: {
   checkoutDir: string;
@@ -434,7 +452,7 @@ export async function resolveSkillSourceDir(input: {
 }
 
 /**
- * Resolves and validates an arbitrary managed skill directory path from a temporary repository checkout.
+ * Returns the source directory path for a skill at an explicit repository-relative path, confirming the directory and SKILL.md exist.
  */
 export async function resolveSkillSourceDirByPath(input: {
   checkoutDir: string;
@@ -499,6 +517,15 @@ export async function fetchRemoteSkillSnapshot(input: {
       error,
     });
   }
+}
+
+/**
+ * Removes one temporary remote skill snapshot returned by `fetchRemoteSkillSnapshot`.
+ */
+export async function cleanupRemoteSkillSnapshot(
+  snapshot: RemoteSkillSnapshot,
+): Promise<void> {
+  await snapshot.cleanup();
 }
 
 export async function replaceManagedSkillDirectory({
