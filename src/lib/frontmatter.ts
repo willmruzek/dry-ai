@@ -1,6 +1,8 @@
 import matter from 'gray-matter';
 import { z } from 'zod';
 
+export { compactObject } from './object-helpers.js';
+
 export const nonEmptyStringSchema = z.string().trim().min(1);
 
 export const commandFrontmatterSchema = z
@@ -36,17 +38,6 @@ export const ruleFrontmatterSchema = z
 
 export type CommandFrontmatter = z.infer<typeof commandFrontmatterSchema>;
 export type RuleFrontmatter = z.infer<typeof ruleFrontmatterSchema>;
-
-/**
- * Returns a copy of an object with all undefined-valued entries removed.
- */
-export function compactObject(
-  value: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
-  );
-}
 
 /**
  * Returns whether a value is a non-null plain object and not an array.
