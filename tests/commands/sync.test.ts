@@ -12,6 +12,7 @@ import {
   configureMockOs,
   createMockFileSystemState,
   createTestEnv,
+  readMockTextFile,
   storeMockTextFile,
 } from '../helpers.js';
 
@@ -277,20 +278,382 @@ describe('dryai sync', () => {
     });
 
     describe('sync manifest: pruning', () => {
-      // priority: high
-      it.todo(
-        'removes files in target roots that were previously tracked in the manifest but are no longer present in the config root',
-      );
+      type StaleManifestEntry = {
+        agent: 'copilot' | 'cursor';
+        kind: 'command' | 'rule' | 'skill';
+        name: string;
+        outputPath: string;
+      };
 
-      // priority: high
-      it.todo(
-        'leaves target-root files that were never tracked by the sync manifest untouched',
-      );
+      /**
+       * Seeds one current command source (`current.md`) so each prune
+       * test has at least one applied item alongside the pruned one.
+       * This mirrors a realistic incremental sync (where some items
+       * stayed and some were deleted from the config root) and gives
+       * the per-agent report both `installed`/`updated` lines AND
+       * `removed` lines to render side by side.
+       */
+      function seedCurrentCommandSource(): void {
+        storeMockTextFile(
+          mockFileSystem,
+          path.join(DEFAULT_CONFIG_ROOT, 'commands', 'current.md'),
+          [
+            '---',
+            'name: current',
+            'description: Still-present command',
+            '---',
+            '',
+            'Current body',
+            '',
+          ].join('\n'),
+        );
+      }
 
-      // priority: med
-      it.todo(
-        'reports pruned items with change-type "removed" in the per-agent sync report',
-      );
+      /**
+       * Writes the prior `sync-manifest.json` (version 2) to the config
+       * root with the given stale entries — i.e. entries whose
+       * `outputPath` is no longer claimed by any current source, so
+       * `collectRemovedManifestEntries` will mark them as orphaned and
+       * `removeStaleOutputs` will `fs.remove` them.
+       */
+      function seedPriorManifest(staleEntries: StaleManifestEntry[]): void {
+        storeMockTextFile(
+          mockFileSystem,
+          path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+          JSON.stringify({ version: 2, outputs: staleEntries }),
+        );
+      }
+
+      /**
+       * Arranges a stale `command` named `gone-cmd` — seeds its on-disk
+       * outputs (Copilot prompt file + Cursor skill-style SKILL.md) and
+       * the prior manifest entries that point to them.
+       */
+      function arrangeStaleCommand(): {
+        copilotOutputPath: string;
+        cursorOutputPath: string;
+      } {
+        const copilotOutputPath = path.join(
+          VIRTUAL_HOME_DIR,
+          '.copilot',
+          'prompts',
+          'gone-cmd.prompt.md',
+        );
+        const cursorOutputPath = path.join(
+          VIRTUAL_HOME_DIR,
+          '.cursor',
+          'skills',
+          'gone-cmd',
+          'SKILL.md',
+        );
+
+        storeMockTextFile(mockFileSystem, copilotOutputPath, '# stale prompt\n');
+        storeMockTextFile(mockFileSystem, cursorOutputPath, '# stale skill\n');
+
+        seedPriorManifest([
+          {
+            agent: 'copilot',
+            kind: 'command',
+            name: 'gone-cmd',
+            outputPath: copilotOutputPath,
+          },
+          {
+            agent: 'cursor',
+            kind: 'command',
+            name: 'gone-cmd',
+            outputPath: cursorOutputPath,
+          },
+        ]);
+
+        return { copilotOutputPath, cursorOutputPath };
+      }
+
+      /**
+       * Arranges a stale `rule` named `gone-rule` — seeds its on-disk
+       * outputs (Copilot `.instructions.md` + Cursor `.mdc`) and the
+       * prior manifest entries that point to them.
+       */
+      function arrangeStaleRule(): {
+        copilotOutputPath: string;
+        cursorOutputPath: string;
+      } {
+        const copilotOutputPath = path.join(
+          VIRTUAL_HOME_DIR,
+          '.copilot',
+          'instructions',
+          'gone-rule.instructions.md',
+        );
+        const cursorOutputPath = path.join(
+          VIRTUAL_HOME_DIR,
+          '.cursor',
+          'rules',
+          'gone-rule.mdc',
+        );
+
+        storeMockTextFile(
+          mockFileSystem,
+          copilotOutputPath,
+          '# stale instructions\n',
+        );
+        storeMockTextFile(mockFileSystem, cursorOutputPath, '# stale mdc\n');
+
+        seedPriorManifest([
+          {
+            agent: 'copilot',
+            kind: 'rule',
+            name: 'gone-rule',
+            outputPath: copilotOutputPath,
+          },
+          {
+            agent: 'cursor',
+            kind: 'rule',
+            name: 'gone-rule',
+            outputPath: cursorOutputPath,
+          },
+        ]);
+
+        return { copilotOutputPath, cursorOutputPath };
+      }
+
+      /**
+       * Arranges a stale `skill` named `gone-skill` — seeds multiple
+       * files inside each agent's skill directory (so the test can
+       * assert that pruning a skill's `outputPath`, which is the
+       * directory itself, removes the entire subtree, not just one
+       * file) and the prior manifest entries that point to those
+       * directories.
+       */
+      function arrangeStaleSkill(): {
+        copilotInnerFiles: string[];
+        cursorInnerFiles: string[];
+      } {
+        const copilotSkillDir = path.join(
+          VIRTUAL_HOME_DIR,
+          '.copilot',
+          'skills',
+          'gone-skill',
+        );
+        const cursorSkillDir = path.join(
+          VIRTUAL_HOME_DIR,
+          '.cursor',
+          'skills',
+          'gone-skill',
+        );
+        const copilotInnerFiles = [
+          path.join(copilotSkillDir, 'SKILL.md'),
+          path.join(copilotSkillDir, 'rules.md'),
+        ];
+        const cursorInnerFiles = [
+          path.join(cursorSkillDir, 'SKILL.md'),
+          path.join(cursorSkillDir, 'rules.md'),
+        ];
+
+        for (const filePath of [...copilotInnerFiles, ...cursorInnerFiles]) {
+          storeMockTextFile(
+            mockFileSystem,
+            filePath,
+            `# stale ${path.basename(filePath)}\n`,
+          );
+        }
+
+        seedPriorManifest([
+          {
+            agent: 'copilot',
+            kind: 'skill',
+            name: 'gone-skill',
+            outputPath: copilotSkillDir,
+          },
+          {
+            agent: 'cursor',
+            kind: 'skill',
+            name: 'gone-skill',
+            outputPath: cursorSkillDir,
+          },
+        ]);
+
+        return { copilotInnerFiles, cursorInnerFiles };
+      }
+
+      it("removes a previously-tracked command's per-agent outputs when its source has been deleted from the config root", async () => {
+        // Arrange: prior manifest tracks `gone-cmd` outputs whose
+        // command source is no longer present; one current command
+        // (`current`) keeps the run from being a pure-prune scenario.
+        seedCurrentCommandSource();
+        const { copilotOutputPath, cursorOutputPath } = arrangeStaleCommand();
+        const { cliOptions, stderrMessages } = createTestEnv();
+
+        // Sanity check: the stale outputs were actually seeded on disk
+        // before the run, so a `false` post-run assertion isn't trivially
+        // true (e.g. due to a bad path in `arrangeStaleCommand`).
+        expect(mockFileSystem.files.has(copilotOutputPath)).toBe(true);
+        expect(mockFileSystem.files.has(cursorOutputPath)).toBe(true);
+
+        // Act
+        await runCLI({
+          argv: ['sync'],
+          ...cliOptions,
+        });
+
+        // Assert: both stale per-agent command outputs were pruned.
+        expect(mockFileSystem.files.has(copilotOutputPath)).toBe(false);
+        expect(mockFileSystem.files.has(cursorOutputPath)).toBe(false);
+
+        // Assert: the still-present command's outputs were written, so
+        // pruning didn't accidentally short-circuit the apply phase.
+        expect(
+          mockFileSystem.files.has(
+            path.join(
+              VIRTUAL_HOME_DIR,
+              '.copilot',
+              'prompts',
+              'current.prompt.md',
+            ),
+          ),
+        ).toBe(true);
+
+        // Assert: clean run.
+        expect(stderrMessages).toEqual([]);
+      });
+
+      it("removes a previously-tracked rule's per-agent outputs when its source has been deleted from the config root", async () => {
+        // Arrange: prior manifest tracks `gone-rule` outputs (Copilot
+        // `.instructions.md` + Cursor `.mdc`) whose rule source is no
+        // longer present; one current command keeps the apply phase
+        // exercised.
+        seedCurrentCommandSource();
+        const { copilotOutputPath, cursorOutputPath } = arrangeStaleRule();
+        const { cliOptions, stderrMessages } = createTestEnv();
+
+        // Sanity check: stale outputs were seeded on disk pre-run so
+        // the post-run `false` assertion can't pass for the wrong
+        // reason.
+        expect(mockFileSystem.files.has(copilotOutputPath)).toBe(true);
+        expect(mockFileSystem.files.has(cursorOutputPath)).toBe(true);
+
+        // Act
+        await runCLI({
+          argv: ['sync'],
+          ...cliOptions,
+        });
+
+        // Assert: both stale per-agent rule outputs were pruned —
+        // covering the `.instructions.md` (Copilot) and `.mdc` (Cursor)
+        // path shapes that differ from the command path layout.
+        expect(mockFileSystem.files.has(copilotOutputPath)).toBe(false);
+        expect(mockFileSystem.files.has(cursorOutputPath)).toBe(false);
+
+        // Assert: clean run.
+        expect(stderrMessages).toEqual([]);
+      });
+
+      it("removes a previously-tracked skill's per-agent directories (and every file inside them) when its source has been deleted from the config root", async () => {
+        // Arrange: prior manifest tracks `gone-skill` directory
+        // outputs; multiple files seeded inside each agent's skill
+        // directory let us assert the full subtree is pruned, not just
+        // a top-level file at the manifest's `outputPath`.
+        seedCurrentCommandSource();
+        const { copilotInnerFiles, cursorInnerFiles } = arrangeStaleSkill();
+        const { cliOptions, stderrMessages } = createTestEnv();
+
+        // Sanity check: every inner file was seeded on disk pre-run, so
+        // the post-run `false` assertions can't all pass for the wrong
+        // reason (e.g. wrong dir paths in `arrangeStaleSkill`).
+        for (const filePath of [...copilotInnerFiles, ...cursorInnerFiles]) {
+          expect(mockFileSystem.files.has(filePath)).toBe(true);
+        }
+
+        // Act
+        await runCLI({
+          argv: ['sync'],
+          ...cliOptions,
+        });
+
+        // Assert: every file that lived inside either agent's stale
+        // skill directory is gone — proves `fs.remove(<skillDir>)`
+        // cleaned up the subtree (skills are directory-shaped outputs,
+        // unlike commands and rules which are single-file outputs).
+        for (const filePath of [...copilotInnerFiles, ...cursorInnerFiles]) {
+          expect(mockFileSystem.files.has(filePath)).toBe(false);
+        }
+
+        // Assert: clean run.
+        expect(stderrMessages).toEqual([]);
+      });
+
+      it('leaves target-root files that were never tracked by the sync manifest untouched', async () => {
+        // Arrange: no prior manifest, no current sources, just a single
+        // hand-authored file under one of the target roots — i.e. the
+        // realistic case of a user with their own files alongside a
+        // first-ever `dryai sync`.
+        const untrackedFilePath = path.join(
+          VIRTUAL_HOME_DIR,
+          '.copilot',
+          'prompts',
+          'handcrafted.prompt.md',
+        );
+        const untrackedFileContent = '# handcrafted\n';
+        storeMockTextFile(
+          mockFileSystem,
+          untrackedFilePath,
+          untrackedFileContent,
+        );
+
+        const { cliOptions, stderrMessages } = createTestEnv();
+
+        // Act
+        await runCLI({
+          argv: ['sync'],
+          ...cliOptions,
+        });
+
+        // Assert: the untracked file is still on disk with its original
+        // bytes — sync must not touch outputs it didn't manage.
+        expect(mockFileSystem.files.has(untrackedFilePath)).toBe(true);
+        expect(readMockTextFile(mockFileSystem, untrackedFilePath)).toBe(
+          untrackedFileContent,
+        );
+
+        // Assert: clean run, no warnings.
+        expect(stderrMessages).toEqual([]);
+      });
+
+      it('reports pruned items with change-type "removed" in the per-agent sync report', async () => {
+        // Arrange: reuse the command-prune setup so the report has both
+        // applied (`current`) and removed (`gone-cmd`) entries to
+        // render under each agent. The kind under test here is the
+        // report rendering, not the prune path itself — `command` is
+        // sufficient since the report code is uniform across kinds.
+        seedCurrentCommandSource();
+        arrangeStaleCommand();
+        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv();
+
+        // Act
+        await runCLI({
+          argv: ['sync'],
+          ...cliOptions,
+        });
+
+        // The full report is emitted as a single `logInfo` line. Chalk
+        // (level 3) only wraps individual tokens, not whole lines, so
+        // raw substring + per-line regex assertions still work without
+        // stripping ANSI.
+        const stdout = stdoutMessages.join('');
+
+        // Assert: the pruned entry name and the "removed" label both
+        // appear, on the SAME line (rendered as
+        // `    - <name> (<changeType>)`), so we can be sure `gone-cmd`
+        // was reported as removed and not e.g. installed.
+        expect(stdout).toMatch(/gone-cmd[^\n]*removed/);
+
+        // Assert: both agent labels appear in the report — the pruned
+        // entry was tracked in both Copilot and Cursor manifest entries,
+        // so each agent section should render its own "removed" line.
+        expect(stdout).toContain('Copilot');
+        expect(stdout).toContain('Cursor');
+
+        // Assert: clean run.
+        expect(stderrMessages).toEqual([]);
+      });
     });
 
     describe('change-type detection', () => {
