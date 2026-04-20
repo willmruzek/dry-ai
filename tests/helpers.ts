@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
+import type fs from 'fs-extra';
+import type os from 'node:os';
 import { simpleGit } from 'simple-git';
 import { vi } from 'vitest';
-import type { Mock } from 'vitest';
+import type { MockedObject } from 'vitest';
 import { type CLIOptions, type StdioWriters } from '../src/cli.js';
 
 // ---- Types ----
@@ -33,31 +36,31 @@ export type MockFileSystemState = {
   tempDirectories: string[];
 };
 
-export type MockedFsObject = {
-  copy: Mock;
-  ensureDir: Mock;
-  mkdtemp: Mock;
-  move: Mock;
-  pathExists: Mock;
-  readFile: Mock;
-  readdir: Mock;
-  remove: Mock;
-  stat: Mock;
-  writeFile: Mock;
-};
+export type MockedFsObject = MockedObject<
+  Pick<
+    typeof fs,
+    | 'copy'
+    | 'emptyDir'
+    | 'ensureDir'
+    | 'mkdtemp'
+    | 'move'
+    | 'pathExists'
+    | 'readFile'
+    | 'readdir'
+    | 'remove'
+    | 'stat'
+    | 'writeFile'
+  >
+>;
 
-export type MockedGitObject = {
-  addRemote: Mock;
-  checkout: Mock;
-  fetch: Mock;
-  init: Mock;
-  revparse: Mock;
-};
+export type MockedGitObject = MockedObject<
+  Pick<
+    ReturnType<typeof simpleGit>,
+    'addRemote' | 'checkout' | 'fetch' | 'init' | 'revparse'
+  >
+>;
 
-export type MockedOsObject = {
-  homedir: Mock;
-  tmpdir: Mock;
-};
+export type MockedOsObject = MockedObject<Pick<typeof os, 'homedir' | 'tmpdir'>>;
 
 export type TestEnv = {
   defaultConfigRoot: string;
@@ -370,6 +373,39 @@ export function removeMockPath(
 }
 
 /**
+ * Clears every descendant of one directory while keeping the directory itself.
+ * Matches `fs-extra.emptyDir` semantics: if the directory does not exist yet,
+ * it is created.
+ */
+export function emptyMockDirectory(
+  state: MockFileSystemState,
+  directoryPath: string,
+): void {
+  const normalizedDirectoryPath = normalizeMockPath(directoryPath);
+
+  for (const existingFilePath of [...state.files.keys()]) {
+    if (
+      existingFilePath !== normalizedDirectoryPath &&
+      isSameOrDescendantPath(normalizedDirectoryPath, existingFilePath)
+    ) {
+      state.files.delete(existingFilePath);
+    }
+  }
+
+  for (const existingDirectory of [...state.directories]) {
+    if (
+      existingDirectory !== normalizedDirectoryPath &&
+      existingDirectory !== '/' &&
+      isSameOrDescendantPath(normalizedDirectoryPath, existingDirectory)
+    ) {
+      state.directories.delete(existingDirectory);
+    }
+  }
+
+  ensureMockDirectory(state, normalizedDirectoryPath);
+}
+
+/**
  * Copies one file or directory subtree within the mock filesystem.
  */
 export function copyMockPath(
@@ -483,15 +519,17 @@ export function configureMockFileSystem(
   );
 
   mockedFs.readFile.mockImplementation(
-    async (filePath: string, encoding?: BufferEncoding) => {
+    // fs.readFile has many overloads; narrow here and cast once.
+    (async (filePath: string, encoding?: BufferEncoding) => {
       const content = readMockTextFile(state, filePath);
 
       return encoding === 'utf8' ? content : Buffer.from(content, 'utf8');
-    },
+    }) as unknown as typeof fs.readFile,
   );
 
   mockedFs.writeFile.mockImplementation(
-    async (filePath: string, content: string | Uint8Array) => {
+    // fs.writeFile has many overloads; narrow here and cast once.
+    (async (filePath: string, content: string | Uint8Array) => {
       const normalizedFilePath = normalizeMockPath(filePath);
       const parentDirectoryPath = path.dirname(normalizedFilePath);
 
@@ -514,7 +552,7 @@ export function configureMockFileSystem(
       ) {
         state.lockfileWrites.push(textContent);
       }
-    },
+    }) as unknown as typeof fs.writeFile,
   );
 
   mockedFs.mkdtemp.mockImplementation(async (prefix: string) => {
@@ -528,7 +566,8 @@ export function configureMockFileSystem(
   });
 
   mockedFs.readdir.mockImplementation(
-    async (
+    // fs.readdir has many overloads; narrow here and cast once.
+    (async (
       directoryPath: string,
       readdirOptions?: { withFileTypes?: boolean },
     ) => {
@@ -537,11 +576,13 @@ export function configureMockFileSystem(
       return readdirOptions?.withFileTypes
         ? directoryEntries
         : directoryEntries.map((directoryEntry) => directoryEntry.name);
-    },
+    }) as unknown as typeof fs.readdir,
   );
 
-  mockedFs.stat.mockImplementation(async (targetPath: string) =>
-    getMockStatResult(state, targetPath),
+  mockedFs.stat.mockImplementation(
+    // fs.stat has many overloads; narrow here and cast once.
+    (async (targetPath: string) =>
+      getMockStatResult(state, targetPath)) as unknown as typeof fs.stat,
   );
 
   mockedFs.copy.mockImplementation(
@@ -551,17 +592,22 @@ export function configureMockFileSystem(
   );
 
   mockedFs.move.mockImplementation(
-    async (
+    // fs.move's MoveOptions is stricter than we need here; cast once.
+    (async (
       sourcePath: string,
       destinationPath: string,
       moveOptions?: { overwrite?: boolean },
     ) => {
       moveMockPath(state, sourcePath, destinationPath, moveOptions?.overwrite);
-    },
+    }) as unknown as typeof fs.move,
   );
 
   mockedFs.remove.mockImplementation(async (targetPath: string) => {
     removeMockPath(state, targetPath);
+  });
+
+  mockedFs.emptyDir.mockImplementation(async (directoryPath: string) => {
+    emptyMockDirectory(state, directoryPath);
   });
 }
 
@@ -577,17 +623,53 @@ export function configureMockOs(
 }
 
 /**
+ * Creates one fresh set of `vi.fn()` stubs shaped like the subset of
+ * `simple-git`'s chain that `cloneRemoteRepo` uses. Pair with
+ * `configureMockGitClient` to wire the stubs into the mocked `simpleGit(...)`
+ * factory.
+ *
+ * @example
+ * const mockedGit = createMockedGit();
+ * configureMockGitClient(mockedGit, { fetchedCommit: 'abc123' });
+ */
+export function createMockedGit(): MockedGitObject {
+  return {
+    addRemote: vi.fn(),
+    checkout: vi.fn(),
+    fetch: vi.fn(),
+    init: vi.fn(),
+    revparse: vi.fn(),
+  } as unknown as MockedGitObject;
+}
+
+/**
  * Configures the simple-git mock factory and the git client used by cloneRemoteRepo.
  */
 export function configureMockGitClient(
   mockedGit: MockedGitObject,
   { fetchedCommit }: { fetchedCommit: string },
 ): void {
-  mockedGit.init.mockResolvedValue(undefined);
-  mockedGit.addRemote.mockResolvedValue(undefined);
-  mockedGit.fetch.mockResolvedValue(undefined);
-  mockedGit.checkout.mockResolvedValue(undefined);
-  mockedGit.revparse.mockResolvedValue(fetchedCommit);
+  // The real simple-git methods resolve to richer types (InitResult,
+  // FetchResult, string, etc.); our mocks only need to no-op, so cast once.
+  type AwaitedReturn<T extends (...args: never[]) => unknown> = Awaited<
+    ReturnType<T>
+  >;
+
+  mockedGit.init.mockResolvedValue(
+    undefined as unknown as AwaitedReturn<typeof mockedGit.init>,
+  );
+  mockedGit.addRemote.mockResolvedValue(
+    undefined as unknown as AwaitedReturn<typeof mockedGit.addRemote>,
+  );
+  mockedGit.fetch.mockResolvedValue(
+    undefined as unknown as AwaitedReturn<typeof mockedGit.fetch>,
+  );
+  mockedGit.checkout.mockResolvedValue(
+    undefined as unknown as AwaitedReturn<typeof mockedGit.checkout>,
+  );
+  mockedGit.revparse.mockResolvedValue(
+    fetchedCommit as unknown as AwaitedReturn<typeof mockedGit.revparse>,
+  );
 
   // Cast needed because we only stub the methods exercised by cloneRemoteRepo.
   vi.mocked(simpleGit).mockImplementation(
@@ -600,5 +682,137 @@ export function configureMockGitClient(
         revparse: mockedGit.revparse,
       }) as unknown as ReturnType<typeof simpleGit>,
   );
+}
+
+// ---- Shared skill fixture constants ----
+
+/**
+ * Virtual `$HOME` directory returned by the mocked `os.homedir()`. Tests use
+ * this as the anchor for the default config/output root paths that the CLI
+ * derives when no `--config-root`/`--output-root` flags are passed.
+ */
+export const VIRTUAL_HOME_DIR = '/virtual/home';
+
+/**
+ * The default config root the CLI resolves to from `VIRTUAL_HOME_DIR` when no
+ * `--config-root` flag is passed. Mirrors the real
+ * `~/.config/dryai` layout.
+ */
+export const DEFAULT_CONFIG_ROOT = path.join(
+  VIRTUAL_HOME_DIR,
+  '.config',
+  'dryai',
+);
+
+/**
+ * Skills lockfile path under the default config root.
+ */
+export const DEFAULT_SKILLS_LOCKFILE_PATH = path.join(
+  DEFAULT_CONFIG_ROOT,
+  'skills.lock.json',
+);
+
+/**
+ * Skills source directory under the default config root; holds the per-skill
+ * on-disk directories managed by `skills add` / `skills update*`.
+ */
+export const DEFAULT_SKILLS_SOURCE_ROOT = path.join(
+  DEFAULT_CONFIG_ROOT,
+  'skills',
+);
+
+/**
+ * Sample ISO-8601 timestamp for seeded `importedAt` / initial `updatedAt`
+ * lockfile fields. Tests that pin `vi.setSystemTime` to a later date can use
+ * this as a distinct "previous import time" fixture.
+ */
+export const SAMPLE_IMPORTED_AT = '2026-04-14T00:00:00.000Z';
+
+/**
+ * Sample normalized repository URL (HTTPS, with trailing `.git`) that
+ * `normalizeRemoteRepo` would produce for the `anthropics/skills` shorthand.
+ */
+export const SAMPLE_NORMALIZED_REPO = 'https://github.com/anthropics/skills.git';
+
+// ---- Shared skill fixture helpers ----
+
+/**
+ * Computes the SHA-256 hash map for one skill's file set, keyed by portable
+ * relative path (forward slashes) and sorted alphabetically by path.
+ *
+ * Mirrors what `computeDirectoryHashes` writes into the lockfile's
+ * per-skill `files` record, so tests can construct expected lockfile entries
+ * directly from their fixture content without hard-coding hex digests.
+ */
+export function hashFileSet(
+  files: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(files)
+      .map(
+        ([filePath, content]) =>
+          [
+            filePath,
+            createHash('sha256').update(content).digest('hex'),
+          ] as const,
+      )
+      .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath)),
+  );
+}
+
+/**
+ * Seeds one managed skill's on-disk directory into the mock filesystem under
+ * an arbitrary skills source root.
+ *
+ * @example
+ * seedLocalSkillDirectory(state, DEFAULT_SKILLS_SOURCE_ROOT, 'note-taker', {
+ *   'SKILL.md': '...',
+ *   'rules.md': '...',
+ * });
+ */
+export function seedLocalSkillDirectory(
+  state: MockFileSystemState,
+  skillsSourceRoot: string,
+  skillName: string,
+  files: Record<string, string>,
+): void {
+  for (const [relativeFilePath, content] of Object.entries(files)) {
+    storeMockTextFile(
+      state,
+      path.join(skillsSourceRoot, skillName, relativeFilePath),
+      content,
+    );
+  }
+}
+
+/**
+ * Seeds one skill's fixture files into a freshly cloned remote-checkout
+ * directory at the repository-relative `skillPath`.
+ *
+ * Callers loop over this helper when they need to populate multiple skills
+ * into the same checkout (e.g. a single `skills update-all` run clones each
+ * managed skill's repo once).
+ *
+ * @example
+ * seedRemoteSkillCheckout(state, checkoutDir, 'skills/note-taker', {
+ *   'SKILL.md': '...',
+ * });
+ */
+export function seedRemoteSkillCheckout(
+  state: MockFileSystemState,
+  checkoutDir: string,
+  skillPath: string,
+  files: Record<string, string>,
+): void {
+  const remoteSkillDir = path.join(checkoutDir, skillPath);
+  ensureMockDirectory(state, remoteSkillDir);
+
+  for (const [relativeFilePath, content] of Object.entries(files)) {
+    storeMockTextFile(
+      state,
+      path.join(remoteSkillDir, relativeFilePath),
+      content,
+    );
+  }
 }
 
