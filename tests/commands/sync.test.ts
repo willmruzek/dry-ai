@@ -50,6 +50,14 @@ const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
 
+/**
+ * Strips chalk's ANSI CSI escape codes (e.g. `\x1B[1m`) from a string
+ * so report assertions can focus on structure rather than baking
+ * chalk's styling bytes into the expected output.
+ */
+const stripAnsi = (text: string): string =>
+  text.replace(/\x1B\[[0-9;]*m/g, '');
+
 describe('dry-ai sync', () => {
   let mockFileSystem: MockFileSystemState;
 
@@ -90,11 +98,16 @@ describe('dry-ai sync', () => {
 
   describe('happy paths', () => {
     describe('basic sync', () => {
-      it('writes commands, rules, and skills into every supported agent target', async () => {
-        // Arrange: seed one command, one rule, and one skill under the
-        // default config root. Use distinct names for command and skill so
-        // they don't collide on `.cursor/skills/<name>/SKILL.md` (the
-        // Cursor command output path is skill-shaped).
+      /**
+       * Seeds the standard trio (one command, rule, and skill) under the
+       * default config root so a baseline `dry-ai sync` has exactly one
+       * item per kind to render. Distinct names (`my-cmd`, `my-rule`,
+       * `my-skill`) avoid path collisions across agent targets (the
+       * Cursor command output is skill-shaped at
+       * `.cursor/skills/<name>/SKILL.md`) and let report-grouping
+       * assertions verify name-per-kind placement.
+       */
+      function arrangeBasicSources(): void {
         storeMockTextFile(
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'commands', 'my-cmd.md'),
@@ -130,6 +143,49 @@ describe('dry-ai sync', () => {
           path.join(DEFAULT_CONFIG_ROOT, 'skills', 'my-skill', 'SKILL.md'),
           '# My Skill\n',
         );
+      }
+
+      /**
+       * The six per-agent output paths `arrangeBasicSources()` produces
+       * on a clean sync — two agents × (command + rule + skill). Used by
+       * the "writes files to target roots" assertion and by the
+       * "(updated)" report test, which pre-seeds each of these paths to
+       * flip the sync change type from `installed` to `updated`.
+       */
+      const basicOutputPaths = [
+        // Command → Copilot (markdown prompt file).
+        path.join(VIRTUAL_HOME_DIR, '.copilot', 'prompts', 'my-cmd.prompt.md'),
+        // Command → Cursor (skill-style SKILL.md).
+        path.join(VIRTUAL_HOME_DIR, '.cursor', 'skills', 'my-cmd', 'SKILL.md'),
+        // Rule → Copilot (`.instructions.md` file).
+        path.join(
+          VIRTUAL_HOME_DIR,
+          '.copilot',
+          'instructions',
+          'my-rule.instructions.md',
+        ),
+        // Rule → Cursor (`.mdc` file).
+        path.join(VIRTUAL_HOME_DIR, '.cursor', 'rules', 'my-rule.mdc'),
+        // Skill → Copilot (directory copy of the source SKILL.md).
+        path.join(
+          VIRTUAL_HOME_DIR,
+          '.copilot',
+          'skills',
+          'my-skill',
+          'SKILL.md',
+        ),
+        // Skill → Cursor (directory copy of the source SKILL.md).
+        path.join(
+          VIRTUAL_HOME_DIR,
+          '.cursor',
+          'skills',
+          'my-skill',
+          'SKILL.md',
+        ),
+      ];
+
+      it('writes commands, rules, and skills into every supported agent target', async () => {
+        arrangeBasicSources();
 
         const { cliOptions, stderrMessages } = createTestEnv();
 
@@ -146,50 +202,7 @@ describe('dry-ai sync', () => {
         // Assert: every rendered output file landed at its expected
         // per-agent target path — covering all 3 item kinds × both
         // supported agents (Copilot + Cursor).
-        const expectedOutputFiles = [
-          // Command → Copilot (markdown prompt file).
-          path.join(
-            VIRTUAL_HOME_DIR,
-            '.copilot',
-            'prompts',
-            'my-cmd.prompt.md',
-          ),
-          // Command → Cursor (skill-style SKILL.md).
-          path.join(
-            VIRTUAL_HOME_DIR,
-            '.cursor',
-            'skills',
-            'my-cmd',
-            'SKILL.md',
-          ),
-          // Rule → Copilot (`.instructions.md` file).
-          path.join(
-            VIRTUAL_HOME_DIR,
-            '.copilot',
-            'instructions',
-            'my-rule.instructions.md',
-          ),
-          // Rule → Cursor (`.mdc` file).
-          path.join(VIRTUAL_HOME_DIR, '.cursor', 'rules', 'my-rule.mdc'),
-          // Skill → Copilot (directory copy of the source SKILL.md).
-          path.join(
-            VIRTUAL_HOME_DIR,
-            '.copilot',
-            'skills',
-            'my-skill',
-            'SKILL.md',
-          ),
-          // Skill → Cursor (directory copy of the source SKILL.md).
-          path.join(
-            VIRTUAL_HOME_DIR,
-            '.cursor',
-            'skills',
-            'my-skill',
-            'SKILL.md',
-          ),
-        ];
-
-        for (const outputPath of expectedOutputFiles) {
+        for (const outputPath of basicOutputPaths) {
           expect(mockFileSystem.files.has(outputPath)).toBe(true);
         }
       });
@@ -202,10 +215,219 @@ describe('dry-ai sync', () => {
       // priority: med
       it.todo('prints the resolved output root when --test was provided');
 
-      // priority: high
-      it.todo(
-        'renders a per-agent "Applied changes:" report that groups commands, rules, and skills under each agent label',
-      );
+      describe('sync report', () => {
+        it('groups items by agent and item kind under the "Applied changes:" heading', async () => {
+          // Arrange: fresh trio means each item renders once per agent,
+          // letting us verify the header, agent ordering, and
+          // kind-per-agent grouping without also pinning down the
+          // change-type label (covered by the sibling tests below).
+          arrangeBasicSources();
+
+          const { cliOptions, stdoutMessages, stderrMessages } =
+            createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          const report = stripAnsi(stdoutMessages.join(''));
+
+          // Sanity: top-level heading renders and no warnings fired.
+          expect(report).toContain('Applied changes:');
+          expect(stderrMessages).toEqual([]);
+
+          // Agent sections render in registry definition order
+          // (Copilot → Cursor). Slicing between the two agent headings
+          // yields a clean per-agent block.
+          const copilotStart = report.indexOf('- Copilot');
+          const cursorStart = report.indexOf('- Cursor');
+          expect(copilotStart).toBeGreaterThan(-1);
+          expect(cursorStart).toBeGreaterThan(copilotStart);
+
+          // Within each agent block, kind headings render in
+          // commands → rules → skills order, and each item name appears
+          // under its own kind heading. Catches regressions that
+          // mis-group items across sections.
+          for (const section of [
+            report.slice(copilotStart, cursorStart),
+            report.slice(cursorStart),
+          ]) {
+            const commandsIdx = section.indexOf('* commands');
+            const rulesIdx = section.indexOf('* rules');
+            const skillsIdx = section.indexOf('* skills');
+
+            expect(commandsIdx).toBeGreaterThan(-1);
+            expect(rulesIdx).toBeGreaterThan(commandsIdx);
+            expect(skillsIdx).toBeGreaterThan(rulesIdx);
+
+            expect(section.slice(commandsIdx, rulesIdx)).toContain('my-cmd');
+            expect(section.slice(rulesIdx, skillsIdx)).toContain('my-rule');
+            expect(section.slice(skillsIdx)).toContain('my-skill');
+          }
+        });
+
+        it('tags newly-written items with change-type "(installed)"', async () => {
+          // Arrange: fresh sources, no pre-existing outputs. Every
+          // write is a new file, so the report should tag every item
+          // `(installed)` (see `changeType` assignment in
+          // `src/lib/sync.ts`).
+          arrangeBasicSources();
+
+          const { cliOptions, stdoutMessages, stderrMessages } =
+            createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          const report = stripAnsi(stdoutMessages.join(''));
+
+          expect(report).toMatch(/my-cmd \(installed\)/);
+          expect(report).toMatch(/my-rule \(installed\)/);
+          expect(report).toMatch(/my-skill \(installed\)/);
+
+          // Guard against false positives: no applied item should be
+          // reported as `updated` when all outputs are brand-new.
+          expect(report).not.toMatch(/my-cmd \(updated\)/);
+          expect(report).not.toMatch(/my-rule \(updated\)/);
+          expect(report).not.toMatch(/my-skill \(updated\)/);
+
+          expect(stderrMessages).toEqual([]);
+        });
+
+        it('tags items whose outputs already existed with change-type "(updated)"', async () => {
+          // Arrange: same sources as the `(installed)` case, but
+          // pre-seed every target-root output on disk. Sync branches
+          // to `updated` when the output path already exists (see
+          // `changeType` assignment in `src/lib/sync.ts`).
+          arrangeBasicSources();
+
+          for (const outputPath of basicOutputPaths) {
+            storeMockTextFile(mockFileSystem, outputPath, '# pre-existing\n');
+          }
+
+          const { cliOptions, stdoutMessages, stderrMessages } =
+            createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          const report = stripAnsi(stdoutMessages.join(''));
+
+          expect(report).toMatch(/my-cmd \(updated\)/);
+          expect(report).toMatch(/my-rule \(updated\)/);
+          expect(report).toMatch(/my-skill \(updated\)/);
+
+          // Guard: nothing should be tagged `installed` when every
+          // output pre-existed.
+          expect(report).not.toMatch(/my-cmd \(installed\)/);
+          expect(report).not.toMatch(/my-rule \(installed\)/);
+          expect(report).not.toMatch(/my-skill \(installed\)/);
+
+          expect(stderrMessages).toEqual([]);
+        });
+
+        it('tags pruned items with change-type "(removed)"', async () => {
+          // Arrange: no current sources. Prior manifest claims an
+          // earlier sync wrote `gone-cmd` outputs for both agents;
+          // since those sources are gone, the prune path turns every
+          // manifest entry into a removal (see `removeStaleOutputs` in
+          // `src/lib/sync.ts`).
+          //
+          // Kept here (alongside `installed`/`updated`) so the full
+          // change-type label vocabulary is co-located in one describe.
+          // The pruning suite's equivalent test covers the same shape
+          // from the prune path's POV.
+          const copilotOutputPath = path.join(
+            VIRTUAL_HOME_DIR,
+            '.copilot',
+            'prompts',
+            'gone-cmd.prompt.md',
+          );
+          const cursorOutputPath = path.join(
+            VIRTUAL_HOME_DIR,
+            '.cursor',
+            'skills',
+            'gone-cmd',
+            'SKILL.md',
+          );
+
+          storeMockTextFile(
+            mockFileSystem,
+            copilotOutputPath,
+            '# stale prompt\n',
+          );
+          storeMockTextFile(
+            mockFileSystem,
+            cursorOutputPath,
+            '# stale skill\n',
+          );
+
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            JSON.stringify({
+              version: 2,
+              outputs: [
+                {
+                  agent: 'copilot',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: copilotOutputPath,
+                },
+                {
+                  agent: 'cursor',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: cursorOutputPath,
+                },
+              ],
+            }),
+          );
+
+          const { cliOptions, stdoutMessages, stderrMessages } =
+            createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          const report = stripAnsi(stdoutMessages.join(''));
+
+          // Both agents tracked `gone-cmd`, so each agent section
+          // should render its own `(removed)` line for it.
+          const removedMatches = report.match(/gone-cmd \(removed\)/g) ?? [];
+          expect(removedMatches).toHaveLength(2);
+
+          expect(stderrMessages).toEqual([]);
+        });
+
+        it('reports "Skipped conflicts: None" when no conflicts were encountered', async () => {
+          // Arrange: baseline sources + no pre-existing conflicts
+          // means nothing gets skipped. The report should close with
+          // the `None` footer branch (see `renderSyncReport` in
+          // `src/lib/sync.ts`).
+          arrangeBasicSources();
+
+          const { cliOptions, stdoutMessages, stderrMessages } =
+            createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          const report = stripAnsi(stdoutMessages.join(''));
+
+          expect(report).toContain('Skipped conflicts: None');
+          expect(stderrMessages).toEqual([]);
+        });
+      });
     });
 
     describe('partial configs', () => {
