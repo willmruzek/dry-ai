@@ -1,6 +1,7 @@
 import { Chalk } from 'chalk';
 import fs from 'fs-extra';
 import { glob } from 'glob';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import type { CLIRuntime } from '../cli.js';
@@ -29,8 +30,9 @@ import {
   ruleFrontmatterSchema,
   validateFrontmatter,
 } from './frontmatter.js';
+import { computeDirectoryHashes } from './skills.js';
 
-type SyncAppliedChangeType = 'installed' | 'updated';
+type SyncAppliedChangeType = 'installed' | 'updated' | 'unchanged';
 type SyncChangeType = SyncAppliedChangeType | 'removed';
 
 const chalk = new Chalk({ level: 3 });
@@ -47,10 +49,11 @@ const syncManifestEntrySchema = z.object({
   kind: z.enum(SYNC_ITEM_KINDS),
   name: z.string().min(1),
   outputPath: z.string().min(1),
+  contentHash: z.string().min(1),
 });
 
 const syncManifestSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(3),
   outputs: z.array(syncManifestEntrySchema),
 });
 
@@ -62,8 +65,10 @@ type SyncItem = {
 };
 
 type ItemSyncChange = {
+  target: SyncTarget;
   agent: SyncAgent;
   changeType: SyncAppliedChangeType;
+  contentHash: string;
 };
 
 type AppliedSyncItem = {
@@ -112,6 +117,11 @@ export async function syncToTargets(
   await ensureTargetDirectories(targetRoots);
 
   const previousManifest = await loadSyncManifest(context.syncManifestPath);
+  const previousEntriesByOutputPath = new Map(
+    previousManifest.outputs.map(
+      (entry) => [entry.outputPath, entry] as const,
+    ),
+  );
   const syncItems = [
     ...(await collectCommandSyncItems(context, runtime)),
     ...(await collectRuleSyncItems(context, runtime)),
@@ -120,9 +130,10 @@ export async function syncToTargets(
   const { syncableItems, skippedItems } =
     collectConflictFilterResult(syncItems);
   const skippedOwnershipKeys = collectSkippedOwnershipKeys(skippedItems);
-  const desiredManifestEntries = collectManifestEntries(syncableItems);
   const desiredOutputPaths = new Set(
-    desiredManifestEntries.map((entry) => entry.outputPath),
+    syncableItems.flatMap((syncItem) =>
+      syncItem.targets.map((target) => target.outputPath),
+    ),
   );
   const removedEntries = collectRemovedManifestEntries(
     previousManifest.outputs,
@@ -137,9 +148,12 @@ export async function syncToTargets(
   const appliedItems: AppliedSyncItem[] = [];
 
   for (const syncItem of syncableItems) {
-    appliedItems.push(await applySyncItem(syncItem));
+    appliedItems.push(
+      await applySyncItem(syncItem, previousEntriesByOutputPath),
+    );
   }
 
+  const desiredManifestEntries = collectManifestEntriesFromApplied(appliedItems);
   const preservedEntries = collectPreservedManifestEntries(
     previousManifest.outputs,
     {
@@ -191,17 +205,30 @@ async function ensureTargetDirectories(
 }
 
 /**
- * Reads the sync manifest from disk, or returns an empty manifest if none exists yet.
+ * Reads the sync manifest from disk, or returns an empty manifest if none
+ * exists yet. Any failure to read, parse, or validate (including reading a
+ * manifest from an older version of the schema) falls back to an empty
+ * manifest, which causes the next sync to re-report every current output
+ * as `(installed)` instead of `(unchanged)`.
  */
 async function loadSyncManifest(manifestPath: string): Promise<SyncManifest> {
   if (!(await fs.pathExists(manifestPath))) {
     return createSyncManifest([]);
   }
 
-  const rawManifest = await fs.readFile(manifestPath, 'utf8');
-  const parsedManifest: unknown = JSON.parse(rawManifest);
+  try {
+    const rawManifest = await fs.readFile(manifestPath, 'utf8');
+    const parsedManifest: unknown = JSON.parse(rawManifest);
+    const result = syncManifestSchema.safeParse(parsedManifest);
 
-  return syncManifestSchema.parse(parsedManifest);
+    if (result.success) {
+      return result.data;
+    }
+  } catch {
+    // Fall through to an empty manifest on any read/parse failure.
+  }
+
+  return createSyncManifest([]);
 }
 
 /**
@@ -230,7 +257,7 @@ function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
   }
 
   return {
-    version: 2,
+    version: 3,
     outputs: [...entriesByOutputPath.values()].sort(compareManifestEntries),
   };
 }
@@ -258,27 +285,89 @@ async function writeMarkdownFile<Metadata extends Record<string, unknown>>(
 }
 
 /**
- * Detects whether each agent target for one item will be installed or updated.
+ * Computes a content hash for one sync target that identifies the bytes
+ * that WOULD be written on the next sync. Markdown targets hash the exact
+ * rendered output (frontmatter + body). Directory targets hash a sorted,
+ * serialized snapshot of per-file SHA-256 hashes under the source
+ * directory. The hash is stable across runs as long as the effective
+ * content is unchanged, and is used to detect the `unchanged` branch.
  */
-async function detectSyncChanges(
-  syncItem: SyncItem,
-): Promise<ItemSyncChange[]> {
-  return Promise.all(
-    syncItem.targets.map(async (target) => ({
-      agent: parseSyncAgent(target.agent),
-      changeType: (await fs.pathExists(target.outputPath))
-        ? 'updated'
-        : 'installed',
-    })),
+async function computeTargetContentHash(target: SyncTarget): Promise<string> {
+  if (target.targetType === 'markdown') {
+    const content = renderMarkdown({
+      metadata: target.metadata,
+      body: target.body,
+    });
+    return createHash('sha256').update(content).digest('hex');
+  }
+
+  const fileHashes = await computeDirectoryHashes(target.sourceDir);
+  const serialized = JSON.stringify(
+    Object.entries(fileHashes).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
   );
+  return createHash('sha256').update(serialized).digest('hex');
 }
 
 /**
- * Applies one sync item and records the change type for each agent target.
+ * Determines the applied change type for one target by comparing the
+ * would-be-written hash against the prior manifest entry's hash for the
+ * same `outputPath`.
+ *
+ * - `unchanged`: output exists AND prior manifest entry's hash matches.
+ *   The write is skipped entirely in `applySyncItem`.
+ * - `installed`: output path does not exist on disk.
+ * - `updated`: output exists but no hash match (missing manifest entry
+ *   OR hash mismatch). The file is rewritten.
  */
-async function applySyncItem(syncItem: SyncItem): Promise<AppliedSyncItem> {
-  const changes = await detectSyncChanges(syncItem);
-  await writeSyncItem(syncItem);
+async function detectAppliedChangeType(input: {
+  target: SyncTarget;
+  contentHash: string;
+  previousEntry: SyncManifestEntry | undefined;
+}): Promise<SyncAppliedChangeType> {
+  const outputExists = await fs.pathExists(input.target.outputPath);
+
+  if (outputExists && input.previousEntry?.contentHash === input.contentHash) {
+    return 'unchanged';
+  }
+
+  return outputExists ? 'updated' : 'installed';
+}
+
+/**
+ * Applies one sync item: computes a content hash per target, decides the
+ * applied change type, and writes the output iff the change type is not
+ * `unchanged`.
+ */
+async function applySyncItem(
+  syncItem: SyncItem,
+  previousEntriesByOutputPath: ReadonlyMap<string, SyncManifestEntry>,
+): Promise<AppliedSyncItem> {
+  const changes = await Promise.all(
+    syncItem.targets.map(async (target): Promise<ItemSyncChange> => {
+      const contentHash = await computeTargetContentHash(target);
+      const changeType = await detectAppliedChangeType({
+        target,
+        contentHash,
+        previousEntry: previousEntriesByOutputPath.get(target.outputPath),
+      });
+
+      return {
+        target,
+        agent: parseSyncAgent(target.agent),
+        changeType,
+        contentHash,
+      };
+    }),
+  );
+
+  for (const change of changes) {
+    if (change.changeType === 'unchanged') {
+      continue;
+    }
+    await writeSyncTarget(change.target);
+  }
 
   return {
     item: syncItem,
@@ -296,15 +385,6 @@ async function writeSyncTarget(target: SyncTarget): Promise<void> {
   }
 
   await copyDirectoryContents(target.sourceDir, target.outputPath);
-}
-
-/**
- * Writes one sync item to all of its target outputs.
- */
-async function writeSyncItem(syncItem: SyncItem): Promise<void> {
-  for (const target of syncItem.targets) {
-    await writeSyncTarget(target);
-  }
 }
 
 /**
@@ -552,15 +632,22 @@ function collectSkippedOwnershipKeys(
 }
 
 /**
- * Converts sync items into manifest entries for the current desired outputs.
+ * Converts applied sync items into manifest entries, carrying forward the
+ * `contentHash` computed during apply. Unchanged targets contribute their
+ * prior hash (since `applySyncItem` preserves the already-correct hash
+ * when it skips the write), which keeps the manifest stable across runs
+ * that don't modify anything.
  */
-function collectManifestEntries(syncItems: SyncItem[]): SyncManifestEntry[] {
-  return syncItems.flatMap((syncItem) =>
-    syncItem.targets.map((target) => ({
-      agent: parseSyncAgent(target.agent),
-      kind: syncItem.kind,
-      name: syncItem.name,
-      outputPath: target.outputPath,
+function collectManifestEntriesFromApplied(
+  appliedItems: AppliedSyncItem[],
+): SyncManifestEntry[] {
+  return appliedItems.flatMap((appliedItem) =>
+    appliedItem.changes.map((change) => ({
+      agent: change.agent,
+      kind: appliedItem.item.kind,
+      name: appliedItem.item.name,
+      outputPath: change.target.outputPath,
+      contentHash: change.contentHash,
     })),
   );
 }
@@ -620,16 +707,19 @@ function renderSyncReport(
   removedEntries: SyncManifestEntry[],
   skippedItems: SkippedSyncItem[],
 ): string {
-  const sections = [chalk.bold.cyan('Applied changes:')];
+  const agentSections = SYNC_AGENTS.map((agent) =>
+    renderAgentSyncSection(
+      getAgentLabel(agent),
+      collectAgentReportedSyncChanges(appliedItems, removedEntries, agent),
+    ),
+  ).filter((section): section is string => section !== undefined);
 
-  for (const agent of SYNC_AGENTS) {
-    sections.push(
-      renderAgentSyncSection(
-        getAgentLabel(agent),
-        collectAgentReportedSyncChanges(appliedItems, removedEntries, agent),
-      ),
-    );
-  }
+  const sections =
+    agentSections.length === 0
+      ? [
+          `${chalk.bold.cyan('Applied changes:')} ${chalk.green('None')}`,
+        ]
+      : [chalk.bold.cyan('Applied changes:'), ...agentSections];
 
   if (skippedItems.length === 0) {
     sections.push(
@@ -667,7 +757,10 @@ function collectAgentReportedSyncChanges(
 ): ReportedAgentSyncChange[] {
   const appliedChanges = appliedItems.flatMap((appliedItem) =>
     appliedItem.changes
-      .filter((change) => change.agent === agent)
+      .filter(
+        (change) =>
+          change.agent === agent && change.changeType !== 'unchanged',
+      )
       .map((change) => ({
         kind: appliedItem.item.kind,
         name: appliedItem.item.name,
@@ -687,16 +780,22 @@ function collectAgentReportedSyncChanges(
 
 /**
  * Renders the synced items for one agent grouped by item kind.
+ * Returns `undefined` when there is nothing to report for this agent
+ * (so empty agent headings are omitted from the summary).
  */
 function renderAgentSyncSection(
   agentLabel: string,
   reportedChanges: ReportedAgentSyncChange[],
-): string {
+): string | undefined {
   const kindSections = [
     renderKindSyncLine('commands', 'command', reportedChanges),
     renderKindSyncLine('rules', 'rule', reportedChanges),
     renderKindSyncLine('skills', 'skill', reportedChanges),
   ].filter((section) => section !== undefined);
+
+  if (kindSections.length === 0) {
+    return undefined;
+  }
 
   return [`- ${colorAgentLabel(agentLabel)}`, ...kindSections].join('\n');
 }

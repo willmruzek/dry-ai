@@ -331,6 +331,51 @@ describe('dry-ai sync', () => {
           expect(stderrMessages).toEqual([]);
         });
 
+        it('omits items whose content matches the prior manifest hash (unchanged) from the report on repeat runs', async () => {
+          // Arrange: baseline sources. First sync populates the manifest
+          // with a `contentHash` per target.
+          arrangeBasicSources();
+
+          const { cliOptions, stdoutMessages, stderrMessages } =
+            createTestEnv();
+
+          // Act 1: first sync writes every target and records hashes.
+          // Discard its output so the second run's report is easy to
+          // assert against in isolation.
+          await runCLI({ argv: ['sync'], ...cliOptions });
+          stdoutMessages.length = 0;
+          stderrMessages.length = 0;
+
+          // Act 2: nothing changed on disk or in sources. Every target's
+          // would-be-written hash matches the prior manifest entry, so
+          // `detectAppliedChangeType` returns `unchanged` and
+          // `collectAgentReportedSyncChanges` filters these items out
+          // (see `src/lib/sync.ts`).
+          await runCLI({ argv: ['sync'], ...cliOptions });
+
+          const report = stripAnsi(stdoutMessages.join(''));
+
+          // No-op sync: every agent section is empty, so the report uses
+          // the `Applied changes: None` branch (see `renderSyncReport`).
+          expect(report).toContain('Applied changes: None');
+          expect(report).not.toContain('- Copilot');
+          expect(report).not.toContain('- Cursor');
+          expect(stderrMessages).toEqual([]);
+
+          // Items that were `installed` on run 1 must NOT appear anywhere
+          // in run 2's report (neither under commands / rules / skills,
+          // nor with any change-type label).
+          expect(report).not.toContain('my-cmd');
+          expect(report).not.toContain('my-rule');
+          expect(report).not.toContain('my-skill');
+
+          // And no applied or removed labels should render at all — no
+          // items to tag since everything is unchanged.
+          expect(report).not.toMatch(/\(installed\)/);
+          expect(report).not.toMatch(/\(updated\)/);
+          expect(report).not.toMatch(/\(removed\)/);
+        });
+
         it('tags pruned items with change-type "(removed)"', async () => {
           // Arrange: no current sources. Prior manifest claims an
           // earlier sync wrote `gone-cmd` outputs for both agents;
@@ -367,23 +412,30 @@ describe('dry-ai sync', () => {
             '# stale skill\n',
           );
 
+          // The `contentHash` on a removed entry is never compared (it
+          // falls into `removedEntries` because no current source claims
+          // `gone-cmd.prompt.md` / `gone-cmd/SKILL.md`), so the values
+          // below are placeholders that satisfy the schema without
+          // pretending to match any real on-disk content.
           storeMockTextFile(
             mockFileSystem,
             path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
             JSON.stringify({
-              version: 2,
+              version: 3,
               outputs: [
                 {
                   agent: 'copilot',
                   kind: 'command',
                   name: 'gone-cmd',
                   outputPath: copilotOutputPath,
+                  contentHash: '0'.repeat(64),
                 },
                 {
                   agent: 'cursor',
                   kind: 'command',
                   name: 'gone-cmd',
                   outputPath: cursorOutputPath,
+                  contentHash: '0'.repeat(64),
                 },
               ],
             }),
@@ -505,7 +557,16 @@ describe('dry-ai sync', () => {
         kind: 'command' | 'rule' | 'skill';
         name: string;
         outputPath: string;
+        contentHash: string;
       };
+
+      /**
+       * Placeholder SHA-256 for prior manifest entries whose hash is
+       * never compared. Stale entries fall into `removedEntries` because
+       * no current source claims their `outputPath`, so the hash only
+       * needs to satisfy the schema's `min(1)` + shape constraint.
+       */
+      const STALE_CONTENT_HASH = '0'.repeat(64);
 
       /**
        * Seeds one current command source (`current.md`) so each prune
@@ -532,7 +593,7 @@ describe('dry-ai sync', () => {
       }
 
       /**
-       * Writes the prior `sync-manifest.json` (version 2) to the config
+       * Writes the prior `sync-manifest.json` (version 3) to the config
        * root with the given stale entries — i.e. entries whose
        * `outputPath` is no longer claimed by any current source, so
        * `collectRemovedManifestEntries` will mark them as orphaned and
@@ -542,7 +603,7 @@ describe('dry-ai sync', () => {
         storeMockTextFile(
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
-          JSON.stringify({ version: 2, outputs: staleEntries }),
+          JSON.stringify({ version: 3, outputs: staleEntries }),
         );
       }
 
@@ -578,12 +639,14 @@ describe('dry-ai sync', () => {
             kind: 'command',
             name: 'gone-cmd',
             outputPath: copilotOutputPath,
+            contentHash: STALE_CONTENT_HASH,
           },
           {
             agent: 'cursor',
             kind: 'command',
             name: 'gone-cmd',
             outputPath: cursorOutputPath,
+            contentHash: STALE_CONTENT_HASH,
           },
         ]);
 
@@ -625,12 +688,14 @@ describe('dry-ai sync', () => {
             kind: 'rule',
             name: 'gone-rule',
             outputPath: copilotOutputPath,
+            contentHash: STALE_CONTENT_HASH,
           },
           {
             agent: 'cursor',
             kind: 'rule',
             name: 'gone-rule',
             outputPath: cursorOutputPath,
+            contentHash: STALE_CONTENT_HASH,
           },
         ]);
 
@@ -684,12 +749,14 @@ describe('dry-ai sync', () => {
             kind: 'skill',
             name: 'gone-skill',
             outputPath: copilotSkillDir,
+            contentHash: STALE_CONTENT_HASH,
           },
           {
             agent: 'cursor',
             kind: 'skill',
             name: 'gone-skill',
             outputPath: cursorSkillDir,
+            contentHash: STALE_CONTENT_HASH,
           },
         ]);
 
