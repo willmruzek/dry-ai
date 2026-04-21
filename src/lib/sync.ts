@@ -344,18 +344,18 @@ async function applySyncItem(
   syncItem: SyncItem,
   previousEntriesByOutputPath: ReadonlyMap<string, SyncManifestEntry>,
 ): Promise<AppliedSyncItem> {
-  const directoryHashBySourceDir = new Map<string, Promise<string>>();
+  const directoryHashCache = new Map<string, Promise<string>>();
 
   const changes = await Promise.all(
     syncItem.targets.map(async (target): Promise<ItemSyncChange> => {
       let contentHash: string;
       if (target.targetType === 'directory') {
-        const cachedHashPromise = directoryHashBySourceDir.get(target.sourceDir);
+        const cachedHashPromise = directoryHashCache.get(target.sourceDir);
         const contentHashPromise =
           cachedHashPromise ?? computeTargetContentHash(target);
 
         if (!cachedHashPromise) {
-          directoryHashBySourceDir.set(target.sourceDir, contentHashPromise);
+          directoryHashCache.set(target.sourceDir, contentHashPromise);
         }
 
         contentHash = await contentHashPromise;
