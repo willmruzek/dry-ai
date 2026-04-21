@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { z } from 'zod';
+
 import { addSkillsCommand } from './commands/skills/index.js';
 import { runSyncCommand } from './commands/sync.js';
 import { describeSupportedAgents } from './lib/agents.js';

@@ -1,7 +1,10 @@
 import os from 'node:os';
+
 import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { runCLI } from '../../../src/cli.js';
+
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,

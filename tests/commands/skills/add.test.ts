@@ -1,8 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
+
 import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { runCLI } from '../../../src/cli.js';
+
 import {
   DEFAULT_CONFIG_ROOT,
   type MockFileSystemState,
