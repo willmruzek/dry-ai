@@ -146,13 +146,16 @@ describe('dry-ai sync', () => {
       }
 
       /**
-       * The six per-agent output paths `arrangeBasicSources()` produces
-       * on a clean sync — two agents × (command + rule + skill). Used by
-       * the "writes files to target roots" assertion and by the
-       * "(updated)" report test, which pre-seeds each of these paths to
-       * flip the sync change type from `installed` to `updated`.
+       * The six concrete written file paths `arrangeBasicSources()`
+       * produces on a clean sync — two agents × (command + rule + skill).
+       * Used by the "writes files to target roots" assertion and by the
+       * "(updated)" report test, which pre-seeds each of these file paths
+       * to flip the sync change type from `installed` to `updated`.
+       *
+       * Note: this is intentionally file-level output, not the target's
+       * `outputPath` (which can be a directory for some targets).
        */
-      const basicOutputPaths = [
+      const basicWrittenFilePaths = [
         // Command → Copilot (markdown prompt file).
         path.join(VIRTUAL_HOME_DIR, '.copilot', 'prompts', 'my-cmd.prompt.md'),
         // Command → Cursor (skill-style SKILL.md).
@@ -202,8 +205,8 @@ describe('dry-ai sync', () => {
         // Assert: every rendered output file landed at its expected
         // per-agent target path — covering all 3 item kinds × both
         // supported agents (Copilot + Cursor).
-        for (const outputPath of basicOutputPaths) {
-          expect(mockFileSystem.files.has(outputPath)).toBe(true);
+        for (const writtenFilePath of basicWrittenFilePaths) {
+          expect(mockFileSystem.files.has(writtenFilePath)).toBe(true);
         }
       });
 
@@ -304,8 +307,12 @@ describe('dry-ai sync', () => {
           // `changeType` assignment in `src/lib/sync.ts`).
           arrangeBasicSources();
 
-          for (const outputPath of basicOutputPaths) {
-            storeMockTextFile(mockFileSystem, outputPath, '# pre-existing\n');
+          for (const writtenFilePath of basicWrittenFilePaths) {
+            storeMockTextFile(
+              mockFileSystem,
+              writtenFilePath,
+              '# pre-existing\n',
+            );
           }
 
           const { cliOptions, stdoutMessages, stderrMessages } =
