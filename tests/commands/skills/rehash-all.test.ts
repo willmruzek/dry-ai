@@ -71,7 +71,7 @@ vi.mock('node:os', () => ({
 const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
-describe('dryai skills rehash-all', () => {
+describe('dry-ai skills rehash-all', () => {
   let mockFileSystem: MockFileSystemState;
 
   beforeEach(() => {
@@ -256,7 +256,7 @@ describe('dryai skills rehash-all', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai skills rehash-all" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai skills rehash-all" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     // priority: low

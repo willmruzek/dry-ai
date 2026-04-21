@@ -1,6 +1,6 @@
 # Share AI config CLI
 
-Syncs command, rule, and skill sources from `~/.config/dryai` by default into supported agent targets.
+Syncs command, rule, and skill sources from `~/.config/dry-ai` by default into supported agent targets.
 
 Global CLI options:
 
@@ -29,7 +29,7 @@ The current built-in agent config writes live output to these default roots:
 One config root can contain all three source types:
 
 ```text
-~/.config/dryai/
+~/.config/dry-ai/
 ├── commands/
 │   └── gen-commit-msg.md
 ├── rules/
@@ -48,7 +48,7 @@ See VS Code editor setup note below.
 - Purpose: Sync commands, rules, and skills from the selected config root into the configured agent target directories.
 - Input roots: Reads from `commands`, `rules`, and `skills` under the selected config root.
 - Output roots: Writes to the live output paths listed in Config Layout by default.
-- Pruning: Removes stale dryai-managed outputs that were written by earlier sync runs but are no longer present in the selected config root.
+- Pruning: Removes stale dry-ai-managed outputs that were written by earlier sync runs but are no longer present in the selected config root.
 - Safety: Only prunes outputs tracked in `sync-manifest.json`; unrelated user files in target roots are left alone.
 
 ### `skills add`
@@ -68,19 +68,19 @@ See VS Code editor setup note below.
 
 ```sh
 # Resolves from <repo root>/skills/skill-creator
-dryai skills add anthropics/skills --skill skill-creator
+dry-ai skills add anthropics/skills --skill skill-creator
 
 # Resolves from <repo root>/review-helper
-dryai skills add anthropics/skills --path . --skill review-helper
+dry-ai skills add anthropics/skills --path . --skill review-helper
 
 # Resolves from <repo root>/tools/review-helper
-dryai skills add anthropics/skills --path tools --skill review-helper
+dry-ai skills add anthropics/skills --path tools --skill review-helper
 
 # Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
-dryai skills add vercel-labs/agent-skills --skill pr-review commit
+dry-ai skills add vercel-labs/agent-skills --skill pr-review commit
 
 # Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
-dryai skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
+dry-ai skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
 ```
 
 By default, imports track the requested ref. With no `--ref`, that means the remote default branch `HEAD` is tracked.
@@ -123,27 +123,27 @@ The lockfile records:
 - the resolved commit that was imported
 - the last installed content hash for each file in the managed skill directory
 
-Before replacing a managed skill, `dryai` compares the current local files against the hashes stored in `skills.lock.json`. If any file was added, removed, or edited locally, the update is skipped and a warning is printed so you do not lose your customizations by accident.
+Before replacing a managed skill, `dry-ai` compares the current local files against the hashes stored in `skills.lock.json`. If any file was added, removed, or edited locally, the update is skipped and a warning is printed so you do not lose your customizations by accident.
 
 For skills imported before hash tracking existed, use these commands to store hashes from the current local directory without fetching from the remote source:
 
 ```sh
-dryai skills rehash review-helper
-dryai skills rehash-all
+dry-ai skills rehash review-helper
+dry-ai skills rehash-all
 ```
 
 Use these commands to intentionally overwrite local edits:
 
 ```sh
-dryai skills update review-helper --force
-dryai skills update-all --force
+dry-ai skills update review-helper --force
+dry-ai skills update-all --force
 ```
 
 ## Example Configs
 
 ### Example Rule
 
-Rules are markdown files under `rules/`. `dryai` recognizes these rule frontmatter fields:
+Rules are markdown files under `rules/`. `dry-ai` recognizes these rule frontmatter fields:
 
 - `description`
 - `agents.copilot.applyTo`
@@ -170,7 +170,7 @@ When the user says "Make it so" or "Engage", start your response with "Yes, Capt
 
 ### Example Command
 
-Commands are markdown files under `commands/`. `dryai` recognizes these command frontmatter fields:
+Commands are markdown files under `commands/`. `dry-ai` recognizes these command frontmatter fields:
 
 - `name`
 - `description`
@@ -194,7 +194,7 @@ Read the staged diff and produce a conventional commit message with a concise su
 
 Skills live in directories under `skills/`. The directory is copied as-is into the configured agent skill targets.
 
-Unlike commands and rules, `dryai` does not define or validate a fixed skill frontmatter schema. Skill files are passed through unchanged, so the allowed frontmatter fields depend on the skill format expected by the target agent.
+Unlike commands and rules, `dry-ai` does not define or validate a fixed skill frontmatter schema. Skill files are passed through unchanged, so the allowed frontmatter fields depend on the skill format expected by the target agent.
 
 ```text
 skills/
@@ -218,7 +218,7 @@ Focus on findings first.
 
 ## Development
 
-For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:dryai <...>` to run the built CLI.
+For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:dry-ai <...>` to run the built CLI.
 
 Run `pnpm run setup:editor` after installing dependencies if you want the Effect language service workspace patch applied locally.
 
@@ -229,7 +229,7 @@ pnpm run dev
 pnpm run test
 pnpm run test:watch
 
-pnpm dev:dryai <...>
+pnpm dev:dry-ai <...>
 ```
 
 ---
@@ -238,7 +238,7 @@ pnpm dev:dryai <...>
 
 One current editor-specific note: VS Code does not automatically discover prompt files from the Copilot prompt target at `~/.copilot/prompts`.
 
-Add this to your VS Code user settings if you want prompt files installed by `dryai` into that target to be picked up:
+Add this to your VS Code user settings if you want prompt files installed by `dry-ai` into that target to be picked up:
 
 ```json
 {

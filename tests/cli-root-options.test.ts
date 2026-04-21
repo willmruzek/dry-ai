@@ -54,12 +54,12 @@ const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
 
-// Root-option coverage is exercised against `dryai skills list`, the simplest
+// Root-option coverage is exercised against `dry-ai skills list`, the simplest
 // read-only command. Its stdout deterministically reflects which config root
 // the CLI resolved (via the contents of the lockfile it loaded), without
 // requiring git or sync machinery.
 
-describe('dryai root options', () => {
+describe('dry-ai root options', () => {
   let mockFileSystem: MockFileSystemState;
 
   beforeEach(() => {
@@ -294,12 +294,12 @@ describe('dryai root options', () => {
     describe('flag placement', () => {
       // priority: med
       it.todo(
-        'accepts --config-root before the subcommand (e.g. "dryai --config-root /tmp sync")',
+        'accepts --config-root before the subcommand (e.g. "dry-ai --config-root /tmp sync")',
       );
 
       // priority: med
       it.todo(
-        'accepts --output-root before the subcommand (e.g. "dryai --output-root /tmp sync")',
+        'accepts --output-root before the subcommand (e.g. "dry-ai --output-root /tmp sync")',
       );
 
       // priority: med
@@ -307,17 +307,17 @@ describe('dryai root options', () => {
 
       // priority: low
       it.todo(
-        'accepts --config-root after the subcommand (e.g. "dryai sync --config-root /tmp")',
+        'accepts --config-root after the subcommand (e.g. "dry-ai sync --config-root /tmp")',
       );
 
       // priority: low
       it.todo(
-        'accepts --output-root after the subcommand (e.g. "dryai sync --output-root /tmp")',
+        'accepts --output-root after the subcommand (e.g. "dry-ai sync --output-root /tmp")',
       );
 
       // priority: low
       it.todo(
-        'accepts --test after the subcommand (e.g. "dryai sync --test")',
+        'accepts --test after the subcommand (e.g. "dry-ai sync --test")',
       );
     });
   });

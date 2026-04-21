@@ -50,7 +50,7 @@ const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
 
-describe('dryai sync', () => {
+describe('dry-ai sync', () => {
   let mockFileSystem: MockFileSystemState;
 
   beforeEach(() => {
@@ -584,7 +584,7 @@ describe('dryai sync', () => {
         // Arrange: no prior manifest, no current sources, just a single
         // hand-authored file under one of the target roots — i.e. the
         // realistic case of a user with their own files alongside a
-        // first-ever `dryai sync`.
+        // first-ever `dry-ai sync`.
         const untrackedFilePath = path.join(
           VIRTUAL_HOME_DIR,
           '.copilot',
@@ -819,7 +819,7 @@ describe('dryai sync', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai sync" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai sync" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     // priority: med

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { runCLI } from './cli.js';
 
-const EXECUTABLE_NAME = 'dryai';
+const EXECUTABLE_NAME = 'dry-ai';
 
 /**
  * Reads the CLI version from the package manifest at the repository root.

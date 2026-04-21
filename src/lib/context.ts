@@ -17,7 +17,7 @@ export type AgentsContext = {
   targetRoots: TargetRoots;
 };
 
-export const DEFAULT_INPUT_ROOT_SEGMENTS = ['.config', 'dryai'] as const;
+export const DEFAULT_INPUT_ROOT_SEGMENTS = ['.config', 'dry-ai'] as const;
 export const DEFAULT_TEST_OUTPUT_DIR_NAME = 'output-test';
 export const DEFAULT_SYNC_MANIFEST_FILE_NAME = 'sync-manifest.json';
 

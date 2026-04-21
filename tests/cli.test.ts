@@ -58,7 +58,7 @@ describe('runCLI', () => {
       ['no args', []],
       ['--help', ['--help']],
       ['-h', ['-h']],
-    ])('prints `dryai` (root) help with %s', async (_label, argv) => {
+    ])('prints `dry-ai` (root) help with %s', async (_label, argv) => {
       const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
 
       await runCLIHelp({
@@ -68,14 +68,14 @@ describe('runCLI', () => {
 
       expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
       expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-        "Usage: dryai [options] <command> [args]
+        "Usage: dry-ai [options] <command> [args]
 
         Options:
           -v, --version         Display the current version
           --test                Shortcut for writing generated output into ./output-test
                                 unless --output-root is also provided
           --config-root <path>  Read configs from a different root instead of
-                                ~/.config/dryai
+                                ~/.config/dry-ai
           --output-root <path>  Write generated output under a different root instead of
                                 the default home directory
           -h, --help            Display this message
@@ -115,7 +115,7 @@ describe('runCLI', () => {
 
       expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
       expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-        "Usage: dryai sync [options]
+        "Usage: dry-ai sync [options]
 
         Sync generated output into Copilot and Cursor targets
 
@@ -139,7 +139,7 @@ describe('runCLI', () => {
 
       expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
       expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-        "Usage: dryai skills <subcommand> [args]
+        "Usage: dry-ai skills <subcommand> [args]
 
         Manage imported skills
 
@@ -155,13 +155,13 @@ describe('runCLI', () => {
           update [options] <name>  Update a managed skill from its tracked source
           update-all [options]     Update all managed skills from their tracked sources
         Examples:
-          dryai skills list
-          dryai skills add anthropics/skills --skill skill-creator
-          dryai skills add anthropics/skills --path . --skill review-helper
-          dryai skills add anthropics/skills --path tools --skill review-helper
-          dryai skills add vercel-labs/agent-skills --skill pr-review commit
-          dryai skills rehash skill-creator
-          dryai skills update skill-creator
+          dry-ai skills list
+          dry-ai skills add anthropics/skills --skill skill-creator
+          dry-ai skills add anthropics/skills --path . --skill review-helper
+          dry-ai skills add anthropics/skills --path tools --skill review-helper
+          dry-ai skills add vercel-labs/agent-skills --skill pr-review commit
+          dry-ai skills rehash skill-creator
+          dry-ai skills update skill-creator
         "
       `);
     });
@@ -178,7 +178,7 @@ describe('runCLI', () => {
 
         expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
         expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dryai skills add [options] <repo>
+          "Usage: dry-ai skills add [options] <repo>
 
           Add managed skills from a remote repository
 
@@ -210,7 +210,7 @@ describe('runCLI', () => {
 
         expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
         expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dryai skills update [options] <name>
+          "Usage: dry-ai skills update [options] <name>
 
           Update a managed skill from its tracked source
 
@@ -234,7 +234,7 @@ describe('runCLI', () => {
 
         expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
         expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dryai skills update-all [options]
+          "Usage: dry-ai skills update-all [options]
 
           Update all managed skills from their tracked sources
 
@@ -258,7 +258,7 @@ describe('runCLI', () => {
 
         expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
         expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dryai skills list [options]
+          "Usage: dry-ai skills list [options]
 
           List local skills
 
@@ -281,7 +281,7 @@ describe('runCLI', () => {
 
         expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
         expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dryai skills remove [options] <name>
+          "Usage: dry-ai skills remove [options] <name>
 
           Remove a managed skill
 
@@ -304,7 +304,7 @@ describe('runCLI', () => {
 
         expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
         expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dryai skills rehash [options] <name>
+          "Usage: dry-ai skills rehash [options] <name>
 
           Refresh stored file hashes for one managed skill
 
@@ -327,7 +327,7 @@ describe('runCLI', () => {
 
         expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
         expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dryai skills rehash-all [options]
+          "Usage: dry-ai skills rehash-all [options]
 
           Refresh stored file hashes for all managed skills
 
@@ -340,7 +340,7 @@ describe('runCLI', () => {
   });
 
   describe('sad paths', () => {
-    it('rejects an unknown top-level subcommand (e.g. "dryai bogus") with a commander error', async () => {
+    it('rejects an unknown top-level subcommand (e.g. "dry-ai bogus") with a commander error', async () => {
       const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
 
       const error = await runCLIExpectingError({
@@ -356,7 +356,7 @@ describe('runCLI', () => {
       expect(stderrMessages.join('')).toContain('too many arguments');
     });
 
-    it('rejects an unknown subcommand under skills (e.g. "dryai skills bogus") with a commander error', async () => {
+    it('rejects an unknown subcommand under skills (e.g. "dry-ai skills bogus") with a commander error', async () => {
       const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
 
       const error = await runCLIExpectingError({
@@ -374,7 +374,7 @@ describe('runCLI', () => {
       expect(stderr).toContain("'skills'");
     });
 
-    it('rejects an unknown root flag (e.g. "dryai --bogus sync") with a commander error', async () => {
+    it('rejects an unknown root flag (e.g. "dry-ai --bogus sync") with a commander error', async () => {
       const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
 
       const error = await runCLIExpectingError({

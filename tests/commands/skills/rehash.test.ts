@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 
-describe('dryai skills rehash', () => {
+describe('dry-ai skills rehash', () => {
   describe('happy paths', () => {
     describe('basic rehash', () => {
       // priority: high
@@ -61,12 +61,12 @@ describe('dryai skills rehash', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai skills rehash" without a <name> positional argument with a commander.missingArgument error',
+      'rejects "dry-ai skills rehash" without a <name> positional argument with a commander.missingArgument error',
     );
 
     // priority: low
     it.todo(
-      'rejects "dryai skills rehash" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai skills rehash" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     // priority: med

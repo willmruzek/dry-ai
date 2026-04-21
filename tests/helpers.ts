@@ -118,7 +118,7 @@ export function createTestEnv({
     defaultConfigRoot,
     defaultOutputRoot,
     cliOptions: {
-      executableName: 'dryai',
+      executableName: 'dry-ai',
       version: '9.9.9-test',
       stdioWriters,
     },
@@ -696,12 +696,12 @@ export const VIRTUAL_HOME_DIR = '/virtual/home';
 /**
  * The default config root the CLI resolves to from `VIRTUAL_HOME_DIR` when no
  * `--config-root` flag is passed. Mirrors the real
- * `~/.config/dryai` layout.
+ * `~/.config/dry-ai` layout.
  */
 export const DEFAULT_CONFIG_ROOT = path.join(
   VIRTUAL_HOME_DIR,
   '.config',
-  'dryai',
+  'dry-ai',
 );
 
 /**

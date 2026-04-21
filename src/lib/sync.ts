@@ -102,7 +102,7 @@ function parseSyncAgent(agent: string): SyncAgent {
 }
 
 /**
- * Writes all command, rule, and skill outputs to their target directories, then prunes any stale dryai-managed files from prior runs.
+ * Writes all command, rule, and skill outputs to their target directories, then prunes any stale dry-ai-managed files from prior runs.
  */
 export async function syncToTargets(
   context: AgentsContext,
@@ -602,7 +602,7 @@ function collectPreservedManifestEntries(
 }
 
 /**
- * Removes stale dryai-managed outputs that are no longer part of the desired sync state.
+ * Removes stale dry-ai-managed outputs that are no longer part of the desired sync state.
  */
 async function removeStaleOutputs(
   removedEntries: SyncManifestEntry[],

@@ -142,7 +142,7 @@ export function createProductionStdioWriters(): StdioWriters {
  */
 function resolveCLIOptions(options: CLIOptions): ResolvedCLIOptions {
   return {
-    executableName: options.executableName ?? 'dryai',
+    executableName: options.executableName ?? 'dry-ai',
     version: options.version,
     stdioWriters: options.stdioWriters ?? createProductionStdioWriters(),
   };
@@ -186,7 +186,7 @@ export function createCLI(options: CLIOptions): Command {
     )
     .option(
       '--config-root <path>',
-      'Read configs from a different root instead of ~/.config/dryai',
+      'Read configs from a different root instead of ~/.config/dry-ai',
       parseOptionValue({
         schema: nonEmptyOptionStringSchema,
         optionLabel: '--config-root',

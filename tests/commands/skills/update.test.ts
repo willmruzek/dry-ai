@@ -82,7 +82,7 @@ const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 const mockedGit = createMockedGit();
 
-describe('dryai skills update', () => {
+describe('dry-ai skills update', () => {
   let mockFileSystem: MockFileSystemState;
 
   /**
@@ -444,12 +444,12 @@ describe('dryai skills update', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai skills update" without a <name> positional argument with a commander.missingArgument error',
+      'rejects "dry-ai skills update" without a <name> positional argument with a commander.missingArgument error',
     );
 
     // priority: low
     it.todo(
-      'rejects "dryai skills update" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai skills update" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     // priority: med

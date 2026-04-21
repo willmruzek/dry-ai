@@ -59,7 +59,7 @@ vi.mock('node:os', () => ({
 const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
-describe('dryai skills list', () => {
+describe('dry-ai skills list', () => {
   let mockFileSystem: MockFileSystemState;
 
   beforeEach(() => {
@@ -228,7 +228,7 @@ describe('dryai skills list', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai skills list" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai skills list" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     describe('lockfile edge cases', () => {

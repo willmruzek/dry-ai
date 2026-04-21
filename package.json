@@ -1,11 +1,11 @@
 {
-  "name": "dryai",
-  "version": "3.0.0",
+  "name": "dry-ai",
+  "version": "0.0.0",
   "description": "CLI for syncing shared AI commands, rules, and skills into supported agent targets.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/willmruzek/dryai.git"
+    "url": "git+ssh://git@github.com/willmruzek/dry-ai.git"
   },
   "license": "MIT",
   "files": [
@@ -16,14 +16,14 @@
     "setup:editor": "effect-language-service patch",
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "dev:dryai": "node ./dest/main.js",
+    "dev:dry-ai": "node ./dest/main.js",
     "tsc": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "husky"
   },
   "bin": {
-    "dryai": "dest/main.js"
+    "dry-ai": "dest/main.js"
   },
   "dependencies": {
     "@effect/cli": "^0.75.0",

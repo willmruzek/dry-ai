@@ -67,7 +67,7 @@ vi.mock('node:os', () => ({
 const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
-describe('dryai skills remove', () => {
+describe('dry-ai skills remove', () => {
   let mockFileSystem: MockFileSystemState;
 
   beforeEach(() => {
@@ -209,12 +209,12 @@ describe('dryai skills remove', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai skills remove" without a <name> positional argument with a commander.missingArgument error',
+      'rejects "dry-ai skills remove" without a <name> positional argument with a commander.missingArgument error',
     );
 
     // priority: low
     it.todo(
-      'rejects "dryai skills remove" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai skills remove" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     // priority: med

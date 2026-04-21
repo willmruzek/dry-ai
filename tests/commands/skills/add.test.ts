@@ -87,7 +87,7 @@ function createTestEnv({
   return createBaseTestEnv({ defaultConfigRoot, defaultOutputRoot });
 }
 
-describe('dryai skills add', () => {
+describe('dry-ai skills add', () => {
   let mockFileSystem: MockFileSystemState;
 
   beforeEach(() => {
@@ -415,12 +415,12 @@ describe('dryai skills add', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai skills add" without a <repo> positional argument with a commander.missingArgument error',
+      'rejects "dry-ai skills add" without a <repo> positional argument with a commander.missingArgument error',
     );
 
     // priority: low
     it.todo(
-      'rejects "dryai skills add" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai skills add" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     // priority: med

@@ -107,7 +107,7 @@ function seedAllRemoteSkills(
   }
 }
 
-describe('dryai skills update-all', () => {
+describe('dry-ai skills update-all', () => {
   let mockFileSystem: MockFileSystemState;
 
   /**
@@ -537,7 +537,7 @@ describe('dryai skills update-all', () => {
   describe('sad paths', () => {
     // priority: low
     it.todo(
-      'rejects "dryai skills update-all" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
+      'rejects "dry-ai skills update-all" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
     // priority: med
