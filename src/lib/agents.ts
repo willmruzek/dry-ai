@@ -1,5 +1,7 @@
 import path from 'node:path';
+
 import type { CLIRuntime } from '../cli.js';
+
 import { AGENT_DEFINITIONS } from './agent-definitions.js';
 import {
   type SyncTargetSpec,
@@ -124,17 +126,22 @@ function listOwnershipDefinitions() {
  */
 export function createTargetRoots(baseDir: string): TargetRoots {
   return Object.fromEntries(
-    SYNC_AGENTS.map((agent) => [
-      agent,
-      Object.fromEntries(
-        Object.entries(getAgentDefinition(agent).targetRoots).map(
-          ([rootName, pathSegments]) => [
+    SYNC_AGENTS.map((agent) => {
+      const segmentRoots = getAgentDefinition(agent).targetRoots as Record<
+        string,
+        readonly string[]
+      >;
+
+      return [
+        agent,
+        Object.fromEntries(
+          Object.entries(segmentRoots).map(([rootName, pathSegments]) => [
             rootName,
             path.join(baseDir, ...pathSegments),
-          ],
+          ]),
         ),
-      ),
-    ]),
+      ];
+    }),
   );
 }
 
@@ -286,12 +293,14 @@ function formatValidationIssues(input: {
 /**
  * Reads the per-agent blocks from parsed frontmatter and returns a map of agent → raw section value.
  */
-function collectAgentSectionValues(
+function collectAgentSectionValues<K extends 'command' | 'rule'>(
   runtime: CLIRuntime,
   input: {
     filePath: string;
-    kind: 'command' | 'rule';
-    sections: CommandFrontmatter['agents'] | RuleFrontmatter['agents'];
+    kind: K;
+    sections: K extends 'command'
+      ? CommandFrontmatter['agents']
+      : RuleFrontmatter['agents'];
   },
 ): Map<SyncAgent, unknown> | null {
   const sectionValues = new Map<SyncAgent, unknown>();

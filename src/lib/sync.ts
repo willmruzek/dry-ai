@@ -1,9 +1,12 @@
+import path from 'node:path';
+
 import { Chalk } from 'chalk';
 import fs from 'fs-extra';
 import { glob } from 'glob';
-import path from 'node:path';
 import { z } from 'zod';
+
 import type { CLIRuntime } from '../cli.js';
+
 import {
   buildSyncTargets,
   createAgentCmdSyncSpec,
@@ -187,7 +190,9 @@ function deriveOwnershipKeyForManifestEntry(
 async function ensureTargetDirectories(
   targetRoots: TargetRoots,
 ): Promise<void> {
-  await Promise.all(listTargetRootPaths(targetRoots).map(fs.ensureDir));
+  await Promise.all(
+    listTargetRootPaths(targetRoots).map((dir) => fs.ensureDir(dir)),
+  );
 }
 
 /**

@@ -1,6 +1,8 @@
 import { Command, CommanderError } from 'commander';
 import { describe, expect, it } from 'vitest';
+
 import { createCLI, type CLIOptions } from '../src/cli.js';
+
 import { createTestEnv } from './helpers.js';
 
 function applyExitOverride(command: Command): void {

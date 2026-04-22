@@ -1,9 +1,12 @@
-import fsExtra from 'fs-extra';
-import { glob } from 'glob';
 import os from 'node:os';
 import path from 'node:path';
+
+import fsExtra from 'fs-extra';
+import { glob } from 'glob';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { runCLI } from '../../src/cli.js';
+
 import {
   DEFAULT_CONFIG_ROOT,
   type MockFileSystemState,
@@ -71,7 +74,7 @@ describe('dry-ai sync', () => {
 
     // Resolve `<rootDir>/*.md` patterns (the only shape `lib/sync.ts` uses)
     // against the virtual filesystem, returning matches in sorted order.
-    mockedGlob.mockImplementation((async (
+    mockedGlob.mockImplementation(async (
       patterns: string | string[],
     ): Promise<string[]> => {
       const patternList = Array.isArray(patterns) ? patterns : [patterns];
@@ -93,7 +96,7 @@ describe('dry-ai sync', () => {
       }
 
       return matches.sort();
-    }) as unknown as typeof glob);
+    });
   });
 
   describe('happy paths', () => {
