@@ -293,12 +293,14 @@ function formatValidationIssues(input: {
 /**
  * Reads the per-agent blocks from parsed frontmatter and returns a map of agent → raw section value.
  */
-function collectAgentSectionValues(
+function collectAgentSectionValues<K extends 'command' | 'rule'>(
   runtime: CLIRuntime,
   input: {
     filePath: string;
-    kind: 'command' | 'rule';
-    sections: CommandFrontmatter['agents']  ;
+    kind: K;
+    sections: K extends 'command'
+      ? CommandFrontmatter['agents']
+      : RuleFrontmatter['agents'];
   },
 ): Map<SyncAgent, unknown> | null {
   const sectionValues = new Map<SyncAgent, unknown>();
