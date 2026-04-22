@@ -1,6 +1,14 @@
 import { Command } from 'commander';
 import dedent from 'dedent';
 import { z } from 'zod';
+
+import type { CommandEnv } from '../../cli.js';
+import {
+  nonEmptyOptionStringSchema,
+  parseOptionsObject,
+  parseOptionValue,
+} from '../../lib/command-options.js';
+
 import { runSkillsAddCommand } from './add.js';
 import { runSkillsListCommand } from './list.js';
 import { runSkillsRehashAllCommand } from './rehash-all.js';
@@ -8,12 +16,6 @@ import { runSkillsRehashCommand } from './rehash.js';
 import { runSkillsRemoveCommand } from './remove.js';
 import { runSkillsUpdateAllCommand } from './update-all.js';
 import { runSkillsUpdateCommand } from './update.js';
-import type { CommandEnv } from '../../cli.js';
-import {
-  nonEmptyOptionStringSchema,
-  parseOptionsObject,
-  parseOptionValue,
-} from '../../lib/command-options.js';
 
 const skillsImportOptionsSchema = z.object({
   skill: z.array(z.string()).optional(),

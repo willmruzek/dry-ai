@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import path from 'node:path';
-import type fs from 'fs-extra';
 import type os from 'node:os';
+import path from 'node:path';
+
+import type fs from 'fs-extra';
 import { simpleGit } from 'simple-git';
 import { vi } from 'vitest';
 import type { MockedObject } from 'vitest';
+
 import { type CLIOptions, type StdioWriters } from '../src/cli.js';
 
 // ---- Types ----
@@ -633,13 +635,16 @@ export function configureMockOs(
  * configureMockGitClient(mockedGit, { fetchedCommit: 'abc123' });
  */
 export function createMockedGit(): MockedGitObject {
+  // `vi.fn()` is typed as `Mock<...>`; simple-git methods use heavy overloads that
+  // don't unify with `Mock` assignment. The stubs are configured in
+  // `configureMockGitClient`; cast once at the factory boundary.
   return {
     addRemote: vi.fn(),
     checkout: vi.fn(),
     fetch: vi.fn(),
     init: vi.fn(),
     revparse: vi.fn(),
-  } as unknown as MockedGitObject;
+  } as MockedGitObject;
 }
 
 /**
@@ -668,7 +673,7 @@ export function configureMockGitClient(
     undefined as unknown as AwaitedReturn<typeof mockedGit.checkout>,
   );
   mockedGit.revparse.mockResolvedValue(
-    fetchedCommit as unknown as AwaitedReturn<typeof mockedGit.revparse>,
+    fetchedCommit,
   );
 
   // Cast needed because we only stub the methods exercised by cloneRemoteRepo.

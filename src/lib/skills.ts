@@ -1,9 +1,11 @@
-import fs from 'fs-extra';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+
+import fs from 'fs-extra';
 import { simpleGit } from 'simple-git';
 import { z } from 'zod';
+
 import type { AgentsContext } from './context.js';
 
 const managedSkillFilesSchema = z.record(z.string(), z.string());
@@ -558,7 +560,7 @@ export async function removeManagedSkillDirectory(
 }
 
 export function formatManagedSkillSummary(skill: ManagedSkill): string {
-  const refLabel = skill.ref ? skill.ref : 'HEAD';
+  const refLabel = skill.ref ?? 'HEAD';
   return `${skill.name} repo=${skill.repo} path=${skill.path} ref=${refLabel} commit=${shortCommit(skill.commit)}`;
 }
 
