@@ -922,6 +922,43 @@ describe('dry-ai sync', () => {
         );
       });
 
+      it('should write the Cursor rule file when alwaysApply is true and globs is omitted', async () => {
+        storeMockTextFile(
+          mockFileSystem,
+          path.join(DEFAULT_CONFIG_ROOT, 'rules', 'cursor-always-apply.md'),
+          [
+            '---',
+            'description: Cursor always-apply rule',
+            'agents:',
+            '  copilot:',
+            "    applyTo: '**'",
+            '  cursor:',
+            '    alwaysApply: true',
+            '---',
+            '',
+            'Body',
+            '',
+          ].join('\n'),
+        );
+
+        const { cliOptions, stderrMessages } = createTestEnv();
+
+        await runCLI({
+          argv: ['sync'],
+          ...cliOptions,
+        });
+
+        const cursorPath = path.join(
+          VIRTUAL_HOME_DIR,
+          '.cursor',
+          'rules',
+          'cursor-always-apply.mdc',
+        );
+
+        expect(mockFileSystem.files.has(cursorPath)).toBe(true);
+        expect(stderrMessages).toEqual([]);
+      });
+
       it('should write the Cursor rule file and log a warning when the Copilot agents block is invalid', async () => {
         storeMockTextFile(
           mockFileSystem,

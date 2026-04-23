@@ -309,10 +309,18 @@ export const AGENT_DEFINITIONS = {
           createTargetPath: ({ targetRoots, sourceFileStem }) =>
             path.join(targetRoots.cursor.rules, `${sourceFileStem}.mdc`),
         });
-      const frontmatterSectionSchema = z.strictObject({
-        alwaysApply: z.boolean().optional(),
-        globs: nonEmptyStringSchema,
-      });
+      const frontmatterSectionSchema = z
+        .strictObject({
+          alwaysApply: z.boolean().optional(),
+          globs: nonEmptyStringSchema.optional(),
+        })
+        .refine(
+          (value) => value.alwaysApply === true || value.globs !== undefined,
+          {
+            message: 'globs is required unless alwaysApply is true',
+            path: ['globs'],
+          },
+        );
       const metadata = defineMetadata<
         {
           description: string;
