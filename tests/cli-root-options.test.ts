@@ -75,32 +75,29 @@ describe('dry-ai root options', () => {
 
     // Resolve `<rootDir>/*.md` patterns (the only shape `lib/sync.ts` uses)
     // against the virtual filesystem, returning matches in sorted order.
-    mockedGlob.mockImplementation(async (
-      patterns: string | string[],
-    ): Promise<string[]> => {
-      const patternList = Array.isArray(patterns) ? patterns : [patterns];
-      const matches: string[] = [];
+    mockedGlob.mockImplementation(
+      async (patterns: string | string[]): Promise<string[]> => {
+        const patternList = Array.isArray(patterns) ? patterns : [patterns];
+        const matches: string[] = [];
 
-      for (const pattern of patternList) {
-        const patternMatch = /^(?<dir>.+)\/\*\.md$/.exec(pattern);
-        if (!patternMatch?.groups) {
-          continue;
-        }
+        for (const pattern of patternList) {
+          const patternMatch = /^(?<dir>.+)\/\*\.md$/.exec(pattern);
+          if (!patternMatch?.groups) {
+            continue;
+          }
 
-        const { dir } = patternMatch.groups;
+          const { dir } = patternMatch.groups;
 
-        for (const filePath of mockFileSystem.files.keys()) {
-          if (
-            path.dirname(filePath) === dir &&
-            filePath.endsWith('.md')
-          ) {
-            matches.push(filePath);
+          for (const filePath of mockFileSystem.files.keys()) {
+            if (path.dirname(filePath) === dir && filePath.endsWith('.md')) {
+              matches.push(filePath);
+            }
           }
         }
-      }
 
-      return matches.sort();
-    });
+        return matches.sort();
+      },
+    );
   });
 
   describe('happy paths', () => {

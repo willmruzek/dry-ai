@@ -412,11 +412,7 @@ describe('dry-ai skills update-all', () => {
         expect(
           readMockTextFile(
             mockFileSystem,
-            path.join(
-              DEFAULT_SKILLS_SOURCE_ROOT,
-              FIRST_SKILL.name,
-              'SKILL.md',
-            ),
+            path.join(DEFAULT_SKILLS_SOURCE_ROOT, FIRST_SKILL.name, 'SKILL.md'),
           ),
         ).toBe(skippedSkillOnDiskFiles['SKILL.md']);
 

@@ -153,9 +153,9 @@ describe('dry-ai skills list', () => {
         // Arrange: fresh mock filesystem with neither a skills root directory
         // nor a lockfile. Sanity-check the pre-state so the post-state
         // assertion below is meaningful.
-        expect(
-          mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT),
-        ).toBe(false);
+        expect(mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT)).toBe(
+          false,
+        );
 
         const environment = createTestEnv();
 
@@ -170,9 +170,9 @@ describe('dry-ai skills list', () => {
         expect(mockedFs.ensureDir).toHaveBeenCalledWith(
           DEFAULT_SKILLS_SOURCE_ROOT,
         );
-        expect(
-          mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT),
-        ).toBe(true);
+        expect(mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT)).toBe(
+          true,
+        );
 
         // Assert: with no local skills and no lockfile, stdout is the
         // empty-state message and stderr is empty.

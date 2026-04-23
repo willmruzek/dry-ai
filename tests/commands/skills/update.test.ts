@@ -282,9 +282,7 @@ describe('dry-ai skills update', () => {
       );
 
       // priority: med
-      it.todo(
-        'leaves other managed skill entries in the lockfile untouched',
-      );
+      it.todo('leaves other managed skill entries in the lockfile untouched');
     });
 
     describe('no-op updates', () => {
@@ -320,7 +318,8 @@ describe('dry-ai skills update', () => {
       } {
         const onDiskFiles = {
           ...TARGET_SKILL.localFiles,
-          'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
+          'SKILL.md':
+            '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
         };
 
         seedLocalSkillDirectory(
@@ -366,9 +365,7 @@ describe('dry-ai skills update', () => {
         // bytes — `SKILL.md` keeps the user's edit and unchanged files
         // (e.g. `legacy.md`) are not touched either. A skip must never
         // modify local content.
-        for (const [relativeFilePath, content] of Object.entries(
-          onDiskFiles,
-        )) {
+        for (const [relativeFilePath, content] of Object.entries(onDiskFiles)) {
           expect(
             readMockTextFile(
               mockFileSystem,

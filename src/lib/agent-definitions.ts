@@ -314,7 +314,14 @@ export const AGENT_DEFINITIONS = {
           alwaysApply: z.boolean().optional(),
           globs: nonEmptyStringSchema.optional(),
         })
-        .optional();
+        .refine(
+          (value) =>
+            value.alwaysApply === true ? true : value.globs !== undefined,
+          {
+            message: 'globs is required unless alwaysApply is true',
+            path: ['globs'],
+          },
+        );
       const metadata = defineMetadata<
         {
           description: string;
@@ -346,11 +353,9 @@ export const AGENT_DEFINITIONS = {
           AgentRuleSyncSpec
         >({
           schema: frontmatterSectionSchema,
-          extendSyncInput: (value, { currentInput }) => {
-            const scopedGlobs = value?.globs ?? currentInput.applyTo;
-            const alwaysApply =
-              value?.alwaysApply ??
-              (scopedGlobs === undefined || scopedGlobs === '**');
+          extendSyncInput: (value) => {
+            const scopedGlobs = value.globs;
+            const alwaysApply = value.alwaysApply ?? scopedGlobs === '**';
 
             return {
               alwaysApply,

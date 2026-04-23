@@ -10,9 +10,7 @@ import {
 /**
  * Lists local skills and annotates which ones are managed by the lockfile.
  */
-export async function runSkillsListCommand(
-  env: CommandEnv,
-): Promise<void> {
+export async function runSkillsListCommand(env: CommandEnv): Promise<void> {
   const { context, runtime } = env;
   await ensureSkillsRoot(context);
 

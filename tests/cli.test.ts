@@ -89,23 +89,20 @@ describe('runCLI', () => {
       `);
     });
 
-    it.each(['-v', '--version'])(
-      'prints the version with %s',
-      async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+    it.each(['-v', '--version'])('prints the version with %s', async (flag) => {
+      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
 
-        await runCLIHelp({
-          argv: [flag],
-          ...cliOptions,
-        });
+      await runCLIHelp({
+        argv: [flag],
+        ...cliOptions,
+      });
 
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+      expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
+      expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
           "9.9.9-test
           "
         `);
-      },
-    );
+    });
 
     it.each(['--help', '-h'])('prints `sync` help with %s', async (flag) => {
       const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();

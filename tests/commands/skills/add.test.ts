@@ -349,9 +349,9 @@ describe('dry-ai skills add', () => {
         }
 
         expect(initialWrite).toEqual({ version: 1, skills: [] });
-        expect(
-          firstIncrementalWrite.skills.map((skill) => skill.name),
-        ).toEqual([MANAGED_SKILL_NAME]);
+        expect(firstIncrementalWrite.skills.map((skill) => skill.name)).toEqual(
+          [MANAGED_SKILL_NAME],
+        );
         expect(finalWrite.skills.map((skill) => skill.name)).toEqual(
           // `saveSkillsLockfile` sorts by name; `note-taker` < `review-helper`.
           [SECOND_SKILL_NAME, MANAGED_SKILL_NAME],

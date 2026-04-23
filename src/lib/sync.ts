@@ -338,14 +338,14 @@ async function collectCommandSyncItems(
     }
 
     const commandName = commandMetadata.name;
-    const commandInput = createAgentCmdSyncSpec(runtime, {
+    const commandSpec = createAgentCmdSyncSpec(runtime, {
       filePath,
       sourceFileStem: fileName,
       body,
       frontmatter: commandMetadata,
     });
 
-    if (!commandInput) {
+    if (!commandSpec) {
       continue;
     }
 
@@ -355,8 +355,9 @@ async function collectCommandSyncItems(
       sourcePath: filePath,
       targets: buildSyncTargets({
         kind: 'command',
-        input: commandInput,
+        input: commandSpec.input,
         targetRoots,
+        agents: commandSpec.activeAgents,
       }),
     });
   }
@@ -389,14 +390,14 @@ async function collectRuleSyncItems(
       continue;
     }
 
-    const ruleInput = createAgentRuleSyncSpec(runtime, {
+    const ruleSpec = createAgentRuleSyncSpec(runtime, {
       filePath,
       sourceFileStem: fileName,
       body,
       frontmatter: ruleMetadata,
     });
 
-    if (!ruleInput) {
+    if (!ruleSpec) {
       continue;
     }
 
@@ -406,8 +407,9 @@ async function collectRuleSyncItems(
       sourcePath: filePath,
       targets: buildSyncTargets({
         kind: 'rule',
-        input: ruleInput,
+        input: ruleSpec.input,
         targetRoots,
+        agents: ruleSpec.activeAgents,
       }),
     });
   }
