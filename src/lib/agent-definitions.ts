@@ -315,7 +315,8 @@ export const AGENT_DEFINITIONS = {
           globs: nonEmptyStringSchema.optional(),
         })
         .refine(
-          (value) => value.alwaysApply === true || value.globs !== undefined,
+          (value) =>
+            value.alwaysApply === true ? true : value.globs !== undefined,
           {
             message: 'globs is required unless alwaysApply is true',
             path: ['globs'],
