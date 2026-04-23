@@ -150,7 +150,7 @@ Rules are markdown files under `rules/`. `dry-ai` recognizes these rule frontmat
 - `agents.cursor.alwaysApply`
 - `agents.cursor.globs`
 
-`agents.cursor.globs` should be provided as one comma-separated glob string.
+Provide both a `copilot` block and a `cursor` block; Cursor `globs` are not inferred from Copilot `applyTo`. `agents.cursor.globs` should be provided as one comma-separated glob string.
 
 ```md
 ---

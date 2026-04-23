@@ -163,9 +163,7 @@ describe('dry-ai skills remove', () => {
         expect(mockFileSystem.directories.has(keptSkillDir)).toBe(true);
         for (const relativeFilePath of Object.keys(KEPT_SKILL.files)) {
           expect(
-            mockFileSystem.files.has(
-              path.join(keptSkillDir, relativeFilePath),
-            ),
+            mockFileSystem.files.has(path.join(keptSkillDir, relativeFilePath)),
           ).toBe(true);
         }
 

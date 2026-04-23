@@ -309,12 +309,10 @@ export const AGENT_DEFINITIONS = {
           createTargetPath: ({ targetRoots, sourceFileStem }) =>
             path.join(targetRoots.cursor.rules, `${sourceFileStem}.mdc`),
         });
-      const frontmatterSectionSchema = z
-        .strictObject({
-          alwaysApply: z.boolean().optional(),
-          globs: nonEmptyStringSchema.optional(),
-        })
-        .optional();
+      const frontmatterSectionSchema = z.strictObject({
+        alwaysApply: z.boolean().optional(),
+        globs: nonEmptyStringSchema,
+      });
       const metadata = defineMetadata<
         {
           description: string;
@@ -346,11 +344,9 @@ export const AGENT_DEFINITIONS = {
           AgentRuleSyncSpec
         >({
           schema: frontmatterSectionSchema,
-          extendSyncInput: (value, { currentInput }) => {
-            const scopedGlobs = value?.globs ?? currentInput.applyTo;
-            const alwaysApply =
-              value?.alwaysApply ??
-              (scopedGlobs === undefined || scopedGlobs === '**');
+          extendSyncInput: (value) => {
+            const scopedGlobs = value.globs;
+            const alwaysApply = value.alwaysApply ?? scopedGlobs === '**';
 
             return {
               alwaysApply,

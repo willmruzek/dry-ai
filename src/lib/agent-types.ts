@@ -1,4 +1,4 @@
-import type { TargetRoots } from './agents.js';
+import type { SyncAgent, TargetRoots } from './agents.js';
 
 export const SYNC_ITEM_KINDS = ['command', 'rule', 'skill'] as const;
 
@@ -43,11 +43,15 @@ export type SyncTargetSpec =
       kind: 'command';
       input: AgentCmdSyncSpec;
       targetRoots: TargetRoots;
+      /** When set, only these agents get outputs; omit to sync all agents. */
+      agents?: readonly SyncAgent[];
     }
   | {
       kind: 'rule';
       input: AgentRuleSyncSpec;
       targetRoots: TargetRoots;
+      /** When set, only these agents get outputs; omit to sync all agents. */
+      agents?: readonly SyncAgent[];
     }
   | {
       kind: 'skill';

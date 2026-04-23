@@ -62,7 +62,9 @@ export type MockedGitObject = MockedObject<
   >
 >;
 
-export type MockedOsObject = MockedObject<Pick<typeof os, 'homedir' | 'tmpdir'>>;
+export type MockedOsObject = MockedObject<
+  Pick<typeof os, 'homedir' | 'tmpdir'>
+>;
 
 export type TestEnv = {
   defaultConfigRoot: string;
@@ -672,9 +674,7 @@ export function configureMockGitClient(
   mockedGit.checkout.mockResolvedValue(
     undefined as unknown as AwaitedReturn<typeof mockedGit.checkout>,
   );
-  mockedGit.revparse.mockResolvedValue(
-    fetchedCommit,
-  );
+  mockedGit.revparse.mockResolvedValue(fetchedCommit);
 
   // Cast needed because we only stub the methods exercised by cloneRemoteRepo.
   vi.mocked(simpleGit).mockImplementation(
@@ -737,7 +737,8 @@ export const SAMPLE_IMPORTED_AT = '2026-04-14T00:00:00.000Z';
  * Sample normalized repository URL (HTTPS, with trailing `.git`) that
  * `normalizeRemoteRepo` would produce for the `anthropics/skills` shorthand.
  */
-export const SAMPLE_NORMALIZED_REPO = 'https://github.com/anthropics/skills.git';
+export const SAMPLE_NORMALIZED_REPO =
+  'https://github.com/anthropics/skills.git';
 
 // ---- Shared skill fixture helpers ----
 
@@ -820,4 +821,3 @@ export function seedRemoteSkillCheckout(
     );
   }
 }
-
