@@ -127,30 +127,35 @@ function buildExpectedManifestTrio(outputRoot: string): ManifestTrioRow[] {
 }
 
 /**
- * The two manifest rows (Copilot + Cursor) for a single command `name` under `outputRoot`,
- * matching the layout produced for `arrangeBasicSources` commands.
+ * Two manifest rows for one command, matching `AGENT_DEFINITIONS` / `buildSyncTargets`:
+ * Copilot `*.prompt.md` path uses the source file stem; Cursor’s command skill
+ * directory uses frontmatter `name` (the manifest `name` field matches
+ * `collectManifestEntries` / `commandMetadata.name`).
  */
 function buildExpectedManifestCommandRows(
-  name: string,
   outputRoot: string,
+  {
+    commandName,
+    sourceFileStem,
+  }: { commandName: string; sourceFileStem: string },
 ): ManifestTrioRow[] {
   return [
     {
       agent: 'copilot',
       kind: 'command',
-      name,
+      name: commandName,
       outputPath: path.join(
         outputRoot,
         '.copilot',
         'prompts',
-        `${name}.prompt.md`,
+        `${sourceFileStem}.prompt.md`,
       ),
     },
     {
       agent: 'cursor',
       kind: 'command',
-      name,
-      outputPath: path.join(outputRoot, '.cursor', 'skills', name),
+      name: commandName,
+      outputPath: path.join(outputRoot, '.cursor', 'skills', commandName),
     },
   ];
 }
@@ -1356,6 +1361,7 @@ describe('dry-ai sync', () => {
             '',
           ].join('\n'),
         );
+        // `extra-cmd.md` → stem `extra-cmd`; frontmatter `name` matches the stem in this fixture.
 
         await runCLI({
           argv: ['sync'],
@@ -1368,7 +1374,10 @@ describe('dry-ai sync', () => {
 
         const expected = [
           ...buildExpectedManifestTrio(VIRTUAL_HOME_DIR),
-          ...buildExpectedManifestCommandRows('extra-cmd', VIRTUAL_HOME_DIR),
+          ...buildExpectedManifestCommandRows(VIRTUAL_HOME_DIR, {
+            commandName: 'extra-cmd',
+            sourceFileStem: 'extra-cmd',
+          }),
         ];
         assertMockSyncManifestMatchesExpectedRows(
           mockFileSystem,
