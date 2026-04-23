@@ -348,9 +348,25 @@ async function applySyncItem(
   syncItem: SyncItem,
   previousEntriesByOutputPath: ReadonlyMap<string, SyncManifestEntry>,
 ): Promise<AppliedSyncItem> {
+  const directoryHashCache = new Map<string, Promise<string>>();
+
   const changes = await Promise.all(
     syncItem.targets.map(async (target): Promise<ItemSyncChange> => {
-      const contentHash = await computeTargetContentHash(target);
+      let contentHash: string;
+      if (target.targetType === 'directory') {
+        const cachedHashPromise = directoryHashCache.get(target.sourceDir);
+        const contentHashPromise =
+          cachedHashPromise ?? computeTargetContentHash(target);
+
+        if (!cachedHashPromise) {
+          directoryHashCache.set(target.sourceDir, contentHashPromise);
+        }
+
+        contentHash = await contentHashPromise;
+      } else {
+        contentHash = await computeTargetContentHash(target);
+      }
+
       const changeType = await detectAppliedChangeType({
         target,
         contentHash,
