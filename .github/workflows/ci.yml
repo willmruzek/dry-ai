@@ -10,9 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  commitlint:
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -31,12 +30,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Print versions
-        run: |
-          git --version
-          node --version
-          npm --version
-          pnpm exec commitlint --version
+      - name: Print commitlint version
+        run: pnpm exec commitlint --version
 
       - name: Validate current commit (last commit) with commitlint
         if: github.event_name == 'push'
@@ -46,11 +41,94 @@ jobs:
         if: github.event_name == 'pull_request'
         run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
 
-      - name: Build
-        run: pnpm run build
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
 
-      - name: Run tests
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run tsc
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
         run: pnpm run test
+
+  pack:
+    needs:
+      - commitlint
+      - typecheck
+      - lint
+      - test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build for pack
+        run: pnpm run build
 
       - name: Validate packed contents
         run: npm pack --dry-run
