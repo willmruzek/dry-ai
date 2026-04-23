@@ -1,5 +1,7 @@
 import path from 'node:path';
+
 import type { CLIRuntime } from '../cli.js';
+
 import { AGENT_DEFINITIONS } from './agent-definitions.js';
 import {
   type SyncTargetSpec,
@@ -124,17 +126,22 @@ function listOwnershipDefinitions() {
  */
 export function createTargetRoots(baseDir: string): TargetRoots {
   return Object.fromEntries(
-    SYNC_AGENTS.map((agent) => [
-      agent,
-      Object.fromEntries(
-        Object.entries(getAgentDefinition(agent).targetRoots).map(
-          ([rootName, pathSegments]) => [
+    SYNC_AGENTS.map((agent) => {
+      const segmentRoots = getAgentDefinition(agent).targetRoots as Record<
+        string,
+        readonly string[]
+      >;
+
+      return [
+        agent,
+        Object.fromEntries(
+          Object.entries(segmentRoots).map(([rootName, pathSegments]) => [
             rootName,
             path.join(baseDir, ...pathSegments),
-          ],
+          ]),
         ),
-      ),
-    ]),
+      ];
+    }),
   );
 }
 
@@ -162,10 +169,22 @@ export function listTargetRootPaths(targetRoots: TargetRoots): string[] {
 /**
  * Builds one sync target per supported agent for the given item kind and input.
  */
+function resolveAgentsForSync(
+  value: Extract<SyncTargetSpec, { kind: 'command' } | { kind: 'rule' }>,
+): SyncAgent[] {
+  if (value.agents) {
+    return SYNC_AGENTS.filter((agent) => value.agents!.includes(agent));
+  }
+
+  return [...SYNC_AGENTS];
+}
+
 export function buildSyncTargets(value: SyncTargetSpec): SyncTarget[] {
   switch (value.kind) {
     case 'command': {
-      return SYNC_AGENTS.map((agent) =>
+      const agents = resolveAgentsForSync(value);
+
+      return agents.map((agent) =>
         getAgentDefinition(agent).command.target.buildTarget({
           input: value.input,
           targetRoots: value.targetRoots,
@@ -173,7 +192,9 @@ export function buildSyncTargets(value: SyncTargetSpec): SyncTarget[] {
       );
     }
     case 'rule': {
-      return SYNC_AGENTS.map((agent) =>
+      const agents = resolveAgentsForSync(value);
+
+      return agents.map((agent) =>
         getAgentDefinition(agent).rule.target.buildTarget({
           input: value.input,
           targetRoots: value.targetRoots,
@@ -286,12 +307,14 @@ function formatValidationIssues(input: {
 /**
  * Reads the per-agent blocks from parsed frontmatter and returns a map of agent → raw section value.
  */
-function collectAgentSectionValues(
+function collectAgentSectionValues<K extends 'command' | 'rule'>(
   runtime: CLIRuntime,
   input: {
     filePath: string;
-    kind: 'command' | 'rule';
-    sections: CommandFrontmatter['agents'] | RuleFrontmatter['agents'];
+    kind: K;
+    sections: K extends 'command'
+      ? CommandFrontmatter['agents']
+      : RuleFrontmatter['agents'];
   },
 ): Map<SyncAgent, unknown> | null {
   const sectionValues = new Map<SyncAgent, unknown>();
@@ -324,7 +347,9 @@ function collectAgentSectionValues(
 }
 
 /**
- * Validates each per-agent frontmatter block and merges the results into the base command sync input. Returns null if any block is invalid.
+ * Validates each per-agent command block and merges successful sections into
+ * the base sync input. Invalid sections log a warning and that agent is
+ * skipped; if no agent is valid, returns null.
  */
 function extendCommandSyncInputFromAgentSections(
   runtime: CLIRuntime,
@@ -333,7 +358,7 @@ function extendCommandSyncInputFromAgentSections(
     currentInput: AgentCmdSyncSpec;
     sections: CommandFrontmatter['agents'];
   },
-): AgentCmdSyncSpec | null {
+): { currentInput: AgentCmdSyncSpec; activeAgents: SyncAgent[] } | null {
   const sectionValues = collectAgentSectionValues(runtime, {
     filePath: input.filePath,
     kind: 'command',
@@ -345,6 +370,7 @@ function extendCommandSyncInputFromAgentSections(
   }
 
   let currentInput = input.currentInput;
+  const activeAgents: SyncAgent[] = [];
 
   for (const agent of SYNC_AGENTS) {
     const sourceDefinition = getCommandSourceDefinition(agent);
@@ -357,28 +383,35 @@ function extendCommandSyncInputFromAgentSections(
     );
 
     if (!result.success) {
-      runtime.logInfo(
-        `Skipping invalid command frontmatter in ${input.filePath}: ${formatValidationIssues(
+      runtime.logWarn(
+        `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
           {
             issues: result.issues,
             pathPrefix: `agents.${agent}`,
           },
         )}`,
       );
-      return null;
+      continue;
     }
 
     currentInput = {
       ...currentInput,
       ...result.data,
     };
+    activeAgents.push(agent);
   }
 
-  return currentInput;
+  if (activeAgents.length === 0) {
+    return null;
+  }
+
+  return { currentInput, activeAgents };
 }
 
 /**
- * Validates each per-agent frontmatter block and merges the results into the base rule sync input. Returns null if any block is invalid.
+ * Validates each per-agent rule block and merges successful sections into the
+ * base sync input. Invalid sections log a warning and that agent is skipped;
+ * if no agent is valid, returns null.
  */
 function extendRuleSyncInputFromAgentSections(
   runtime: CLIRuntime,
@@ -387,7 +420,7 @@ function extendRuleSyncInputFromAgentSections(
     currentInput: AgentRuleSyncSpec;
     sections: RuleFrontmatter['agents'];
   },
-): AgentRuleSyncSpec | null {
+): { currentInput: AgentRuleSyncSpec; activeAgents: SyncAgent[] } | null {
   const sectionValues = collectAgentSectionValues(runtime, {
     filePath: input.filePath,
     kind: 'rule',
@@ -399,6 +432,7 @@ function extendRuleSyncInputFromAgentSections(
   }
 
   let currentInput = input.currentInput;
+  const activeAgents: SyncAgent[] = [];
 
   for (const agent of SYNC_AGENTS) {
     const sourceDefinition = getRuleSourceDefinition(agent);
@@ -411,28 +445,34 @@ function extendRuleSyncInputFromAgentSections(
     );
 
     if (!result.success) {
-      runtime.logInfo(
-        `Skipping invalid rule frontmatter in ${input.filePath}: ${formatValidationIssues(
+      runtime.logWarn(
+        `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
           {
             issues: result.issues,
             pathPrefix: `agents.${agent}`,
           },
         )}`,
       );
-      return null;
+      continue;
     }
 
     currentInput = {
       ...currentInput,
       ...result.data,
     };
+    activeAgents.push(agent);
   }
 
-  return currentInput;
+  if (activeAgents.length === 0) {
+    return null;
+  }
+
+  return { currentInput, activeAgents };
 }
 
 /**
- * Builds a CommandSyncSource from parsed command frontmatter. Returns null if any per-agent section fails validation.
+ * Builds a command sync spec from per-agent `agents` blocks. Omits agents
+ * whose sections fail validation (with a warning); returns null if none are valid.
  */
 export function createAgentCmdSyncSpec(
   runtime: CLIRuntime,
@@ -442,8 +482,11 @@ export function createAgentCmdSyncSpec(
     body: string;
     frontmatter: CommandFrontmatter;
   },
-): AgentCmdSyncSpec | null {
-  return extendCommandSyncInputFromAgentSections(runtime, {
+): {
+  input: AgentCmdSyncSpec;
+  activeAgents: SyncAgent[];
+} | null {
+  const result = extendCommandSyncInputFromAgentSections(runtime, {
     filePath: input.filePath,
     currentInput: {
       name: input.frontmatter.name,
@@ -454,10 +497,17 @@ export function createAgentCmdSyncSpec(
     },
     sections: input.frontmatter.agents,
   });
+
+  if (!result) {
+    return null;
+  }
+
+  return { input: result.currentInput, activeAgents: result.activeAgents };
 }
 
 /**
- * Builds a RuleSyncSource from parsed rule frontmatter. Returns null if any per-agent section fails validation.
+ * Builds a rule sync spec from per-agent `agents` blocks. Omits agents
+ * whose sections fail validation (with a warning); returns null if none are valid.
  */
 export function createAgentRuleSyncSpec(
   runtime: CLIRuntime,
@@ -467,8 +517,11 @@ export function createAgentRuleSyncSpec(
     body: string;
     frontmatter: RuleFrontmatter;
   },
-): AgentRuleSyncSpec | null {
-  return extendRuleSyncInputFromAgentSections(runtime, {
+): {
+  input: AgentRuleSyncSpec;
+  activeAgents: SyncAgent[];
+} | null {
+  const result = extendRuleSyncInputFromAgentSections(runtime, {
     filePath: input.filePath,
     currentInput: {
       name: input.sourceFileStem,
@@ -481,4 +534,10 @@ export function createAgentRuleSyncSpec(
     },
     sections: input.frontmatter.agents,
   });
+
+  if (!result) {
+    return null;
+  }
+
+  return { input: result.currentInput, activeAgents: result.activeAgents };
 }

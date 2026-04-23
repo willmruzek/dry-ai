@@ -1,10 +1,13 @@
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+
 import { Chalk } from 'chalk';
 import fs from 'fs-extra';
 import { glob } from 'glob';
-import { createHash } from 'node:crypto';
-import path from 'node:path';
 import { z } from 'zod';
+
 import type { CLIRuntime } from '../cli.js';
+
 import {
   buildSyncTargets,
   createAgentCmdSyncSpec,
@@ -118,9 +121,7 @@ export async function syncToTargets(
 
   const previousManifest = await loadSyncManifest(context.syncManifestPath);
   const previousEntriesByOutputPath = new Map(
-    previousManifest.outputs.map(
-      (entry) => [entry.outputPath, entry] as const,
-    ),
+    previousManifest.outputs.map((entry) => [entry.outputPath, entry] as const),
   );
   const syncItems = [
     ...(await collectCommandSyncItems(context, runtime)),
@@ -153,7 +154,8 @@ export async function syncToTargets(
     );
   }
 
-  const desiredManifestEntries = collectManifestEntriesFromApplied(appliedItems);
+  const desiredManifestEntries =
+    collectManifestEntriesFromApplied(appliedItems);
   const preservedEntries = collectPreservedManifestEntries(
     previousManifest.outputs,
     {
@@ -201,7 +203,9 @@ function deriveOwnershipKeyForManifestEntry(
 async function ensureTargetDirectories(
   targetRoots: TargetRoots,
 ): Promise<void> {
-  await Promise.all(listTargetRootPaths(targetRoots).map(fs.ensureDir));
+  await Promise.all(
+    listTargetRootPaths(targetRoots).map((dir) => fs.ensureDir(dir)),
+  );
 }
 
 /**
@@ -413,14 +417,14 @@ async function collectCommandSyncItems(
     }
 
     const commandName = commandMetadata.name;
-    const commandInput = createAgentCmdSyncSpec(runtime, {
+    const commandSpec = createAgentCmdSyncSpec(runtime, {
       filePath,
       sourceFileStem: fileName,
       body,
       frontmatter: commandMetadata,
     });
 
-    if (!commandInput) {
+    if (!commandSpec) {
       continue;
     }
 
@@ -430,8 +434,9 @@ async function collectCommandSyncItems(
       sourcePath: filePath,
       targets: buildSyncTargets({
         kind: 'command',
-        input: commandInput,
+        input: commandSpec.input,
         targetRoots,
+        agents: commandSpec.activeAgents,
       }),
     });
   }
@@ -464,14 +469,14 @@ async function collectRuleSyncItems(
       continue;
     }
 
-    const ruleInput = createAgentRuleSyncSpec(runtime, {
+    const ruleSpec = createAgentRuleSyncSpec(runtime, {
       filePath,
       sourceFileStem: fileName,
       body,
       frontmatter: ruleMetadata,
     });
 
-    if (!ruleInput) {
+    if (!ruleSpec) {
       continue;
     }
 
@@ -481,8 +486,9 @@ async function collectRuleSyncItems(
       sourcePath: filePath,
       targets: buildSyncTargets({
         kind: 'rule',
-        input: ruleInput,
+        input: ruleSpec.input,
         targetRoots,
+        agents: ruleSpec.activeAgents,
       }),
     });
   }
@@ -716,9 +722,7 @@ function renderSyncReport(
 
   const sections =
     agentSections.length === 0
-      ? [
-          `${chalk.bold.cyan('Applied changes:')} ${chalk.green('None')}`,
-        ]
+      ? [`${chalk.bold.cyan('Applied changes:')} ${chalk.green('None')}`]
       : [chalk.bold.cyan('Applied changes:'), ...agentSections];
 
   if (skippedItems.length === 0) {
@@ -758,8 +762,7 @@ function collectAgentReportedSyncChanges(
   const appliedChanges = appliedItems.flatMap((appliedItem) =>
     appliedItem.changes
       .filter(
-        (change) =>
-          change.agent === agent && change.changeType !== 'unchanged',
+        (change) => change.agent === agent && change.changeType !== 'unchanged',
       )
       .map((change) => ({
         kind: appliedItem.item.kind,

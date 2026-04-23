@@ -1,8 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
+
 import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { runCLI } from '../../../src/cli.js';
+
 import {
   DEFAULT_CONFIG_ROOT,
   type MockFileSystemState,
@@ -346,9 +349,9 @@ describe('dry-ai skills add', () => {
         }
 
         expect(initialWrite).toEqual({ version: 1, skills: [] });
-        expect(
-          firstIncrementalWrite.skills.map((skill) => skill.name),
-        ).toEqual([MANAGED_SKILL_NAME]);
+        expect(firstIncrementalWrite.skills.map((skill) => skill.name)).toEqual(
+          [MANAGED_SKILL_NAME],
+        );
         expect(finalWrite.skills.map((skill) => skill.name)).toEqual(
           // `saveSkillsLockfile` sorts by name; `note-taker` < `review-helper`.
           [SECOND_SKILL_NAME, MANAGED_SKILL_NAME],

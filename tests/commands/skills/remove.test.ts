@@ -1,8 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
+
 import fsExtra from 'fs-extra';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { runCLI } from '../../../src/cli.js';
+
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
@@ -160,9 +163,7 @@ describe('dry-ai skills remove', () => {
         expect(mockFileSystem.directories.has(keptSkillDir)).toBe(true);
         for (const relativeFilePath of Object.keys(KEPT_SKILL.files)) {
           expect(
-            mockFileSystem.files.has(
-              path.join(keptSkillDir, relativeFilePath),
-            ),
+            mockFileSystem.files.has(path.join(keptSkillDir, relativeFilePath)),
           ).toBe(true);
         }
 

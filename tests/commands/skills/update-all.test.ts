@@ -1,8 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
+
 import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { runCLI } from '../../../src/cli.js';
+
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
@@ -409,11 +412,7 @@ describe('dry-ai skills update-all', () => {
         expect(
           readMockTextFile(
             mockFileSystem,
-            path.join(
-              DEFAULT_SKILLS_SOURCE_ROOT,
-              FIRST_SKILL.name,
-              'SKILL.md',
-            ),
+            path.join(DEFAULT_SKILLS_SOURCE_ROOT, FIRST_SKILL.name, 'SKILL.md'),
           ),
         ).toBe(skippedSkillOnDiskFiles['SKILL.md']);
 

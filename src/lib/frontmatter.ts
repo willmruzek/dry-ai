@@ -1,55 +1,35 @@
 import matter from 'gray-matter';
 import { z } from 'zod';
+
 import type { CLIRuntime } from '../cli.js';
-import { AGENT_DEFINITIONS } from './agent-definitions.js';
 
 export { compactObject } from './object-helpers.js';
 
 export const nonEmptyStringSchema = z.string().trim().min(1);
 
-export const agentFrontmatterSectionSchema = z.object({}).catchall(z.unknown());
-
-export const agentFrontmatterSectionsSchema = z
-  .record(z.string(), agentFrontmatterSectionSchema)
-  .optional();
-
 /**
- * Builds the Zod schema for the `agents:` frontmatter section by combining each agent's per-kind source schema from the registry.
+ * `agents` blocks are not validated with strict per-agent schemas at parse
+ * time, so a valid Copilot block can coexist with an invalid Cursor block (and
+ * vice versa); each agent is validated when building sync output.
  */
-export function createAgentFrontmatterSectionsSchema(kind: 'command' | 'rule') {
-  const shape: Record<string, z.ZodType<unknown>> = {};
-
-  for (const [agent, definition] of Object.entries(AGENT_DEFINITIONS)) {
-    shape[agent] = definition[kind].frontmatterSection.schema;
-  }
-
-  return z.object(shape).catchall(agentFrontmatterSectionSchema).optional();
-}
-
-export const commandAgentFrontmatterSectionsSchema =
-  createAgentFrontmatterSectionsSchema('command');
-
-export const ruleAgentFrontmatterSectionsSchema =
-  createAgentFrontmatterSectionsSchema('rule');
+const looseAgentBlocksSchema = z.record(z.string(), z.unknown()).optional();
 
 export const commandFrontmatterSchema = z
   .object({
     name: nonEmptyStringSchema,
     description: nonEmptyStringSchema,
-    agents: commandAgentFrontmatterSectionsSchema,
+    agents: looseAgentBlocksSchema,
   })
   .strict();
 
 export const ruleFrontmatterSchema = z
   .object({
     description: nonEmptyStringSchema,
-    agents: ruleAgentFrontmatterSectionsSchema,
+    agents: looseAgentBlocksSchema,
   })
   .strict();
 
-export type AgentFrontmatterSections = z.infer<
-  typeof agentFrontmatterSectionsSchema
->;
+export type AgentFrontmatterSections = z.infer<typeof looseAgentBlocksSchema>;
 export type CommandFrontmatter = z.infer<typeof commandFrontmatterSchema>;
 export type RuleFrontmatter = z.infer<typeof ruleFrontmatterSchema>;
 

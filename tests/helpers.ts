@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import path from 'node:path';
-import type fs from 'fs-extra';
 import type os from 'node:os';
+import path from 'node:path';
+
+import type fs from 'fs-extra';
 import { simpleGit } from 'simple-git';
 import { vi } from 'vitest';
 import type { MockedObject } from 'vitest';
+
 import { type CLIOptions, type StdioWriters } from '../src/cli.js';
 
 // ---- Types ----
@@ -60,7 +62,9 @@ export type MockedGitObject = MockedObject<
   >
 >;
 
-export type MockedOsObject = MockedObject<Pick<typeof os, 'homedir' | 'tmpdir'>>;
+export type MockedOsObject = MockedObject<
+  Pick<typeof os, 'homedir' | 'tmpdir'>
+>;
 
 export type TestEnv = {
   defaultConfigRoot: string;
@@ -633,13 +637,16 @@ export function configureMockOs(
  * configureMockGitClient(mockedGit, { fetchedCommit: 'abc123' });
  */
 export function createMockedGit(): MockedGitObject {
+  // `vi.fn()` is typed as `Mock<...>`; simple-git methods use heavy overloads that
+  // don't unify with `Mock` assignment. The stubs are configured in
+  // `configureMockGitClient`; cast once at the factory boundary.
   return {
     addRemote: vi.fn(),
     checkout: vi.fn(),
     fetch: vi.fn(),
     init: vi.fn(),
     revparse: vi.fn(),
-  } as unknown as MockedGitObject;
+  } as MockedGitObject;
 }
 
 /**
@@ -667,9 +674,7 @@ export function configureMockGitClient(
   mockedGit.checkout.mockResolvedValue(
     undefined as unknown as AwaitedReturn<typeof mockedGit.checkout>,
   );
-  mockedGit.revparse.mockResolvedValue(
-    fetchedCommit as unknown as AwaitedReturn<typeof mockedGit.revparse>,
-  );
+  mockedGit.revparse.mockResolvedValue(fetchedCommit);
 
   // Cast needed because we only stub the methods exercised by cloneRemoteRepo.
   vi.mocked(simpleGit).mockImplementation(
@@ -732,7 +737,8 @@ export const SAMPLE_IMPORTED_AT = '2026-04-14T00:00:00.000Z';
  * Sample normalized repository URL (HTTPS, with trailing `.git`) that
  * `normalizeRemoteRepo` would produce for the `anthropics/skills` shorthand.
  */
-export const SAMPLE_NORMALIZED_REPO = 'https://github.com/anthropics/skills.git';
+export const SAMPLE_NORMALIZED_REPO =
+  'https://github.com/anthropics/skills.git';
 
 // ---- Shared skill fixture helpers ----
 
@@ -815,4 +821,3 @@ export function seedRemoteSkillCheckout(
     );
   }
 }
-

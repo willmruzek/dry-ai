@@ -3,7 +3,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import { z } from 'zod';
+
 import { runCLI } from './cli.js';
 
 const EXECUTABLE_NAME = 'dry-ai';
