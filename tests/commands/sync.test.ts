@@ -2297,7 +2297,7 @@ describe('dry-ai sync', () => {
             mockFileSystem,
             path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
             JSON.stringify({
-              version: 2,
+              version: MOCK_SYNC_MANIFEST_VERSION,
               outputs: [
                 {
                   agent: 'nope',
