@@ -2,7 +2,7 @@
 
 Syncs command, rule, and skill sources from `~/.config/dry-ai` by default into supported agent targets.
 
-**Compared to [skills.sh](https://skills.sh):** with `dry-ai skills add`, you can **edit those files** and the CLI will not override them next `sync` run. This allows you to use existing skills and tailor them to your needs while keep track of their original sources.
+**Compared to [skills.sh](https://skills.sh):** with `dry-ai skills add`, you can **edit those files**, and the CLI will not override them on the next `sync` run. This allows you to use existing skills, tailor them to your needs, and keep track of their original sources.
 
 Global CLI options:
 
