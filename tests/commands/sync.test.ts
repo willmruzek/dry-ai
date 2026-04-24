@@ -2329,7 +2329,7 @@ describe('dry-ai sync', () => {
       );
       // priority: low
       it.todo(
-        'should either write only frontmatter or skips with documented behavior for a command whose body is empty after trim',
+        'should either write only frontmatter or skip with documented behavior for a command whose body is empty after trim',
       );
     });
   });
