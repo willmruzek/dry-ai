@@ -120,7 +120,11 @@ export async function syncToTargets(
   const { targetRoots } = context;
   await ensureTargetDirectories(targetRoots);
 
-  const previousManifest = await loadSyncManifest(context.syncManifestPath);
+  const { manifest: previousManifest, recoveryWarning } =
+    await loadSyncManifest(context.syncManifestPath);
+  if (recoveryWarning !== undefined) {
+    runtime.logWarn(recoveryWarning);
+  }
   const syncItems = [
     ...(await collectCommandSyncItems(context, runtime)),
     ...(await collectRuleSyncItems(context, runtime)),
@@ -204,31 +208,153 @@ async function ensureTargetDirectories(
   );
 }
 
+type SyncManifestLoadResult = {
+  manifest: SyncManifest;
+  recoveryWarning?: string;
+};
+
+function isSyncItemKind(value: string): value is SyncItemKind {
+  for (const allowed of SYNC_ITEM_KINDS) {
+    if (allowed === value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Parses `outputs` entries (best-effort) when the manifest file is not in the
+ * usual shape (e.g. wrong `version`, extra fields per row). Keep only rows
+ * with a recognized agent, kind, and non-empty name/outputPath.
+ */
+function parseLenientSyncManifestOutputs(
+  parsed: unknown,
+): { entries: SyncManifestEntry[]; sourceRowCount: number } | null {
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null;
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+
+  if (!('outputs' in candidate)) {
+    return null;
+  }
+
+  const rawOutputs = candidate.outputs;
+  if (!Array.isArray(rawOutputs)) {
+    return null;
+  }
+
+  const sourceRowCount = rawOutputs.length;
+  const entries: SyncManifestEntry[] = [];
+
+  for (const row of rawOutputs) {
+    if (typeof row !== 'object' || row === null) {
+      continue;
+    }
+
+    const record = row as Record<string, unknown>;
+    const agent = record.agent;
+    const kind = record.kind;
+    const name = record.name;
+    const outputPath = record.outputPath;
+
+    if (
+      typeof agent !== 'string' ||
+      typeof kind !== 'string' ||
+      typeof name !== 'string' ||
+      typeof outputPath !== 'string'
+    ) {
+      continue;
+    }
+
+    if (!isSyncAgent(agent)) {
+      continue;
+    }
+
+    if (!isSyncItemKind(kind)) {
+      continue;
+    }
+
+    if (name.length < 1 || outputPath.length < 1) {
+      continue;
+    }
+
+    entries.push({
+      agent,
+      kind,
+      name,
+      outputPath,
+    });
+  }
+
+  return { entries, sourceRowCount };
+}
+
 /**
  * Reads the sync manifest from disk, or returns an empty manifest if none
- * exists yet. Any failure to read, parse, or validate (including reading a
- * manifest from an older version of the schema) falls back to an empty
- * manifest, which causes the next sync to re-report every current output
- * as `(installed)` instead of `(unchanged)`.
+ * exists yet.
+ *
+ * When the file does not match the expected shape, this still tries to
+ * recover saved paths so cleanup of removed items can run. If that fails, the
+ * prior manifest is treated as empty and a warning notes that leftover
+ * files might not be removed automatically this run.
  */
-async function loadSyncManifest(manifestPath: string): Promise<SyncManifest> {
+async function loadSyncManifest(
+  manifestPath: string,
+): Promise<SyncManifestLoadResult> {
   if (!(await fs.pathExists(manifestPath))) {
-    return createSyncManifest([]);
+    return { manifest: createSyncManifest([]) };
   }
 
+  let rawManifest: string;
   try {
-    const rawManifest = await fs.readFile(manifestPath, 'utf8');
-    const parsedManifest: unknown = JSON.parse(rawManifest);
-    const result = syncManifestSchema.safeParse(parsedManifest);
-
-    if (result.success) {
-      return result.data;
-    }
+    rawManifest = await fs.readFile(manifestPath, 'utf8');
   } catch {
-    // Fall through to an empty manifest on any read/parse failure.
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `Could not read sync-manifest.json. Files left behind after you remove a command, rule, or skill might not be deleted automatically this run.`,
+    };
   }
 
-  return createSyncManifest([]);
+  let parsedManifest: unknown;
+  try {
+    parsedManifest = JSON.parse(rawManifest);
+  } catch {
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `sync-manifest.json is damaged or incomplete and could not be read. Files left behind after you remove something from your config might not be deleted automatically this run.`,
+    };
+  }
+
+  const strictResult = syncManifestSchema.safeParse(parsedManifest);
+  if (strictResult.success) {
+    return { manifest: strictResult.data };
+  }
+
+  const lenient = parseLenientSyncManifestOutputs(parsedManifest);
+  if (lenient !== null && lenient.entries.length > 0) {
+    return {
+      manifest: createSyncManifest(lenient.entries),
+      recoveryWarning: `sync-manifest.json did not match the expected layout, but ${lenient.entries.length} saved path(s) were recovered. Cleanup of old outputs should still work. The file will be rewritten when sync finishes.`,
+    };
+  }
+
+  if (lenient !== null && lenient.sourceRowCount === 0) {
+    return { manifest: createSyncManifest([]) };
+  }
+
+  if (lenient !== null && lenient.entries.length === 0) {
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `sync-manifest.json lists paths, but none of them could be understood. Files left behind after you remove something from your config might not be deleted automatically this run.`,
+    };
+  }
+
+  return {
+    manifest: createSyncManifest([]),
+    recoveryWarning: `sync-manifest.json could not be loaded. Files left behind after you remove something from your config might not be deleted automatically this run.`,
+  };
 }
 
 /**

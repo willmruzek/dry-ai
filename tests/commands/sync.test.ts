@@ -2220,13 +2220,109 @@ describe('dry-ai sync', () => {
         // Assert: clean run.
         expect(stderrMessages).toEqual([]);
       });
-    });
 
-    describe('when the on-disk manifest is invalid', () => {
-      // priority: med
-      it.todo(
-        'should fail the run with a clear error when sync-manifest.json is version-mismatched or structurally invalid',
-      );
+      describe('when the prior sync-manifest.json is not strictly valid', () => {
+        it('should prune stale outputs when output rows are recoverable after strict validation fails', async () => {
+          seedCurrentCommandSource();
+          const { copilotOutputPath, cursorWritePath, cursorOutputDir } =
+            arrangeStaleCommand();
+
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            JSON.stringify({
+              version: 999,
+              outputs: [
+                {
+                  agent: 'copilot',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: copilotOutputPath,
+                  contentHash: 'ignored-for-pruning',
+                },
+                {
+                  agent: 'cursor',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: cursorOutputDir,
+                },
+              ],
+            }),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(mockFileSystem.files.has(copilotOutputPath)).toBe(false);
+          expect(mockFileSystem.files.has(cursorWritePath)).toBe(false);
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /2 saved path\(s\) were recovered/i,
+          );
+        });
+
+        it('should warn and skip pruning when sync-manifest.json is not valid JSON', async () => {
+          seedCurrentCommandSource();
+          const { copilotOutputPath, cursorWritePath } = arrangeStaleCommand();
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            '{ not json',
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(mockFileSystem.files.has(copilotOutputPath)).toBe(true);
+          expect(mockFileSystem.files.has(cursorWritePath)).toBe(true);
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /damaged or incomplete/i,
+          );
+        });
+
+        it('should warn and skip pruning when manifest output rows are not valid', async () => {
+          seedCurrentCommandSource();
+          const { copilotOutputPath, cursorWritePath } = arrangeStaleCommand();
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            JSON.stringify({
+              version: 2,
+              outputs: [
+                {
+                  agent: 'nope',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: copilotOutputPath,
+                },
+              ],
+            }),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(mockFileSystem.files.has(copilotOutputPath)).toBe(true);
+          expect(mockFileSystem.files.has(cursorWritePath)).toBe(true);
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /none of them could be understood/i,
+          );
+        });
+      });
     });
   });
 
