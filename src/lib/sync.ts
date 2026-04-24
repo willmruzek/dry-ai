@@ -35,6 +35,9 @@ import {
 } from './frontmatter.js';
 import { computeDirectoryHashes } from './skills.js';
 
+/** Written to `sync-manifest.json`; bump when the manifest shape changes. */
+export const SYNC_MANIFEST_VERSION = 2 as const;
+
 type SyncAppliedChangeType = 'installed' | 'updated' | 'unchanged';
 type SyncChangeType = SyncAppliedChangeType | 'removed';
 
@@ -52,11 +55,10 @@ const syncManifestEntrySchema = z.object({
   kind: z.enum(SYNC_ITEM_KINDS),
   name: z.string().min(1),
   outputPath: z.string().min(1),
-  contentHash: z.string().min(1),
 });
 
 const syncManifestSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(SYNC_MANIFEST_VERSION),
   outputs: z.array(syncManifestEntrySchema),
 });
 
@@ -71,7 +73,6 @@ type ItemSyncChange = {
   target: SyncTarget;
   agent: SyncAgent;
   changeType: SyncAppliedChangeType;
-  contentHash: string;
 };
 
 type AppliedSyncItem = {
@@ -120,9 +121,6 @@ export async function syncToTargets(
   await ensureTargetDirectories(targetRoots);
 
   const previousManifest = await loadSyncManifest(context.syncManifestPath);
-  const previousEntriesByOutputPath = new Map(
-    previousManifest.outputs.map((entry) => [entry.outputPath, entry] as const),
-  );
   const syncItems = [
     ...(await collectCommandSyncItems(context, runtime)),
     ...(await collectRuleSyncItems(context, runtime)),
@@ -149,9 +147,7 @@ export async function syncToTargets(
   const appliedItems: AppliedSyncItem[] = [];
 
   for (const syncItem of syncableItems) {
-    appliedItems.push(
-      await applySyncItem(syncItem, previousEntriesByOutputPath),
-    );
+    appliedItems.push(await applySyncItem(syncItem));
   }
 
   const desiredManifestEntries =
@@ -261,7 +257,7 @@ function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
   }
 
   return {
-    version: 3,
+    version: SYNC_MANIFEST_VERSION,
     outputs: [...entriesByOutputPath.values()].sort(compareManifestEntries),
   };
 }
@@ -315,28 +311,82 @@ async function computeTargetContentHash(target: SyncTarget): Promise<string> {
 }
 
 /**
- * Determines the applied change type for one target by comparing the
- * would-be-written hash against the prior manifest entry's hash for the
- * same `outputPath`.
+ * SHA-256 of the bytes currently on disk for this target, using the same
+ * serialization as {@link computeTargetContentHash} so it can be compared
+ * to the would-be-written hash. Returns `undefined` if the artifact is
+ * missing or cannot be read.
+ */
+async function computeOnDiskContentHash(
+  target: SyncTarget,
+): Promise<string | undefined> {
+  if (target.targetType === 'markdown') {
+    const filePath = target.writePath;
+    try {
+      if (!(await fs.pathExists(filePath))) {
+        return undefined;
+      }
+      const content = await fs.readFile(filePath, 'utf8');
+      return createHash('sha256').update(content).digest('hex');
+    } catch {
+      return undefined;
+    }
+  }
+
+  try {
+    if (!(await fs.pathExists(target.outputPath))) {
+      return undefined;
+    }
+    const fileHashes = await computeDirectoryHashes(target.outputPath);
+    const serialized = JSON.stringify(
+      Object.entries(fileHashes).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    );
+    return createHash('sha256').update(serialized).digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * On-disk path that must exist for a target to be treated as already materialized.
+ * Matches what `writeSyncTarget` creates: markdown targets use `writePath` (the file),
+ * which can differ from manifest `outputPath` when that row names a parent directory
+ * (e.g. Cursor commands). Directory targets use `outputPath` as the copy root.
+ */
+function getSyncTargetArtifactPath(target: SyncTarget): string {
+  return target.targetType === 'markdown'
+    ? target.writePath
+    : target.outputPath;
+}
+
+/**
+ * Determines the applied change type by comparing on-disk bytes to the
+ * would-be-written hash (manifest does not store content hashes).
  *
- * - `unchanged`: output exists AND prior manifest entry's hash matches.
- *   The write is skipped entirely in `applySyncItem`.
- * - `installed`: output path does not exist on disk.
- * - `updated`: output exists but no hash match (missing manifest entry
- *   OR hash mismatch). The file is rewritten.
+ * - `unchanged`: the artifact path exists and on-disk content hashes to the
+ *   desired value.
+ * - `installed`: the artifact path does not exist on disk.
+ * - `updated`: the artifact exists but on-disk content does not match.
  */
 async function detectAppliedChangeType(input: {
   target: SyncTarget;
-  contentHash: string;
-  previousEntry: SyncManifestEntry | undefined;
+  desiredContentHash: string;
 }): Promise<SyncAppliedChangeType> {
-  const outputExists = await fs.pathExists(input.target.outputPath);
+  const artifactExists = await fs.pathExists(
+    getSyncTargetArtifactPath(input.target),
+  );
 
-  if (outputExists && input.previousEntry?.contentHash === input.contentHash) {
+  if (!artifactExists) {
+    return 'installed';
+  }
+
+  const onDiskHash = await computeOnDiskContentHash(input.target);
+  if (onDiskHash === input.desiredContentHash) {
     return 'unchanged';
   }
 
-  return outputExists ? 'updated' : 'installed';
+  return 'updated';
 }
 
 /**
@@ -344,15 +394,12 @@ async function detectAppliedChangeType(input: {
  * applied change type, and writes the output iff the change type is not
  * `unchanged`.
  */
-async function applySyncItem(
-  syncItem: SyncItem,
-  previousEntriesByOutputPath: ReadonlyMap<string, SyncManifestEntry>,
-): Promise<AppliedSyncItem> {
+async function applySyncItem(syncItem: SyncItem): Promise<AppliedSyncItem> {
   const directoryHashCache = new Map<string, Promise<string>>();
 
   const changes = await Promise.all(
     syncItem.targets.map(async (target): Promise<ItemSyncChange> => {
-      let contentHash: string;
+      let desiredContentHash: string;
       if (target.targetType === 'directory') {
         const cachedHashPromise = directoryHashCache.get(target.sourceDir);
         const contentHashPromise =
@@ -362,22 +409,20 @@ async function applySyncItem(
           directoryHashCache.set(target.sourceDir, contentHashPromise);
         }
 
-        contentHash = await contentHashPromise;
+        desiredContentHash = await contentHashPromise;
       } else {
-        contentHash = await computeTargetContentHash(target);
+        desiredContentHash = await computeTargetContentHash(target);
       }
 
       const changeType = await detectAppliedChangeType({
         target,
-        contentHash,
-        previousEntry: previousEntriesByOutputPath.get(target.outputPath),
+        desiredContentHash,
       });
 
       return {
         target,
         agent: parseSyncAgent(target.agent),
         changeType,
-        contentHash,
       };
     }),
   );
@@ -654,11 +699,7 @@ function collectSkippedOwnershipKeys(
 }
 
 /**
- * Converts applied sync items into manifest entries, carrying forward the
- * `contentHash` computed during apply. Unchanged targets contribute their
- * prior hash (since `applySyncItem` preserves the already-correct hash
- * when it skips the write), which keeps the manifest stable across runs
- * that don't modify anything.
+ * Converts applied sync items into manifest entries for desired outputs.
  */
 function collectManifestEntriesFromApplied(
   appliedItems: AppliedSyncItem[],
@@ -669,7 +710,6 @@ function collectManifestEntriesFromApplied(
       kind: appliedItem.item.kind,
       name: appliedItem.item.name,
       outputPath: change.target.outputPath,
-      contentHash: change.contentHash,
     })),
   );
 }
