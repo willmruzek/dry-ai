@@ -7,8 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { runCLI } from '../../src/cli.js';
-import { SYNC_AGENTS, type SyncAgent } from '../../src/lib/agents.js';
-import { SYNC_MANIFEST_VERSION } from '../../src/lib/sync.js';
+import type { SyncAgent } from '../../src/lib/agents.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
@@ -182,9 +181,11 @@ function buildExpectedTrioProductFilePaths(outputRoot: string): string[] {
   ];
 }
 
-/** On-disk sync manifest: current schema version, outputs with agent / kind / name / outputPath. */
+/** Fixture `sync-manifest.json` shape; `version` must match the CLI’s on-disk schema. */
+const MOCK_SYNC_MANIFEST_VERSION = 2 as const;
+
 const mockSyncManifestSchema = z.object({
-  version: z.literal(SYNC_MANIFEST_VERSION),
+  version: z.literal(MOCK_SYNC_MANIFEST_VERSION),
   outputs: z.array(
     z.object({
       agent: z.enum(['copilot', 'cursor']),
@@ -196,13 +197,13 @@ const mockSyncManifestSchema = z.object({
 });
 
 /**
- * Exhaustive `Record<SyncAgent, …>`: add a key for each agent in `AGENT_DEFINITIONS`
- * or TypeScript fails. Compared to `SYNC_AGENTS` in the registry-contract test.
+ * Exhaustive `Record<SyncAgent, …>`: `satisfies` requires a key for every registry
+ * agent or TypeScript fails at compile time.
  */
-const e2eOutputTreeTestCoverageByAgent: Record<SyncAgent, true> = {
+const e2eOutputTreeTestCoverageByAgent = {
   copilot: true,
   cursor: true,
-};
+} satisfies Record<SyncAgent, true>;
 
 function compareManifestEntryTuples(
   left: { agent: string; kind: string; name: string; outputPath: string },
@@ -369,10 +370,10 @@ describe('dry-ai sync', () => {
   ];
 
   describe('Registry contracts', () => {
-    it('should keep the e2e output-tree coverage map aligned with the registered agent list', () => {
-      expect(
-        (Object.keys(e2eOutputTreeTestCoverageByAgent) as SyncAgent[]).sort(),
-      ).toEqual([...SYNC_AGENTS].sort());
+    it('should keep the e2e output-tree coverage map exhaustive for every SyncAgent', () => {
+      // Compile-time guard is `satisfies Record<SyncAgent, true>` on the map; this
+      // keeps the value referenced so linters do not treat it as dead code.
+      expect(e2eOutputTreeTestCoverageByAgent).toBeDefined();
     });
 
     describe('for Copilot and Cursor target trees', () => {
@@ -1652,7 +1653,7 @@ describe('dry-ai sync', () => {
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
           JSON.stringify({
-            version: SYNC_MANIFEST_VERSION,
+            version: MOCK_SYNC_MANIFEST_VERSION,
             outputs: [
               {
                 agent: 'copilot',
@@ -1877,7 +1878,7 @@ describe('dry-ai sync', () => {
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
           JSON.stringify({
-            version: SYNC_MANIFEST_VERSION,
+            version: MOCK_SYNC_MANIFEST_VERSION,
             outputs: staleEntries,
           }),
         );
