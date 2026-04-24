@@ -208,8 +208,9 @@ async function ensureTargetDirectories(
  * Reads the sync manifest from disk, or returns an empty manifest if none
  * exists yet. Any failure to read, parse, or validate (including reading a
  * manifest from an older version of the schema) falls back to an empty
- * manifest, which causes the next sync to re-report every current output
- * as `(installed)` instead of `(unchanged)`.
+ * manifest. On the next sync, current outputs are re-evaluated from on-disk
+ * state, so existing matching outputs may still be reported as `(unchanged)`
+ * rather than `(installed)`.
  */
 async function loadSyncManifest(manifestPath: string): Promise<SyncManifest> {
   if (!(await fs.pathExists(manifestPath))) {
