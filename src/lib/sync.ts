@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { Chalk } from 'chalk';
@@ -32,8 +33,12 @@ import {
   ruleFrontmatterSchema,
   validateFrontmatter,
 } from './frontmatter.js';
+import { computeDirectoryHashes } from './skills.js';
 
-type SyncAppliedChangeType = 'installed' | 'updated';
+/** Written to `sync-manifest.json`; bump when the manifest shape changes. */
+export const SYNC_MANIFEST_VERSION = 2 as const;
+
+type SyncAppliedChangeType = 'installed' | 'updated' | 'unchanged';
 type SyncChangeType = SyncAppliedChangeType | 'removed';
 
 const chalk = new Chalk({ level: 3 });
@@ -53,7 +58,7 @@ const syncManifestEntrySchema = z.object({
 });
 
 const syncManifestSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(SYNC_MANIFEST_VERSION),
   outputs: z.array(syncManifestEntrySchema),
 });
 
@@ -65,6 +70,7 @@ type SyncItem = {
 };
 
 type ItemSyncChange = {
+  target: SyncTarget;
   agent: SyncAgent;
   changeType: SyncAppliedChangeType;
 };
@@ -114,7 +120,11 @@ export async function syncToTargets(
   const { targetRoots } = context;
   await ensureTargetDirectories(targetRoots);
 
-  const previousManifest = await loadSyncManifest(context.syncManifestPath);
+  const { manifest: previousManifest, recoveryWarning } =
+    await loadSyncManifest(context.syncManifestPath);
+  if (recoveryWarning !== undefined) {
+    runtime.logWarn(recoveryWarning);
+  }
   const syncItems = [
     ...(await collectCommandSyncItems(context, runtime)),
     ...(await collectRuleSyncItems(context, runtime)),
@@ -123,9 +133,10 @@ export async function syncToTargets(
   const { syncableItems, skippedItems } =
     collectConflictFilterResult(syncItems);
   const skippedOwnershipKeys = collectSkippedOwnershipKeys(skippedItems);
-  const desiredManifestEntries = collectManifestEntries(syncableItems);
   const desiredOutputPaths = new Set(
-    desiredManifestEntries.map((entry) => entry.outputPath),
+    syncableItems.flatMap((syncItem) =>
+      syncItem.targets.map((target) => target.outputPath),
+    ),
   );
   const removedEntries = collectRemovedManifestEntries(
     previousManifest.outputs,
@@ -143,6 +154,8 @@ export async function syncToTargets(
     appliedItems.push(await applySyncItem(syncItem));
   }
 
+  const desiredManifestEntries =
+    collectManifestEntriesFromApplied(appliedItems);
   const preservedEntries = collectPreservedManifestEntries(
     previousManifest.outputs,
     {
@@ -195,18 +208,163 @@ async function ensureTargetDirectories(
   );
 }
 
+type SyncManifestLoadResult = {
+  manifest: SyncManifest;
+  recoveryWarning?: string;
+};
+
+function isSyncItemKind(value: string): value is SyncItemKind {
+  for (const allowed of SYNC_ITEM_KINDS) {
+    if (allowed === value) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
- * Reads the sync manifest from disk, or returns an empty manifest if none exists yet.
+ * Parses `outputs` entries (best-effort) when the manifest file is not in the
+ * usual shape (e.g. wrong `version`, missing required fields, invalid field
+ * types, or malformed rows in `outputs`). Keep only rows with a recognized
+ * agent, kind, and non-empty name/outputPath.
  */
-async function loadSyncManifest(manifestPath: string): Promise<SyncManifest> {
-  if (!(await fs.pathExists(manifestPath))) {
-    return createSyncManifest([]);
+function parseLenientSyncManifestOutputs(
+  parsed: unknown,
+): { entries: SyncManifestEntry[]; sourceRowCount: number } | null {
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null;
   }
 
-  const rawManifest = await fs.readFile(manifestPath, 'utf8');
-  const parsedManifest: unknown = JSON.parse(rawManifest);
+  const candidate = parsed as Record<string, unknown>;
 
-  return syncManifestSchema.parse(parsedManifest);
+  if (!('outputs' in candidate)) {
+    return null;
+  }
+
+  const rawOutputs = candidate.outputs;
+  if (!Array.isArray(rawOutputs)) {
+    return null;
+  }
+
+  const sourceRowCount = rawOutputs.length;
+  const entries: SyncManifestEntry[] = [];
+
+  for (const row of rawOutputs) {
+    if (typeof row !== 'object' || row === null) {
+      continue;
+    }
+
+    const record = row as Record<string, unknown>;
+    const agent = record.agent;
+    const kind = record.kind;
+    const name = record.name;
+    const outputPath = record.outputPath;
+
+    if (
+      typeof agent !== 'string' ||
+      typeof kind !== 'string' ||
+      typeof name !== 'string' ||
+      typeof outputPath !== 'string'
+    ) {
+      continue;
+    }
+
+    if (!isSyncAgent(agent)) {
+      continue;
+    }
+
+    if (!isSyncItemKind(kind)) {
+      continue;
+    }
+
+    if (name.length < 1 || outputPath.length < 1) {
+      continue;
+    }
+
+    entries.push({
+      agent,
+      kind,
+      name,
+      outputPath,
+    });
+  }
+
+  return { entries, sourceRowCount };
+}
+
+/**
+ * Reads the sync manifest from disk, or returns an empty manifest if none
+ * exists yet.
+ *
+ * Any failure to read, parse, or validate (including an older schema version)
+ * falls back to an empty manifest when recovery is not possible. When the file
+ * does not match the expected shape, this still tries to recover saved paths so
+ * cleanup of removed items can run; if that fails, the prior manifest is empty
+ * and a warning notes that leftover files can stay untracked until you remove
+ * them manually.
+ *
+ * On the next sync after a fallback, current outputs are re-evaluated from
+ * on-disk state, so existing matching outputs may still be reported as
+ * `(unchanged)` rather than `(installed)`.
+ */
+async function loadSyncManifest(
+  manifestPath: string,
+): Promise<SyncManifestLoadResult> {
+  if (!(await fs.pathExists(manifestPath))) {
+    return { manifest: createSyncManifest([]) };
+  }
+
+  let rawManifest: string;
+  try {
+    rawManifest = await fs.readFile(manifestPath, 'utf8');
+  } catch {
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `Could not read sync-manifest.json. Files left behind after you remove a command, rule, or skill can stay untracked and require manual cleanup.`,
+    };
+  }
+
+  let parsedManifest: unknown;
+  try {
+    parsedManifest = JSON.parse(rawManifest);
+  } catch {
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `sync-manifest.json is damaged or incomplete and could not be read. Files left behind after you remove something from your config can stay untracked and require manual cleanup.`,
+    };
+  }
+
+  const strictResult = syncManifestSchema.safeParse(parsedManifest);
+  if (strictResult.success) {
+    return { manifest: strictResult.data };
+  }
+
+  const lenient = parseLenientSyncManifestOutputs(parsedManifest);
+  if (lenient !== null && lenient.entries.length > 0) {
+    return {
+      manifest: createSyncManifest(lenient.entries),
+      recoveryWarning: `sync-manifest.json did not match the expected layout, but ${lenient.entries.length} saved path(s) were recovered. Cleanup of old outputs should still work. The file will be rewritten when sync finishes.`,
+    };
+  }
+
+  if (lenient !== null && lenient.sourceRowCount === 0) {
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `sync-manifest.json did not match the expected layout and contains no output rows to recover. The file will be rewritten when sync finishes.`,
+    };
+  }
+
+  if (lenient !== null && lenient.entries.length === 0) {
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `sync-manifest.json lists paths, but none of them could be understood. Files left behind after you remove something from your config can stay untracked and require manual cleanup.`,
+    };
+  }
+
+  return {
+    manifest: createSyncManifest([]),
+    recoveryWarning: `sync-manifest.json could not be loaded. Files left behind after you remove something from your config can stay untracked and require manual cleanup.`,
+  };
 }
 
 /**
@@ -235,7 +393,7 @@ function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
   }
 
   return {
-    version: 2,
+    version: SYNC_MANIFEST_VERSION,
     outputs: [...entriesByOutputPath.values()].sort(compareManifestEntries),
   };
 }
@@ -263,27 +421,154 @@ async function writeMarkdownFile<Metadata extends Record<string, unknown>>(
 }
 
 /**
- * Detects whether each agent target for one item will be installed or updated.
+ * Computes a content hash for one sync target that identifies the bytes
+ * that WOULD be written on the next sync. Markdown targets hash the exact
+ * rendered output (frontmatter + body). Directory targets hash a sorted,
+ * serialized snapshot of per-file SHA-256 hashes under the source
+ * directory. The hash is stable across runs as long as the effective
+ * content is unchanged, and is used to detect the `unchanged` branch.
  */
-async function detectSyncChanges(
-  syncItem: SyncItem,
-): Promise<ItemSyncChange[]> {
-  return Promise.all(
-    syncItem.targets.map(async (target) => ({
-      agent: parseSyncAgent(target.agent),
-      changeType: (await fs.pathExists(target.outputPath))
-        ? 'updated'
-        : 'installed',
-    })),
+async function computeTargetContentHash(target: SyncTarget): Promise<string> {
+  if (target.targetType === 'markdown') {
+    const content = renderMarkdown({
+      metadata: target.metadata,
+      body: target.body,
+    });
+    return createHash('sha256').update(content).digest('hex');
+  }
+
+  const fileHashes = await computeDirectoryHashes(target.sourceDir);
+  const serialized = JSON.stringify(
+    Object.entries(fileHashes).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
   );
+  return createHash('sha256').update(serialized).digest('hex');
 }
 
 /**
- * Applies one sync item and records the change type for each agent target.
+ * SHA-256 of the bytes currently on disk for this target, using the same
+ * serialization as {@link computeTargetContentHash} so it can be compared
+ * to the would-be-written hash. Returns `undefined` if the artifact is
+ * missing or cannot be read.
+ */
+async function computeOnDiskContentHash(
+  target: SyncTarget,
+): Promise<string | undefined> {
+  if (target.targetType === 'markdown') {
+    const filePath = target.writePath;
+    try {
+      if (!(await fs.pathExists(filePath))) {
+        return undefined;
+      }
+      const content = await fs.readFile(filePath, 'utf8');
+      return createHash('sha256').update(content).digest('hex');
+    } catch {
+      return undefined;
+    }
+  }
+
+  try {
+    if (!(await fs.pathExists(target.outputPath))) {
+      return undefined;
+    }
+    const fileHashes = await computeDirectoryHashes(target.outputPath);
+    const serialized = JSON.stringify(
+      Object.entries(fileHashes).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    );
+    return createHash('sha256').update(serialized).digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * On-disk path that must exist for a target to be treated as already materialized.
+ * Matches what `writeSyncTarget` creates: markdown targets use `writePath` (the file),
+ * which can differ from manifest `outputPath` when that row names a parent directory
+ * (e.g. Cursor commands). Directory targets use `outputPath` as the copy root.
+ */
+function getSyncTargetArtifactPath(target: SyncTarget): string {
+  return target.targetType === 'markdown'
+    ? target.writePath
+    : target.outputPath;
+}
+
+/**
+ * Determines the applied change type by comparing on-disk bytes to the
+ * would-be-written hash (manifest does not store content hashes).
+ *
+ * - `unchanged`: the artifact path exists and on-disk content hashes to the
+ *   desired value.
+ * - `installed`: the artifact path does not exist on disk.
+ * - `updated`: the artifact exists but on-disk content does not match.
+ */
+async function detectAppliedChangeType(input: {
+  target: SyncTarget;
+  desiredContentHash: string;
+}): Promise<SyncAppliedChangeType> {
+  const artifactExists = await fs.pathExists(
+    getSyncTargetArtifactPath(input.target),
+  );
+
+  if (!artifactExists) {
+    return 'installed';
+  }
+
+  const onDiskHash = await computeOnDiskContentHash(input.target);
+  if (onDiskHash === input.desiredContentHash) {
+    return 'unchanged';
+  }
+
+  return 'updated';
+}
+
+/**
+ * Applies one sync item: computes a content hash per target, decides the
+ * applied change type, and writes the output iff the change type is not
+ * `unchanged`.
  */
 async function applySyncItem(syncItem: SyncItem): Promise<AppliedSyncItem> {
-  const changes = await detectSyncChanges(syncItem);
-  await writeSyncItem(syncItem);
+  const directoryHashCache = new Map<string, Promise<string>>();
+
+  const changes = await Promise.all(
+    syncItem.targets.map(async (target): Promise<ItemSyncChange> => {
+      let desiredContentHash: string;
+      if (target.targetType === 'directory') {
+        const cachedHashPromise = directoryHashCache.get(target.sourceDir);
+        const contentHashPromise =
+          cachedHashPromise ?? computeTargetContentHash(target);
+
+        if (!cachedHashPromise) {
+          directoryHashCache.set(target.sourceDir, contentHashPromise);
+        }
+
+        desiredContentHash = await contentHashPromise;
+      } else {
+        desiredContentHash = await computeTargetContentHash(target);
+      }
+
+      const changeType = await detectAppliedChangeType({
+        target,
+        desiredContentHash,
+      });
+
+      return {
+        target,
+        agent: parseSyncAgent(target.agent),
+        changeType,
+      };
+    }),
+  );
+
+  for (const change of changes) {
+    if (change.changeType === 'unchanged') {
+      continue;
+    }
+    await writeSyncTarget(change.target);
+  }
 
   return {
     item: syncItem,
@@ -301,15 +586,6 @@ async function writeSyncTarget(target: SyncTarget): Promise<void> {
   }
 
   await copyDirectoryContents(target.sourceDir, target.outputPath);
-}
-
-/**
- * Writes one sync item to all of its target outputs.
- */
-async function writeSyncItem(syncItem: SyncItem): Promise<void> {
-  for (const target of syncItem.targets) {
-    await writeSyncTarget(target);
-  }
 }
 
 /**
@@ -559,15 +835,17 @@ function collectSkippedOwnershipKeys(
 }
 
 /**
- * Converts sync items into manifest entries for the current desired outputs.
+ * Converts applied sync items into manifest entries for desired outputs.
  */
-function collectManifestEntries(syncItems: SyncItem[]): SyncManifestEntry[] {
-  return syncItems.flatMap((syncItem) =>
-    syncItem.targets.map((target) => ({
-      agent: parseSyncAgent(target.agent),
-      kind: syncItem.kind,
-      name: syncItem.name,
-      outputPath: target.outputPath,
+function collectManifestEntriesFromApplied(
+  appliedItems: AppliedSyncItem[],
+): SyncManifestEntry[] {
+  return appliedItems.flatMap((appliedItem) =>
+    appliedItem.changes.map((change) => ({
+      agent: change.agent,
+      kind: appliedItem.item.kind,
+      name: appliedItem.item.name,
+      outputPath: change.target.outputPath,
     })),
   );
 }
@@ -627,16 +905,17 @@ function renderSyncReport(
   removedEntries: SyncManifestEntry[],
   skippedItems: SkippedSyncItem[],
 ): string {
-  const sections = [chalk.bold.cyan('Applied changes:')];
+  const agentSections = SYNC_AGENTS.map((agent) =>
+    renderAgentSyncSection(
+      getAgentLabel(agent),
+      collectAgentReportedSyncChanges(appliedItems, removedEntries, agent),
+    ),
+  ).filter((section): section is string => section !== undefined);
 
-  for (const agent of SYNC_AGENTS) {
-    sections.push(
-      renderAgentSyncSection(
-        getAgentLabel(agent),
-        collectAgentReportedSyncChanges(appliedItems, removedEntries, agent),
-      ),
-    );
-  }
+  const sections =
+    agentSections.length === 0
+      ? [`${chalk.bold.cyan('Applied changes:')} ${chalk.green('None')}`]
+      : [chalk.bold.cyan('Applied changes:'), ...agentSections];
 
   if (skippedItems.length === 0) {
     sections.push(
@@ -674,7 +953,9 @@ function collectAgentReportedSyncChanges(
 ): ReportedAgentSyncChange[] {
   const appliedChanges = appliedItems.flatMap((appliedItem) =>
     appliedItem.changes
-      .filter((change) => change.agent === agent)
+      .filter(
+        (change) => change.agent === agent && change.changeType !== 'unchanged',
+      )
       .map((change) => ({
         kind: appliedItem.item.kind,
         name: appliedItem.item.name,
@@ -694,16 +975,22 @@ function collectAgentReportedSyncChanges(
 
 /**
  * Renders the synced items for one agent grouped by item kind.
+ * Returns `undefined` when there is nothing to report for this agent
+ * (so empty agent headings are omitted from the summary).
  */
 function renderAgentSyncSection(
   agentLabel: string,
   reportedChanges: ReportedAgentSyncChange[],
-): string {
+): string | undefined {
   const kindSections = [
     renderKindSyncLine('commands', 'command', reportedChanges),
     renderKindSyncLine('rules', 'rule', reportedChanges),
     renderKindSyncLine('skills', 'skill', reportedChanges),
   ].filter((section) => section !== undefined);
+
+  if (kindSections.length === 0) {
+    return undefined;
+  }
 
   return [`- ${colorAgentLabel(agentLabel)}`, ...kindSections].join('\n');
 }

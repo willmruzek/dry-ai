@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { runCLI } from '../../src/cli.js';
-import { SYNC_AGENTS, type SyncAgent } from '../../src/lib/agents.js';
+import type { SyncAgent } from '../../src/lib/agents.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
@@ -19,6 +19,7 @@ import {
   createTestEnv,
   normalizeMockPath,
   readMockTextFile,
+  removeMockPath,
   storeMockTextFile,
 } from '../helpers.js';
 
@@ -180,9 +181,11 @@ function buildExpectedTrioProductFilePaths(outputRoot: string): string[] {
   ];
 }
 
-/** On-disk sync manifest: version 2, outputs with agent / kind / name / outputPath. */
+/** Fixture `sync-manifest.json` shape; `version` must match the CLI’s on-disk schema. */
+const MOCK_SYNC_MANIFEST_VERSION = 2 as const;
+
 const mockSyncManifestSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(MOCK_SYNC_MANIFEST_VERSION),
   outputs: z.array(
     z.object({
       agent: z.enum(['copilot', 'cursor']),
@@ -194,13 +197,13 @@ const mockSyncManifestSchema = z.object({
 });
 
 /**
- * Exhaustive `Record<SyncAgent, …>`: add a key for each agent in `AGENT_DEFINITIONS`
- * or TypeScript fails. Compared to `SYNC_AGENTS` in the registry-contract test.
+ * Exhaustive `Record<SyncAgent, …>`: `satisfies` requires a key for every registry
+ * agent or TypeScript fails at compile time.
  */
-const e2eOutputTreeTestCoverageByAgent: Record<SyncAgent, true> = {
+const e2eOutputTreeTestCoverageByAgent = {
   copilot: true,
   cursor: true,
-};
+} satisfies Record<SyncAgent, true>;
 
 function compareManifestEntryTuples(
   left: { agent: string; kind: string; name: string; outputPath: string },
@@ -366,152 +369,15 @@ describe('dry-ai sync', () => {
     path.join(VIRTUAL_HOME_DIR, '.cursor', 'skills', 'my-skill', 'SKILL.md'),
   ];
 
-  describe('Registry contract', () => {
-    describe('generic sync (agent-agnostic)', () => {
-      it('should keep the e2e output-tree coverage map aligned with the registered agent list when both are compared', () => {
-        expect(
-          (Object.keys(e2eOutputTreeTestCoverageByAgent) as SyncAgent[]).sort(),
-        ).toEqual([...SYNC_AGENTS].sort());
-      });
-
-      it('should write one target per (item, agent) and add manifest lines for every agent when commands, rules, and skills are present', async () => {
-        arrangeBasicSources();
-        const { cliOptions, stderrMessages } = createTestEnv();
-
-        await runCLI({
-          argv: ['sync'],
-          ...cliOptions,
-        });
-
-        expect(stderrMessages).toEqual([]);
-
-        assertMockSyncManifestMatchesTrio(
-          mockFileSystem,
-          DEFAULT_CONFIG_ROOT,
-          VIRTUAL_HOME_DIR,
-        );
-      });
-
-      it.each([
-        {
-          label: 'invalid Cursor block',
-          fileStem: 'bad-cursor-cmd',
-          fileContent: [
-            '---',
-            'name: my-cmd',
-            'description: Test command',
-            'agents:',
-            '  copilot: {}',
-            '  cursor:',
-            '    disable-model-invocation: "nope"',
-            '---',
-            '',
-            'Command body',
-            '',
-          ].join('\n'),
-          expectCopilotPrompt: true,
-          expectCursorCommandSkill: false,
-          warnPattern:
-            /Skipping Cursor for .*bad-cursor-cmd\.md.*agents\.cursor/s,
-        },
-        {
-          label: 'invalid Copilot block',
-          fileStem: 'bad-copilot-cmd',
-          fileContent: [
-            '---',
-            'name: my-cmd',
-            'description: Test command',
-            'agents:',
-            '  copilot:',
-            '    not-in-schema: true',
-            '  cursor: {}',
-            '---',
-            '',
-            'Command body',
-            '',
-          ].join('\n'),
-          expectCopilotPrompt: false,
-          expectCursorCommandSkill: true,
-          warnPattern:
-            /Skipping Copilot for .*bad-copilot-cmd\.md.*agents\.copilot/s,
-        },
-      ] as const)(
-        'should skip only the failing side, name that agent in the warning, and still write the other agent output for the same file when an agents block is invalid (case: %s)',
-        async ({
-          fileStem,
-          fileContent,
-          expectCopilotPrompt,
-          expectCursorCommandSkill,
-          warnPattern,
-        }) => {
-          storeMockTextFile(
-            mockFileSystem,
-            path.join(DEFAULT_CONFIG_ROOT, 'commands', `${fileStem}.md`),
-            fileContent,
-          );
-
-          const { cliOptions, stderrMessages } = createTestEnv();
-
-          await runCLI({
-            argv: ['sync'],
-            ...cliOptions,
-          });
-
-          const copilotPrompt = path.join(
-            VIRTUAL_HOME_DIR,
-            '.copilot',
-            'prompts',
-            `${fileStem}.prompt.md`,
-          );
-          const cursorSkill = path.join(
-            VIRTUAL_HOME_DIR,
-            '.cursor',
-            'skills',
-            'my-cmd',
-            'SKILL.md',
-          );
-
-          if (expectCopilotPrompt) {
-            expect(mockFileSystem.files.has(copilotPrompt)).toBe(true);
-            expect(readMockTextFile(mockFileSystem, copilotPrompt)).toContain(
-              'Command body',
-            );
-          } else {
-            expect(mockFileSystem.files.has(copilotPrompt)).toBe(false);
-          }
-
-          if (expectCursorCommandSkill) {
-            expect(mockFileSystem.files.has(cursorSkill)).toBe(true);
-            expect(readMockTextFile(mockFileSystem, cursorSkill)).toContain(
-              'Command body',
-            );
-          } else {
-            expect(mockFileSystem.files.has(cursorSkill)).toBe(false);
-          }
-
-          expect(stderrMessages).toHaveLength(1);
-          expect(stripAnsi(stderrMessages.join(''))).toMatch(warnPattern);
-        },
-      );
-
-      // priority: med
-      it.todo(
-        'should order the sync report and manifest by registry agent order and by item kind when rendering',
-      );
-
-      // priority: med
-      it.todo(
-        'should derive expected agent labels and output roots from the registry in shared helpers',
-      );
-
-      // priority: med
-      it.todo(
-        'should update manifest removal so each agent that lost an item drops the right rows when a source vanishes, even as the agent set grows',
-      );
+  describe('Registry contracts', () => {
+    it('should keep the e2e output-tree coverage map exhaustive for every SyncAgent', () => {
+      // Compile-time guard is `satisfies Record<SyncAgent, true>` on the map; this
+      // keeps the value referenced so linters do not treat it as dead code.
+      expect(e2eOutputTreeTestCoverageByAgent).toBeDefined();
     });
 
-    describe('Copilot and Cursor agent targets', () => {
-      it('should place command, rule, and skill files under the Copilot and Cursor home target trees (prompts, instructions, skills, rules) when syncing the basic trio', async () => {
+    describe('for Copilot and Cursor target trees', () => {
+      it('should place command, rule, and skill files under each agent home tree (prompts, instructions, skills, rules) for the basic trio', async () => {
         const copilotTargetRoots = {
           prompts: path.join(VIRTUAL_HOME_DIR, '.copilot', 'prompts'),
           instructions: path.join(VIRTUAL_HOME_DIR, '.copilot', 'instructions'),
@@ -548,9 +414,134 @@ describe('dry-ai sync', () => {
         }
       });
 
+      describe('when agent is Copilot', () => {
+        it('should write the command prompt and warn when the Cursor agents block is invalid', async () => {
+          const fileStem = 'bad-cursor-cmd';
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'commands', `${fileStem}.md`),
+            [
+              '---',
+              'name: my-cmd',
+              'description: Test command',
+              'agents:',
+              '  copilot: {}',
+              '  cursor:',
+              '    disable-model-invocation: "nope"',
+              '---',
+              '',
+              'Command body',
+              '',
+            ].join('\n'),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          const copilotPrompt = path.join(
+            VIRTUAL_HOME_DIR,
+            '.copilot',
+            'prompts',
+            `${fileStem}.prompt.md`,
+          );
+          const cursorSkill = path.join(
+            VIRTUAL_HOME_DIR,
+            '.cursor',
+            'skills',
+            'my-cmd',
+            'SKILL.md',
+          );
+
+          expect(mockFileSystem.files.has(copilotPrompt)).toBe(true);
+          expect(readMockTextFile(mockFileSystem, copilotPrompt)).toContain(
+            'Command body',
+          );
+          expect(mockFileSystem.files.has(cursorSkill)).toBe(false);
+
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /Skipping Cursor for .*bad-cursor-cmd\.md.*agents\.cursor/s,
+          );
+        });
+      });
+
+      describe('when agent is Cursor', () => {
+        it('should write the command skill and warn when the Copilot agents block is invalid', async () => {
+          const fileStem = 'bad-copilot-cmd';
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'commands', `${fileStem}.md`),
+            [
+              '---',
+              'name: my-cmd',
+              'description: Test command',
+              'agents:',
+              '  copilot:',
+              '    not-in-schema: true',
+              '  cursor: {}',
+              '---',
+              '',
+              'Command body',
+              '',
+            ].join('\n'),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          const copilotPrompt = path.join(
+            VIRTUAL_HOME_DIR,
+            '.copilot',
+            'prompts',
+            `${fileStem}.prompt.md`,
+          );
+          const cursorSkill = path.join(
+            VIRTUAL_HOME_DIR,
+            '.cursor',
+            'skills',
+            'my-cmd',
+            'SKILL.md',
+          );
+
+          expect(mockFileSystem.files.has(copilotPrompt)).toBe(false);
+          expect(mockFileSystem.files.has(cursorSkill)).toBe(true);
+          expect(readMockTextFile(mockFileSystem, cursorSkill)).toContain(
+            'Command body',
+          );
+
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /Skipping Copilot for .*bad-copilot-cmd\.md.*agents\.copilot/s,
+          );
+        });
+      });
+
       // priority: med
       it.todo(
-        'should show "Copilot" and "Cursor" as the per-agent report labels from the registry when rendering Applied changes',
+        'should order the sync report and manifest by registry agent order and by item kind',
+      );
+
+      // priority: med
+      it.todo(
+        'should derive expected agent labels and output roots from the registry in shared helpers',
+      );
+
+      // priority: med
+      it.todo(
+        'should update manifest removal so each agent that lost an item drops the right rows when a source vanishes, even as the agent set grows',
+      );
+
+      // priority: med
+      it.todo(
+        'should show "Copilot" and "Cursor" as the per-agent report labels from the registry under Applied changes',
       );
 
       // priority: med
@@ -560,11 +551,11 @@ describe('dry-ai sync', () => {
 
       // priority: low
       it.todo(
-        'should place partial writes on the expected per-agent paths with the expected file types when one agent’s block is invalid and the other still syncs',
+        'should place partial writes on the expected per-agent paths with the expected file types when one agent block is invalid and the other still syncs',
       );
     });
 
-    describe('stale or invalid registry in manifest', () => {
+    describe('when the manifest references a stale or invalid registry', () => {
       // priority: med
       it.todo(
         'should fail the run with a clear error when the manifest names an agent that no longer exists',
@@ -580,9 +571,9 @@ describe('dry-ai sync', () => {
     });
   });
 
-  describe('Core writes, discovery, and partial per-agent rules', () => {
-    describe('basic sync', () => {
-      it('should write commands, rules, and skills to every supported agent target when the basic config is present', async () => {
+  describe('Core sync: writes, discovery, and partial per-agent rules', () => {
+    describe('with the default trio (command, rule, skill)', () => {
+      it('should write commands, rules, and skills to every supported agent target', async () => {
         arrangeBasicSources();
 
         const { cliOptions, stderrMessages } = createTestEnv();
@@ -611,94 +602,502 @@ describe('dry-ai sync', () => {
        * use N>1 commands, rules, or skill folders to ensure discovery
        * scales (no merging, no single-item assumptions).
        */
-      it('should write one output per command source when multiple command files exist in the config root', async () => {
-        storeMockTextFile(
-          mockFileSystem,
-          path.join(DEFAULT_CONFIG_ROOT, 'commands', 'alpha-cmd.md'),
-          [
-            '---',
-            'name: alpha-cmd',
-            'description: Alpha command',
-            '---',
-            '',
+      describe('with multiple command sources', () => {
+        it('should write one output per command file under the config commands root', async () => {
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'commands', 'alpha-cmd.md'),
+            [
+              '---',
+              'name: alpha-cmd',
+              'description: Alpha command',
+              '---',
+              '',
+              'Alpha body',
+              '',
+            ].join('\n'),
+          );
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'commands', 'beta-cmd.md'),
+            [
+              '---',
+              'name: beta-cmd',
+              'description: Beta command',
+              '---',
+              '',
+              'Beta body',
+              '',
+            ].join('\n'),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(stderrMessages).toEqual([]);
+
+          const copilotAlpha = path.join(
+            VIRTUAL_HOME_DIR,
+            '.copilot',
+            'prompts',
+            'alpha-cmd.prompt.md',
+          );
+          const copilotBeta = path.join(
+            VIRTUAL_HOME_DIR,
+            '.copilot',
+            'prompts',
+            'beta-cmd.prompt.md',
+          );
+          const cursorAlpha = path.join(
+            VIRTUAL_HOME_DIR,
+            '.cursor',
+            'skills',
+            'alpha-cmd',
+            'SKILL.md',
+          );
+          const cursorBeta = path.join(
+            VIRTUAL_HOME_DIR,
+            '.cursor',
+            'skills',
+            'beta-cmd',
+            'SKILL.md',
+          );
+
+          for (const outputPath of [
+            copilotAlpha,
+            copilotBeta,
+            cursorAlpha,
+            cursorBeta,
+          ]) {
+            expect(mockFileSystem.files.has(outputPath)).toBe(true);
+          }
+
+          expect(readMockTextFile(mockFileSystem, copilotAlpha)).toContain(
             'Alpha body',
-            '',
-          ].join('\n'),
-        );
-        storeMockTextFile(
-          mockFileSystem,
-          path.join(DEFAULT_CONFIG_ROOT, 'commands', 'beta-cmd.md'),
-          [
-            '---',
-            'name: beta-cmd',
-            'description: Beta command',
-            '---',
-            '',
+          );
+          expect(readMockTextFile(mockFileSystem, copilotBeta)).toContain(
             'Beta body',
-            '',
-          ].join('\n'),
-        );
+          );
+          expect(readMockTextFile(mockFileSystem, cursorAlpha)).toContain(
+            'Alpha body',
+          );
+          expect(readMockTextFile(mockFileSystem, cursorBeta)).toContain(
+            'Beta body',
+          );
+        });
+      });
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+      describe('when on-disk output drifts from the source', () => {
+        describe('for command targets', () => {
+          it.each([
+            {
+              agent: 'Copilot',
+              driftPath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'prompts',
+                'my-cmd.prompt.md',
+              ),
+            },
+            {
+              agent: 'Cursor',
+              driftPath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'skills',
+                'my-cmd',
+                'SKILL.md',
+              ),
+            },
+          ] as const)(
+            'should restore command output for $agent and report my-cmd as updated',
+            async ({ driftPath }) => {
+              arrangeBasicSources();
 
-        await runCLI({
-          argv: ['sync'],
-          ...cliOptions,
+              const { cliOptions, stderrMessages, stdoutMessages } =
+                createTestEnv();
+
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
+
+              expect(stderrMessages).toEqual([]);
+
+              storeMockTextFile(mockFileSystem, driftPath, '# user tampered\n');
+
+              stdoutMessages.length = 0;
+              stderrMessages.length = 0;
+
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
+
+              expect(stderrMessages).toEqual([]);
+              expect(readMockTextFile(mockFileSystem, driftPath)).toContain(
+                'Command body',
+              );
+              const report = stripAnsi(stdoutMessages.join(''));
+              expect(report).toMatch(/my-cmd \(updated\)/);
+            },
+          );
         });
 
-        expect(stderrMessages).toEqual([]);
+        describe('for rule targets', () => {
+          it.each([
+            {
+              agent: 'Copilot',
+              driftPath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'instructions',
+                'my-rule.instructions.md',
+              ),
+            },
+            {
+              agent: 'Cursor',
+              driftPath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'rules',
+                'my-rule.mdc',
+              ),
+            },
+          ] as const)(
+            'should restore rule output for $agent and report my-rule as updated',
+            async ({ driftPath }) => {
+              arrangeBasicSources();
 
-        const copilotAlpha = path.join(
-          VIRTUAL_HOME_DIR,
-          '.copilot',
-          'prompts',
-          'alpha-cmd.prompt.md',
-        );
-        const copilotBeta = path.join(
-          VIRTUAL_HOME_DIR,
-          '.copilot',
-          'prompts',
-          'beta-cmd.prompt.md',
-        );
-        const cursorAlpha = path.join(
-          VIRTUAL_HOME_DIR,
-          '.cursor',
-          'skills',
-          'alpha-cmd',
-          'SKILL.md',
-        );
-        const cursorBeta = path.join(
-          VIRTUAL_HOME_DIR,
-          '.cursor',
-          'skills',
-          'beta-cmd',
-          'SKILL.md',
-        );
+              const { cliOptions, stderrMessages, stdoutMessages } =
+                createTestEnv();
 
-        for (const outputPath of [
-          copilotAlpha,
-          copilotBeta,
-          cursorAlpha,
-          cursorBeta,
-        ]) {
-          expect(mockFileSystem.files.has(outputPath)).toBe(true);
-        }
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
 
-        expect(readMockTextFile(mockFileSystem, copilotAlpha)).toContain(
-          'Alpha body',
-        );
-        expect(readMockTextFile(mockFileSystem, copilotBeta)).toContain(
-          'Beta body',
-        );
-        expect(readMockTextFile(mockFileSystem, cursorAlpha)).toContain(
-          'Alpha body',
-        );
-        expect(readMockTextFile(mockFileSystem, cursorBeta)).toContain(
-          'Beta body',
+              expect(stderrMessages).toEqual([]);
+
+              storeMockTextFile(mockFileSystem, driftPath, '# user tampered\n');
+
+              stdoutMessages.length = 0;
+              stderrMessages.length = 0;
+
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
+
+              expect(stderrMessages).toEqual([]);
+              expect(readMockTextFile(mockFileSystem, driftPath)).toContain(
+                'Rule body',
+              );
+              const report = stripAnsi(stdoutMessages.join(''));
+              expect(report).toMatch(/my-rule \(updated\)/);
+            },
+          );
+        });
+
+        describe('for directory skill targets', () => {
+          it.each([
+            {
+              agent: 'Copilot',
+              skillRoot: path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'skills',
+                'my-skill',
+              ),
+            },
+            {
+              agent: 'Cursor',
+              skillRoot: path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'skills',
+                'my-skill',
+              ),
+            },
+          ] as const)(
+            'should recopy my-skill for $agent when SKILL.md drifts and report it as updated',
+            async ({ skillRoot }) => {
+              arrangeBasicSources();
+
+              const { cliOptions, stderrMessages, stdoutMessages } =
+                createTestEnv();
+
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
+
+              expect(stderrMessages).toEqual([]);
+
+              const skillMd = path.join(skillRoot, 'SKILL.md');
+              storeMockTextFile(mockFileSystem, skillMd, '# tampered skill\n');
+
+              stdoutMessages.length = 0;
+              stderrMessages.length = 0;
+
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
+
+              expect(stderrMessages).toEqual([]);
+              expect(readMockTextFile(mockFileSystem, skillMd)).toContain(
+                '# My Skill',
+              );
+              const report = stripAnsi(stdoutMessages.join(''));
+              expect(report).toMatch(/my-skill \(updated\)/);
+            },
+          );
+
+          it.each([
+            {
+              agent: 'Copilot',
+              agentSkillsRoot: path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'skills',
+              ),
+            },
+            {
+              agent: 'Cursor',
+              agentSkillsRoot: path.join(VIRTUAL_HOME_DIR, '.cursor', 'skills'),
+            },
+          ] as const)(
+            'should recopy rich-skill for $agent when a non-SKILL.md file drifts and report it as updated',
+            async ({ agentSkillsRoot }) => {
+              const skillName = 'rich-skill';
+              const skillSourceDir = path.join(
+                DEFAULT_CONFIG_ROOT,
+                'skills',
+                skillName,
+              );
+              storeMockTextFile(
+                mockFileSystem,
+                path.join(skillSourceDir, 'SKILL.md'),
+                '# Rich skill\n',
+              );
+              storeMockTextFile(
+                mockFileSystem,
+                path.join(skillSourceDir, 'context.md'),
+                'Context body\n',
+              );
+
+              const { cliOptions, stderrMessages, stdoutMessages } =
+                createTestEnv();
+
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
+
+              expect(stderrMessages).toEqual([]);
+
+              const skillRoot = path.join(agentSkillsRoot, skillName);
+              const contextPath = path.join(skillRoot, 'context.md');
+              const skillMd = path.join(skillRoot, 'SKILL.md');
+
+              expect(readMockTextFile(mockFileSystem, contextPath)).toContain(
+                'Context body',
+              );
+
+              storeMockTextFile(mockFileSystem, contextPath, 'user tampered\n');
+
+              stdoutMessages.length = 0;
+              stderrMessages.length = 0;
+
+              await runCLI({
+                argv: ['sync'],
+                ...cliOptions,
+              });
+
+              expect(stderrMessages).toEqual([]);
+              expect(readMockTextFile(mockFileSystem, contextPath)).toContain(
+                'Context body',
+              );
+              expect(readMockTextFile(mockFileSystem, skillMd)).toContain(
+                'Rich skill',
+              );
+              const report = stripAnsi(stdoutMessages.join(''));
+              expect(report).toMatch(new RegExp(`${skillName} \\(updated\\)`));
+            },
+          );
+        });
+      });
+
+      describe('when SKILL.md is missing but its output directory still exists', () => {
+        it.each([
+          {
+            agent: 'Copilot',
+            scenario: 'synced skill under .copilot/skills',
+            skillMdPath: path.join(
+              VIRTUAL_HOME_DIR,
+              '.copilot',
+              'skills',
+              'my-skill',
+              'SKILL.md',
+            ),
+            expectedSnippet: '# My Skill',
+          },
+          {
+            agent: 'Cursor',
+            scenario: 'command under .cursor/skills/<name>',
+            skillMdPath: path.join(
+              VIRTUAL_HOME_DIR,
+              '.cursor',
+              'skills',
+              'my-cmd',
+              'SKILL.md',
+            ),
+            expectedSnippet: 'Command body',
+          },
+          {
+            agent: 'Cursor',
+            scenario: 'synced skill under .cursor/skills',
+            skillMdPath: path.join(
+              VIRTUAL_HOME_DIR,
+              '.cursor',
+              'skills',
+              'my-skill',
+              'SKILL.md',
+            ),
+            expectedSnippet: '# My Skill',
+          },
+        ] as const)(
+          'should recreate SKILL.md for $agent ($scenario)',
+          async ({ skillMdPath, expectedSnippet }) => {
+            arrangeBasicSources();
+
+            const { cliOptions, stderrMessages } = createTestEnv();
+
+            await runCLI({
+              argv: ['sync'],
+              ...cliOptions,
+            });
+
+            expect(stderrMessages).toEqual([]);
+
+            expect(
+              mockFileSystem.files.has(normalizeMockPath(skillMdPath)),
+            ).toBe(true);
+
+            removeMockPath(mockFileSystem, skillMdPath);
+
+            await runCLI({
+              argv: ['sync'],
+              ...cliOptions,
+            });
+
+            expect(stderrMessages).toEqual([]);
+            expect(
+              mockFileSystem.files.has(normalizeMockPath(skillMdPath)),
+            ).toBe(true);
+            expect(readMockTextFile(mockFileSystem, skillMdPath)).toContain(
+              expectedSnippet,
+            );
+          },
         );
       });
 
-      it('should write one output per rule source when multiple rule files exist in the config root', async () => {
+      describe('when a synced skill directory contains files not in the source tree', () => {
+        it.each([
+          {
+            agent: 'Copilot',
+            skillRoot: path.join(
+              VIRTUAL_HOME_DIR,
+              '.copilot',
+              'skills',
+              'my-skill',
+            ),
+          },
+          {
+            agent: 'Cursor',
+            skillRoot: path.join(
+              VIRTUAL_HOME_DIR,
+              '.cursor',
+              'skills',
+              'my-skill',
+            ),
+          },
+        ] as const)(
+          'should remove stray files under my-skill for $agent and report it as updated',
+          async ({ skillRoot }) => {
+            arrangeBasicSources();
+
+            const { cliOptions, stderrMessages, stdoutMessages } =
+              createTestEnv();
+
+            await runCLI({
+              argv: ['sync'],
+              ...cliOptions,
+            });
+
+            expect(stderrMessages).toEqual([]);
+
+            const strayFile = path.join(skillRoot, 'user-notes.md');
+            storeMockTextFile(mockFileSystem, strayFile, '# local only\n');
+
+            stdoutMessages.length = 0;
+            stderrMessages.length = 0;
+
+            await runCLI({
+              argv: ['sync'],
+              ...cliOptions,
+            });
+
+            expect(stderrMessages).toEqual([]);
+            expect(mockFileSystem.files.has(normalizeMockPath(strayFile))).toBe(
+              false,
+            );
+            expect(
+              readMockTextFile(
+                mockFileSystem,
+                path.join(skillRoot, 'SKILL.md'),
+              ),
+            ).toContain('# My Skill');
+            const report = stripAnsi(stdoutMessages.join(''));
+            expect(report).toMatch(/my-skill \(updated\)/);
+          },
+        );
+      });
+
+      describe('stdout after sync', () => {
+        it('should print Applied changes: None on a second run when sources, manifest, and outputs stay aligned', async () => {
+          arrangeBasicSources();
+
+          const { cliOptions, stderrMessages, stdoutMessages } =
+            createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+          expect(stderrMessages).toEqual([]);
+
+          stdoutMessages.length = 0;
+          stderrMessages.length = 0;
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(stderrMessages).toEqual([]);
+          const report = stripAnsi(stdoutMessages.join(''));
+          expect(report).toContain('Applied changes: None');
+          expect(report).not.toContain('- Copilot');
+        });
+      });
+
+      it('should write one output per rule file under the config rules root', async () => {
         storeMockTextFile(
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'rules', 'alpha-rule.md'),
@@ -791,7 +1190,7 @@ describe('dry-ai sync', () => {
         );
       });
 
-      it('should copy one output tree per skill when multiple skill directories exist under the config skills root', async () => {
+      it('should copy one output tree per skill directory under the config skills root', async () => {
         // Each skill is a directory copy (see `copyDirectoryContents` in
         // `lib/sync.ts`): every file in the source folder — not only
         // `SKILL.md` — is mirrored under each agent's skills target.
@@ -874,7 +1273,7 @@ describe('dry-ai sync', () => {
         );
       });
 
-      it('should write the Copilot rule file and log a warning when the Cursor agents block is invalid', async () => {
+      it('should write the Copilot rule file and warn when the Cursor agents block is invalid', async () => {
         storeMockTextFile(
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'rules', 'bad-cursor-block.md'),
@@ -959,7 +1358,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should write the Cursor rule file and log a warning when the Copilot agents block is invalid', async () => {
+      it('should write the Cursor rule file and warn when the Copilot agents block is invalid', async () => {
         storeMockTextFile(
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'rules', 'bad-copilot-block.md'),
@@ -1017,8 +1416,8 @@ describe('dry-ai sync', () => {
       );
     });
 
-    describe('no configs present', () => {
-      it('should create every target root directory on disk before writing when the home agent trees are missing (first run)', async () => {
+    describe('when home agent trees are missing (first run)', () => {
+      it('should create every target root directory on disk before writing outputs', async () => {
         // Arrange: sources exist under the default config root, but the mock
         // has no pre-seeded `~/.copilot` / `~/.cursor` target trees. Sync must
         // call `ensureTargetDirectories` (see `lib/sync.ts`) so later writes
@@ -1058,7 +1457,9 @@ describe('dry-ai sync', () => {
           expect(mockFileSystem.files.has(writtenFilePath)).toBe(true);
         }
       });
+    });
 
+    describe('partial configs', () => {
       // priority: med
       it.todo(
         'should sync only command outputs and write no rule or skill files when the config has commands but no rules or skills',
@@ -1075,18 +1476,18 @@ describe('dry-ai sync', () => {
       );
 
       // priority: med
-      it.todo('should do nothing to outputs when the config root is empty');
+      it.todo('should leave outputs unchanged when the config root is empty');
     });
 
     describe('source discovery', () => {
       // priority: med
       it.todo(
-        'should ignore non-.md files under the commands and rules source roots when discovering',
+        'should ignore non-.md files under the commands and rules source roots',
       );
 
       // priority: med
       it.todo(
-        'should discover command and rule files only in the top-level of each source root, not in nested subdirectories',
+        'should discover command and rule files only at the top level of each source root, not in nested subdirectories',
       );
     });
 
@@ -1100,7 +1501,7 @@ describe('dry-ai sync', () => {
 
   describe('Sync report', () => {
     describe('structure, change types, and conflict footer', () => {
-      it('should group applied items by agent and by item kind under the Applied changes heading when reporting a normal sync', async () => {
+      it('should group applied items by agent and by kind under Applied changes', async () => {
         // Arrange: fresh trio means each item renders once per agent,
         // letting us verify the header, agent ordering, and
         // kind-per-agent grouping without also pinning down the
@@ -1150,7 +1551,7 @@ describe('dry-ai sync', () => {
         }
       });
 
-      it('tags newly-written items with change-type "(installed)"', async () => {
+      it('should tag newly-written items with change-type "(installed)"', async () => {
         // Arrange: fresh sources, no pre-existing outputs. Every
         // write is a new file, so the report should tag every item
         // `(installed)` (see `changeType` assignment in
@@ -1179,7 +1580,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should tag items with (updated) in the report when the output path already exists before the sync', async () => {
+      it('should tag items with (updated) when each output path already exists before sync', async () => {
         // Arrange: same sources as the `(installed)` case, but
         // pre-seed every target-root output on disk. Sync branches
         // to `updated` when the output path already exists (see
@@ -1216,7 +1617,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should tag pruned items with (removed) in the report when the source is gone but the manifest still listed outputs', async () => {
+      it('should tag pruned items with (removed) when the source is gone but the manifest still lists outputs', async () => {
         // Arrange: no current sources. Prior manifest claims an
         // earlier sync wrote `gone-cmd` outputs for both agents;
         // since those sources are gone, the prune path turns every
@@ -1252,7 +1653,7 @@ describe('dry-ai sync', () => {
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
           JSON.stringify({
-            version: 2,
+            version: MOCK_SYNC_MANIFEST_VERSION,
             outputs: [
               {
                 agent: 'copilot',
@@ -1288,7 +1689,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should report Skipped conflicts: None in stdout when no items were skipped for conflicts', async () => {
+      it('should print Skipped conflicts: None when no items were skipped for conflicts', async () => {
         // Arrange: baseline sources + no pre-existing conflicts
         // means nothing gets skipped. The report should close with
         // the `None` footer branch (see `renderSyncReport` in
@@ -1310,18 +1711,18 @@ describe('dry-ai sync', () => {
       });
     });
 
-    describe('report edge cases and errors', () => {
+    describe('edge cases and errors', () => {
       // priority: med
       it.todo(
         'should still render a coherent report with a possibly empty Applied changes and a non-empty Skipped conflicts when every item is skipped for conflicts',
       );
       // priority: med
       it.todo(
-        'should list only (removed) lines for the pruned work and no spurious (installed) lines when the run only removes stale manifest outputs',
+        'should list only (removed) lines for pruned work and no spurious (installed) lines when the run only removes stale manifest outputs',
       );
       // priority: med
       it.todo(
-        'should keep section spacing and group headings stable in stdout when one item kind (e.g. rules) has no output but other kinds do (no double blank lines or missing newlines)',
+        'should keep section spacing and group headings stable when one item kind (e.g. rules) has no output but other kinds do',
       );
       // priority: low
       it.todo(
@@ -1336,7 +1737,7 @@ describe('dry-ai sync', () => {
 
   describe('Sync manifest', () => {
     describe('create and update', () => {
-      it('should create a version-2 sync manifest with expected rows when no manifest file exists on the first run', async () => {
+      it('should create sync-manifest.json with expected rows on the first run when none exists', async () => {
         const manifestPath = path.join(
           DEFAULT_CONFIG_ROOT,
           'sync-manifest.json',
@@ -1360,7 +1761,7 @@ describe('dry-ai sync', () => {
         );
       });
 
-      it('should add manifest entries for a new command when a command file is added and sync runs again (version-2 manifest stays accurate)', async () => {
+      it('should add manifest rows for a new command when its file appears and sync runs again', async () => {
         arrangeBasicSources();
         const { cliOptions, stderrMessages } = createTestEnv();
         const manifestPath = path.join(
@@ -1429,11 +1830,11 @@ describe('dry-ai sync', () => {
 
       // priority: med
       it.todo(
-        'should list manifest entries in a deterministic order by agent, kind, name, and outputPath when writing sync-manifest.json',
+        'should list manifest entries in deterministic order by agent, kind, name, and outputPath when writing sync-manifest.json',
       );
     });
 
-    describe('pruning', () => {
+    describe('pruning stale manifest outputs', () => {
       type StaleManifestEntry = {
         agent: 'copilot' | 'cursor';
         kind: 'command' | 'rule' | 'skill';
@@ -1476,7 +1877,10 @@ describe('dry-ai sync', () => {
         storeMockTextFile(
           mockFileSystem,
           path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
-          JSON.stringify({ version: 2, outputs: staleEntries }),
+          JSON.stringify({
+            version: MOCK_SYNC_MANIFEST_VERSION,
+            outputs: staleEntries,
+          }),
         );
       }
 
@@ -1637,7 +2041,7 @@ describe('dry-ai sync', () => {
         return { copilotInnerFiles, cursorInnerFiles };
       }
 
-      it('should remove a tracked command’s per-agent outputs when that command’s source no longer exists under the config root', async () => {
+      it('should remove per-agent outputs for a manifest-tracked command whose source no longer exists under the config root', async () => {
         // Arrange: prior manifest tracks `gone-cmd` outputs whose
         // command source is no longer present; one current command
         // (`current`) keeps the run from being a pure-prune scenario.
@@ -1678,7 +2082,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should remove a tracked rule’s per-agent outputs when that rule’s source no longer exists under the config root', async () => {
+      it('should remove per-agent outputs for a manifest-tracked rule whose source no longer exists under the config root', async () => {
         // Arrange: prior manifest tracks `gone-rule` outputs (Copilot
         // `.instructions.md` + Cursor `.mdc`) whose rule source is no
         // longer present; one current command keeps the apply phase
@@ -1709,7 +2113,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should remove a tracked skill’s entire per-agent output trees when that skill’s source directory no longer exists under the config root', async () => {
+      it('should remove entire per-agent skill output trees for a manifest-tracked skill whose source directory no longer exists under the config root', async () => {
         // Arrange: prior manifest tracks `gone-skill` directory
         // outputs; multiple files seeded inside each agent's skill
         // directory let us assert the full subtree is pruned, not just
@@ -1743,7 +2147,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should leave files under target roots that were never listed in the manifest unchanged when stale outputs are pruned', async () => {
+      it('should leave files under target roots that were never manifest-listed unchanged while pruning stale outputs', async () => {
         // Arrange: no prior manifest, no current sources, just a single
         // hand-authored file under one of the target roots — i.e. the
         // realistic case of a user with their own files alongside a
@@ -1780,7 +2184,7 @@ describe('dry-ai sync', () => {
         expect(stderrMessages).toEqual([]);
       });
 
-      it('should list pruned items with the removed change type in each agent section of stdout when apply and removal both occur', async () => {
+      it('should list pruned items as removed in each agent section when apply and removal both occur', async () => {
         // Arrange: reuse the command-prune setup so the report has both
         // applied (`current`) and removed (`gone-cmd`) entries to
         // render under each agent. The kind under test here is the
@@ -1817,13 +2221,133 @@ describe('dry-ai sync', () => {
         // Assert: clean run.
         expect(stderrMessages).toEqual([]);
       });
-    });
 
-    describe('invalid manifest on disk', () => {
-      // priority: med
-      it.todo(
-        'should fail the run with a clear error when the on-disk sync manifest is version-mismatched or structurally invalid',
-      );
+      describe('when the prior sync-manifest.json is not strictly valid', () => {
+        it('should prune stale outputs when output rows are recoverable after strict validation fails', async () => {
+          seedCurrentCommandSource();
+          const { copilotOutputPath, cursorWritePath, cursorOutputDir } =
+            arrangeStaleCommand();
+
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            JSON.stringify({
+              version: 999,
+              outputs: [
+                {
+                  agent: 'copilot',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: copilotOutputPath,
+                  contentHash: 'ignored-for-pruning',
+                },
+                {
+                  agent: 'cursor',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: cursorOutputDir,
+                },
+              ],
+            }),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(mockFileSystem.files.has(copilotOutputPath)).toBe(false);
+          expect(mockFileSystem.files.has(cursorWritePath)).toBe(false);
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /2 saved path\(s\) were recovered/i,
+          );
+        });
+
+        it('should warn and skip pruning when sync-manifest.json is not valid JSON', async () => {
+          seedCurrentCommandSource();
+          const { copilotOutputPath, cursorWritePath } = arrangeStaleCommand();
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            '{ not json',
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(mockFileSystem.files.has(copilotOutputPath)).toBe(true);
+          expect(mockFileSystem.files.has(cursorWritePath)).toBe(true);
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /damaged or incomplete/i,
+          );
+        });
+
+        it('should warn and skip pruning when manifest output rows are not valid', async () => {
+          seedCurrentCommandSource();
+          const { copilotOutputPath, cursorWritePath } = arrangeStaleCommand();
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            JSON.stringify({
+              version: MOCK_SYNC_MANIFEST_VERSION,
+              outputs: [
+                {
+                  agent: 'nope',
+                  kind: 'command',
+                  name: 'gone-cmd',
+                  outputPath: copilotOutputPath,
+                },
+              ],
+            }),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(mockFileSystem.files.has(copilotOutputPath)).toBe(true);
+          expect(mockFileSystem.files.has(cursorWritePath)).toBe(true);
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /none of them could be understood/i,
+          );
+        });
+
+        it('should warn when strict validation fails and manifest outputs is empty', async () => {
+          seedCurrentCommandSource();
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            JSON.stringify({
+              version: 999,
+              outputs: [],
+            }),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /contains no output rows to recover/i,
+          );
+        });
+      });
     });
   });
 
@@ -1836,7 +2360,7 @@ describe('dry-ai sync', () => {
 
       // priority: med
       it.todo(
-        'should skip the Cursor command and skill when they share a name and the same output namespace when that causes a conflict',
+        'should skip the Cursor command and skill when they share a name and output namespace and that causes a conflict',
       );
 
       // priority: med
@@ -1846,17 +2370,17 @@ describe('dry-ai sync', () => {
 
       // priority: low
       it.todo(
-        'should list skipped conflict lines in alphabetical order by source item label when rendering',
+        'should list skipped conflict lines in alphabetical order by source item label',
       );
 
       // priority: low
       it.todo(
-        'should keep manifest entries for conflict-skipped items when the manifest merge rules require it for this run',
+        'should keep manifest entries for conflict-skipped items when merge rules require it for this run',
       );
 
       // priority: med
       it.todo(
-        'should not delete an old output for a conflict-skipped item this run when that path would otherwise be pruned for a missing source',
+        'should not delete an old output for a conflict-skipped item when that path would otherwise be pruned for a missing source',
       );
     });
 
@@ -1878,12 +2402,12 @@ describe('dry-ai sync', () => {
 
     // priority: med
     it.todo(
-      'should skip a command and log a clear message to stdout when its top-level frontmatter fails validation',
+      'should skip a command and log a clear message when its top-level frontmatter fails validation',
     );
 
     // priority: med
     it.todo(
-      'should skip a rule and log a clear message to stdout when its top-level frontmatter fails validation',
+      'should skip a rule and log a clear message when its top-level frontmatter fails validation',
     );
 
     // priority: med
@@ -1918,7 +2442,7 @@ describe('dry-ai sync', () => {
       );
       // priority: med
       it.todo(
-        'should follow the existing warn/skip contract with no partial outputs when frontmatter parses but validation fails for that file',
+        'should follow the warn/skip contract with no partial outputs when frontmatter parses but validation fails for that file',
       );
       // priority: low
       it.todo(
@@ -1935,12 +2459,12 @@ describe('dry-ai sync', () => {
     describe('per-agent output paths', () => {
       // priority: med
       it.todo(
-        'should place Copilot command, rule, and skill files under the expected Copilot layout when synced',
+        'should place Copilot command, rule, and skill files under the expected Copilot layout',
       );
 
       // priority: med
       it.todo(
-        'should place Cursor command, rule, and skill files under the expected Cursor layout when synced',
+        'should place Cursor command, rule, and skill files under the expected Cursor layout',
       );
 
       // priority: med
@@ -1953,7 +2477,7 @@ describe('dry-ai sync', () => {
       // Commands and rules are written as new markdown (YAML + body). Skills are
       // copied as directories, so a skill’s on-disk frontmatter is unchanged by sync.
 
-      it('should write command files as YAML, a closing delimiter, and a body with surrounding blank lines removed when re-serializing to Copilot', async () => {
+      it('should write Copilot command files as YAML, a closing delimiter, and a trimmed body', async () => {
         const rawSource = [
           '---',
           'name: fmt-cmd',
@@ -2000,7 +2524,7 @@ describe('dry-ai sync', () => {
         expect(written).toBe(expectedCopilotCommandRender);
       });
 
-      it('should write rule files as YAML, a closing delimiter, and a body with surrounding blank lines removed when re-serializing to Copilot', async () => {
+      it('should write Copilot rule files as YAML, a closing delimiter, and a trimmed body', async () => {
         const rawSource = [
           '---',
           'description: A rule for render assertions',
@@ -2054,7 +2578,7 @@ describe('dry-ai sync', () => {
 
       // priority: med
       it.todo(
-        'should omit frontmatter keys that have no resolved value when writing the YAML block (no placeholder null lines)',
+        'should omit frontmatter keys that have no resolved value in the YAML block (no placeholder null lines)',
       );
     });
 
@@ -2071,7 +2595,7 @@ describe('dry-ai sync', () => {
     });
 
     describe('skill directory copy semantics', () => {
-      it('should mirror every file and nested path from a skill source into each agent’s skill target directory when syncing', async () => {
+      it('should mirror every file and nested path from a skill source into each agent skill target directory', async () => {
         const skillName = 'tree-skill';
         const skillRoot = path.join(DEFAULT_CONFIG_ROOT, 'skills', skillName);
         storeMockTextFile(
@@ -2126,7 +2650,7 @@ describe('dry-ai sync', () => {
         }
       });
 
-      it('should remove a file from every agent’s skill copy when that file is removed from the source and sync runs again', async () => {
+      it('should remove a file from every agent skill copy when that file disappears from the source and sync runs again', async () => {
         const skillName = 'prune-skill';
         const skillRoot = path.join(DEFAULT_CONFIG_ROOT, 'skills', skillName);
         const orphanSource = path.join(skillRoot, 'orphan.txt');
@@ -2212,7 +2736,7 @@ describe('dry-ai sync', () => {
       );
       // priority: low
       it.todo(
-        'should match the copy layer’s error when a skill source directory is missing at copy time',
+        'should match the copy layer error when a skill source directory is missing at copy time',
       );
       // priority: low
       it.todo(
@@ -2224,23 +2748,23 @@ describe('dry-ai sync', () => {
   describe('CLI and environment', () => {
     // priority: med
     it.todo(
-      'should read sources from the absolute config root and write under the default home output tree when using dry-ai sync with --config-root, unless --output-root or --test overrides it',
+      'should read sources from the absolute config root and write under the default home output tree for dry-ai sync --config-root, unless --output-root or --test overrides it',
     );
     // priority: med
     it.todo(
-      'should write outputs to ./output-test (relative to cwd) when using --test while still reading config from the default or --config-root path',
+      'should write outputs to ./output-test (relative to cwd) for --test while still reading config from the default or --config-root path',
     );
     // priority: med
     it.todo(
-      'should place all agent trees under the --output-root path while keeping the manifest under the config root when that flag is set',
+      'should place all agent trees under --output-root while keeping the manifest under the config root when that flag is set',
     );
     // priority: med
     it.todo(
-      'should print Generated output written to the resolved path in stdout when --test or --output-root changes the output root, matching the in-memory output root value',
+      'should print Generated output written to the resolved path when --test or --output-root changes the output root, matching the in-memory output root value',
     );
     // priority: low
     it.todo(
-      'should expand a leading ~ in --config-root and --output-root to the user’s home the same way as the rest of the CLI',
+      'should expand a leading ~ in --config-root and --output-root to the user home directory the same way as the rest of the CLI',
     );
 
     describe('commander and config root errors', () => {

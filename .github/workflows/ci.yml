@@ -129,7 +129,6 @@ jobs:
 
   pack:
     needs:
-      - commitlint
       - typecheck
       - lint
       - test
