@@ -1406,7 +1406,7 @@ describe('dry-ai sync', () => {
 
       // priority: med
       it.todo(
-        'should print the resolved output root in stdout when --output-root is set, and stays silent otherwise',
+        'should print the resolved output root in stdout when --output-root is set, and stay silent otherwise',
       );
 
       // priority: med
