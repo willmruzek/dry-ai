@@ -224,8 +224,9 @@ function isSyncItemKind(value: string): value is SyncItemKind {
 
 /**
  * Parses `outputs` entries (best-effort) when the manifest file is not in the
- * usual shape (e.g. wrong `version`, extra fields per row). Keep only rows
- * with a recognized agent, kind, and non-empty name/outputPath.
+ * usual shape (e.g. wrong `version`, missing required fields, invalid field
+ * types, or malformed rows in `outputs`). Keep only rows with a recognized
+ * agent, kind, and non-empty name/outputPath.
  */
 function parseLenientSyncManifestOutputs(
   parsed: unknown,
