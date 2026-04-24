@@ -295,10 +295,16 @@ function parseLenientSyncManifestOutputs(
  * Reads the sync manifest from disk, or returns an empty manifest if none
  * exists yet.
  *
- * When the file does not match the expected shape, this still tries to
- * recover saved paths so cleanup of removed items can run. If that fails, the
- * prior manifest is treated as empty and a warning notes that leftover
- * files might not be removed automatically this run.
+ * Any failure to read, parse, or validate (including an older schema version)
+ * falls back to an empty manifest when recovery is not possible. When the file
+ * does not match the expected shape, this still tries to recover saved paths so
+ * cleanup of removed items can run; if that fails, the prior manifest is empty
+ * and a warning notes that leftover files might not be removed automatically
+ * this run.
+ *
+ * On the next sync after a fallback, current outputs are re-evaluated from
+ * on-disk state, so existing matching outputs may still be reported as
+ * `(unchanged)` rather than `(installed)`.
  */
 async function loadSyncManifest(
   manifestPath: string,

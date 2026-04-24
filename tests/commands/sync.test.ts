@@ -1406,7 +1406,7 @@ describe('dry-ai sync', () => {
 
       // priority: med
       it.todo(
-        'should print the resolved output root in stdout when --output-root is set, and stays silent otherwise',
+        'should print the resolved output root in stdout when --output-root is set, and stay silent otherwise',
       );
 
       // priority: med
@@ -2425,7 +2425,7 @@ describe('dry-ai sync', () => {
       );
       // priority: low
       it.todo(
-        'should either write only frontmatter or skips with documented behavior for a command whose body is empty after trim',
+        'should either write only frontmatter or skip with documented behavior for a command whose body is empty after trim',
       );
     });
   });
