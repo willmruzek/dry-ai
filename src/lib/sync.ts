@@ -300,8 +300,8 @@ function parseLenientSyncManifestOutputs(
  * falls back to an empty manifest when recovery is not possible. When the file
  * does not match the expected shape, this still tries to recover saved paths so
  * cleanup of removed items can run; if that fails, the prior manifest is empty
- * and a warning notes that leftover files might not be removed automatically
- * this run.
+ * and a warning notes that leftover files may stay untracked until you remove
+ * them manually.
  *
  * On the next sync after a fallback, current outputs are re-evaluated from
  * on-disk state, so existing matching outputs may still be reported as
@@ -320,7 +320,7 @@ async function loadSyncManifest(
   } catch {
     return {
       manifest: createSyncManifest([]),
-      recoveryWarning: `Could not read sync-manifest.json. Files left behind after you remove a command, rule, or skill might not be deleted automatically this run.`,
+      recoveryWarning: `Could not read sync-manifest.json. Files left behind after you remove a command, rule, or skill may stay untracked and may need manual cleanup.`,
     };
   }
 
@@ -330,7 +330,7 @@ async function loadSyncManifest(
   } catch {
     return {
       manifest: createSyncManifest([]),
-      recoveryWarning: `sync-manifest.json is damaged or incomplete and could not be read. Files left behind after you remove something from your config might not be deleted automatically this run.`,
+      recoveryWarning: `sync-manifest.json is damaged or incomplete and could not be read. Files left behind after you remove something from your config may stay untracked and may need manual cleanup.`,
     };
   }
 
@@ -354,13 +354,13 @@ async function loadSyncManifest(
   if (lenient !== null && lenient.entries.length === 0) {
     return {
       manifest: createSyncManifest([]),
-      recoveryWarning: `sync-manifest.json lists paths, but none of them could be understood. Files left behind after you remove something from your config might not be deleted automatically this run.`,
+      recoveryWarning: `sync-manifest.json lists paths, but none of them could be understood. Files left behind after you remove something from your config may stay untracked and may need manual cleanup.`,
     };
   }
 
   return {
     manifest: createSyncManifest([]),
-    recoveryWarning: `sync-manifest.json could not be loaded. Files left behind after you remove something from your config might not be deleted automatically this run.`,
+    recoveryWarning: `sync-manifest.json could not be loaded. Files left behind after you remove something from your config may stay untracked and may need manual cleanup.`,
   };
 }
 
