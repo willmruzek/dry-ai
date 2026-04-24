@@ -2323,6 +2323,30 @@ describe('dry-ai sync', () => {
             /none of them could be understood/i,
           );
         });
+
+        it('should warn when strict validation fails and manifest outputs is empty', async () => {
+          seedCurrentCommandSource();
+          storeMockTextFile(
+            mockFileSystem,
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+            JSON.stringify({
+              version: 999,
+              outputs: [],
+            }),
+          );
+
+          const { cliOptions, stderrMessages } = createTestEnv();
+
+          await runCLI({
+            argv: ['sync'],
+            ...cliOptions,
+          });
+
+          expect(stderrMessages).toHaveLength(1);
+          expect(stripAnsi(stderrMessages.join(''))).toMatch(
+            /contains no output rows to recover/i,
+          );
+        });
       });
     });
   });

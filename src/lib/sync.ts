@@ -348,7 +348,10 @@ async function loadSyncManifest(
   }
 
   if (lenient !== null && lenient.sourceRowCount === 0) {
-    return { manifest: createSyncManifest([]) };
+    return {
+      manifest: createSyncManifest([]),
+      recoveryWarning: `sync-manifest.json did not match the expected layout and contains no output rows to recover. The file will be rewritten when sync finishes.`,
+    };
   }
 
   if (lenient !== null && lenient.entries.length === 0) {
