@@ -41,6 +41,7 @@ export function addSkillsCommand(input: {
   resolveEnv: () => CommandEnv;
 }): Command {
   const { program, commandName, resolveEnv } = input;
+
   const skills = program
     .command('skills')
     .description('Manage imported skills')
@@ -49,15 +50,16 @@ export function addSkillsCommand(input: {
     .helpCommand(false)
     .addHelpText(
       'after',
-      dedent`
+      '\n' +
+        dedent`
         Examples:
-          ${commandName} list
-          ${commandName} add anthropics/skills --skill skill-creator
-          ${commandName} add anthropics/skills --path . --skill review-helper
-          ${commandName} add anthropics/skills --path tools --skill review-helper
-          ${commandName} add vercel-labs/agent-skills --skill pr-review commit
-          ${commandName} rehash skill-creator
-          ${commandName} update skill-creator
+          ${commandName} skills list
+          ${commandName} skills add anthropics/skills --skill skill-creator
+          ${commandName} skills add anthropics/skills --path . --skill review-helper
+          ${commandName} skills add anthropics/skills --path tools --skill review-helper
+          ${commandName} skills add vercel-labs/agent-skills --skill pr-review commit
+          ${commandName} skills rehash skill-creator
+          ${commandName} skills update skill-creator
       `,
     )
     .action(() => {
