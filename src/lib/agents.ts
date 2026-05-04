@@ -377,40 +377,10 @@ export function buildRuleArtifactSpecsByAgent(
   };
 
   for (const agent of SYNC_AGENTS) {
-    if (agent === 'copilot') {
-      const result =
-        AGENT_DEFINITIONS.copilot.rule.frontmatterSectionSchema.safeParse(
-          sectionValues.get(agent),
-        );
+    const { frontmatterSectionSchema, buildArtifactSpec } =
+      AGENT_DEFINITIONS[agent].rule;
 
-      if (!result.success) {
-        runtime.logWarn(
-          `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
-            {
-              issues: result.error.issues,
-              pathPrefix: `agents.${agent}`,
-            },
-          )}`,
-        );
-        continue;
-      }
-
-      artifactSpecs.push(
-        AGENT_DEFINITIONS.copilot.rule.buildArtifactSpec({
-          input: {
-            ...baseSource,
-            ...(result.data ?? {}),
-          },
-          targetRoots: input.targetRoots,
-        }),
-      );
-      continue;
-    }
-
-    const result =
-      AGENT_DEFINITIONS.cursor.rule.frontmatterSectionSchema.safeParse(
-        sectionValues.get(agent),
-      );
+    const result = frontmatterSectionSchema.safeParse(sectionValues.get(agent));
 
     if (!result.success) {
       runtime.logWarn(
@@ -425,7 +395,7 @@ export function buildRuleArtifactSpecsByAgent(
     }
 
     artifactSpecs.push(
-      AGENT_DEFINITIONS.cursor.rule.buildArtifactSpec({
+      buildArtifactSpec({
         input: {
           ...baseSource,
           ...(result.data ?? {}),
