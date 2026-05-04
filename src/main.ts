@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { z } from 'zod';
+import { layer as nodeFileSystemLayer } from '@effect/platform-node/NodeFileSystem';
+import { FileSystem } from '@effect/platform/FileSystem';
+import { Effect, Schema } from 'effect';
+import { packageDirectory } from 'package-directory';
 
 import { runCLI } from './cli.js';
 
@@ -14,20 +16,34 @@ const EXECUTABLE_NAME = 'dry-ai';
  * Reads the CLI version from the package manifest at the repository root.
  */
 async function readCliVersion(): Promise<string> {
-  const currentFilePath = fileURLToPath(import.meta.url);
-  const packageJsonPath = path.resolve(
-    currentFilePath,
-    '..',
-    '..',
-    'package.json',
+  const packageJsonVersionSchema = Schema.parseJson(
+    Schema.Struct({ version: Schema.String }),
   );
-  const rawPackageJson = await fs.readFile(packageJsonPath, 'utf8');
-  const parsedPackageJson: unknown = JSON.parse(rawPackageJson);
-  const packageJsonSchema = z.object({
-    version: z.string().min(1),
-  });
 
-  return packageJsonSchema.parse(parsedPackageJson).version;
+  const decodePackageJsonVersion = Schema.decodeUnknown(
+    packageJsonVersionSchema,
+  );
+
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const packageRoot = yield* Effect.promise(() =>
+        packageDirectory({
+          cwd: path.dirname(fileURLToPath(import.meta.url)),
+        }),
+      );
+
+      if (!packageRoot) {
+        return yield* Effect.fail('Could not find package root');
+      }
+
+      const packageJsonPath = path.join(packageRoot, 'package.json');
+      const fs = yield* FileSystem;
+      const raw = yield* fs.readFileString(packageJsonPath);
+      const pkg = yield* decodePackageJsonVersion(raw);
+
+      return pkg.version;
+    }).pipe(Effect.provide(nodeFileSystemLayer)),
+  );
 }
 
 /**
