@@ -1,4 +1,4 @@
-import type { CommandEnv } from '../cli.js';
+import type { CommandEnv } from '../lib/command-env.js';
 import { syncToTargets } from '../lib/sync.js';
 
 /**

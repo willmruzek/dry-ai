@@ -166,7 +166,7 @@ describe('dry-ai skills update', () => {
       it('writes the fetched remote files into the local skill directory with the remote bytes', async () => {
         // Arrange: seed the local skill + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -197,7 +197,7 @@ describe('dry-ai skills update', () => {
         // Arrange: seed the local skill (which includes `legacy.md`,
         // absent from the remote snapshot) + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -223,7 +223,7 @@ describe('dry-ai skills update', () => {
       it('updates the lockfile entry with the fetched commit and remote file hashes while preserving importedAt', async () => {
         // Arrange: seed the local skill + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -259,7 +259,7 @@ describe('dry-ai skills update', () => {
       it('prints the updated skill summary to stdout and keeps stderr empty', async () => {
         // Arrange: seed the local skill + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -353,7 +353,7 @@ describe('dry-ai skills update', () => {
       it('skips updating the skill when local edits are detected', async () => {
         // Arrange: on-disk `SKILL.md` bytes differ from lockfile hashes.
         const { onDiskFiles } = arrangeSkillWithLocalEdits();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -387,7 +387,7 @@ describe('dry-ai skills update', () => {
       it('warns on stderr with the user-edited files and a hint to use --force', async () => {
         // Arrange: on-disk `SKILL.md` bytes differ from lockfile hashes.
         arrangeSkillWithLocalEdits();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({

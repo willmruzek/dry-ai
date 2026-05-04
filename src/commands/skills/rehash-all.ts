@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   computeDirectoryHashes,
   createUpdatedSkillRecord,
@@ -19,7 +19,7 @@ export async function runSkillsRehashAllCommand(
   env: CommandEnv,
 ): Promise<void> {
   const { context, runtime } = env;
-  let lockfile = await loadSkillsLockfile(context);
+  let lockfile = await loadSkillsLockfile(env);
 
   if (lockfile.skills.length === 0) {
     runtime.logInfo('No managed skills to rehash.');

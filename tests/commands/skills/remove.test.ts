@@ -134,7 +134,7 @@ describe('dry-ai skills remove', () => {
           }),
         );
 
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
         const removedSkillDir = path.join(
           DEFAULT_SKILLS_SOURCE_ROOT,
           REMOVED_SKILL.name,

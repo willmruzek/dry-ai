@@ -398,7 +398,9 @@ describe('dry-ai sync', () => {
         ]);
 
         arrangeBasicSources();
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -435,7 +437,9 @@ describe('dry-ai sync', () => {
             ].join('\n'),
           );
 
-          const { cliOptions, stderrMessages } = createTestEnv();
+          const { cliOptions, stderrMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -490,7 +494,9 @@ describe('dry-ai sync', () => {
             ].join('\n'),
           );
 
-          const { cliOptions, stderrMessages } = createTestEnv();
+          const { cliOptions, stderrMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -576,7 +582,9 @@ describe('dry-ai sync', () => {
       it('should write commands, rules, and skills to every supported agent target', async () => {
         arrangeBasicSources();
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Act
         await runCLI({
@@ -631,7 +639,9 @@ describe('dry-ai sync', () => {
             ].join('\n'),
           );
 
-          const { cliOptions, stderrMessages } = createTestEnv();
+          const { cliOptions, stderrMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -719,7 +729,7 @@ describe('dry-ai sync', () => {
               arrangeBasicSources();
 
               const { cliOptions, stderrMessages, stdoutMessages } =
-                createTestEnv();
+                createTestEnv({ mockFileSystem });
 
               await runCLI({
                 argv: ['sync'],
@@ -774,7 +784,7 @@ describe('dry-ai sync', () => {
               arrangeBasicSources();
 
               const { cliOptions, stderrMessages, stdoutMessages } =
-                createTestEnv();
+                createTestEnv({ mockFileSystem });
 
               await runCLI({
                 argv: ['sync'],
@@ -829,7 +839,7 @@ describe('dry-ai sync', () => {
               arrangeBasicSources();
 
               const { cliOptions, stderrMessages, stdoutMessages } =
-                createTestEnv();
+                createTestEnv({ mockFileSystem });
 
               await runCLI({
                 argv: ['sync'],
@@ -892,7 +902,7 @@ describe('dry-ai sync', () => {
               );
 
               const { cliOptions, stderrMessages, stdoutMessages } =
-                createTestEnv();
+                createTestEnv({ mockFileSystem });
 
               await runCLI({
                 argv: ['sync'],
@@ -976,7 +986,9 @@ describe('dry-ai sync', () => {
           async ({ skillMdPath, expectedSnippet }) => {
             arrangeBasicSources();
 
-            const { cliOptions, stderrMessages } = createTestEnv();
+            const { cliOptions, stderrMessages } = createTestEnv({
+              mockFileSystem,
+            });
 
             await runCLI({
               argv: ['sync'],
@@ -1033,7 +1045,7 @@ describe('dry-ai sync', () => {
             arrangeBasicSources();
 
             const { cliOptions, stderrMessages, stdoutMessages } =
-              createTestEnv();
+              createTestEnv({ mockFileSystem });
 
             await runCLI({
               argv: ['sync'],
@@ -1073,8 +1085,9 @@ describe('dry-ai sync', () => {
         it('should print Applied changes: None on a second run when sources, manifest, and outputs stay aligned', async () => {
           arrangeBasicSources();
 
-          const { cliOptions, stderrMessages, stdoutMessages } =
-            createTestEnv();
+          const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -1133,7 +1146,9 @@ describe('dry-ai sync', () => {
           ].join('\n'),
         );
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1215,7 +1230,9 @@ describe('dry-ai sync', () => {
           );
         }
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1293,7 +1310,9 @@ describe('dry-ai sync', () => {
           ].join('\n'),
         );
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1340,7 +1359,9 @@ describe('dry-ai sync', () => {
           ].join('\n'),
         );
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1377,7 +1398,9 @@ describe('dry-ai sync', () => {
           ].join('\n'),
         );
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1425,7 +1448,9 @@ describe('dry-ai sync', () => {
         // throws if a parent path was never `ensureDir`'d.
         arrangeBasicSources();
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Expected output roots for the default `~` layout (Copilot: prompts,
         // instructions, skills; Cursor: rules, skills) — fixed here so the
@@ -1508,7 +1533,9 @@ describe('dry-ai sync', () => {
         // change-type label (covered by the sibling tests below).
         arrangeBasicSources();
 
-        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv();
+        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1558,7 +1585,9 @@ describe('dry-ai sync', () => {
         // `src/lib/sync.ts`).
         arrangeBasicSources();
 
-        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv();
+        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1595,7 +1624,9 @@ describe('dry-ai sync', () => {
           );
         }
 
-        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv();
+        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1672,7 +1703,9 @@ describe('dry-ai sync', () => {
           }),
         );
 
-        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv();
+        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1697,7 +1730,9 @@ describe('dry-ai sync', () => {
         // color (e.g. green for this line) is not under test here.
         arrangeBasicSources();
 
-        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv();
+        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1745,7 +1780,9 @@ describe('dry-ai sync', () => {
         expect(mockFileSystem.files.has(manifestPath)).toBe(false);
 
         arrangeBasicSources();
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         await runCLI({
           argv: ['sync'],
@@ -1763,7 +1800,9 @@ describe('dry-ai sync', () => {
 
       it('should add manifest rows for a new command when its file appears and sync runs again', async () => {
         arrangeBasicSources();
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
         const manifestPath = path.join(
           DEFAULT_CONFIG_ROOT,
           'sync-manifest.json',
@@ -2047,7 +2086,9 @@ describe('dry-ai sync', () => {
         // (`current`) keeps the run from being a pure-prune scenario.
         seedCurrentCommandSource();
         const { copilotOutputPath, cursorWritePath } = arrangeStaleCommand();
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Sanity check: the stale outputs were actually seeded on disk
         // before the run, so a `false` post-run assertion isn't trivially
@@ -2089,7 +2130,9 @@ describe('dry-ai sync', () => {
         // exercised.
         seedCurrentCommandSource();
         const { copilotOutputPath, cursorOutputPath } = arrangeStaleRule();
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Sanity check: stale outputs were seeded on disk pre-run so
         // the post-run `false` assertion can't pass for the wrong
@@ -2120,7 +2163,9 @@ describe('dry-ai sync', () => {
         // a top-level file at the manifest's `outputPath`.
         seedCurrentCommandSource();
         const { copilotInnerFiles, cursorInnerFiles } = arrangeStaleSkill();
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Sanity check: every inner file was seeded on disk pre-run, so
         // the post-run `false` assertions can't all pass for the wrong
@@ -2165,7 +2210,9 @@ describe('dry-ai sync', () => {
           untrackedFileContent,
         );
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Act
         await runCLI({
@@ -2192,7 +2239,9 @@ describe('dry-ai sync', () => {
         // sufficient since the report code is uniform across kinds.
         seedCurrentCommandSource();
         arrangeStaleCommand();
-        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv();
+        const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Act
         await runCLI({
@@ -2251,7 +2300,9 @@ describe('dry-ai sync', () => {
             }),
           );
 
-          const { cliOptions, stderrMessages } = createTestEnv();
+          const { cliOptions, stderrMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -2275,7 +2326,9 @@ describe('dry-ai sync', () => {
             '{ not json',
           );
 
-          const { cliOptions, stderrMessages } = createTestEnv();
+          const { cliOptions, stderrMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -2309,7 +2362,9 @@ describe('dry-ai sync', () => {
             }),
           );
 
-          const { cliOptions, stderrMessages } = createTestEnv();
+          const { cliOptions, stderrMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -2335,7 +2390,9 @@ describe('dry-ai sync', () => {
             }),
           );
 
-          const { cliOptions, stderrMessages } = createTestEnv();
+          const { cliOptions, stderrMessages } = createTestEnv({
+            mockFileSystem,
+          });
 
           await runCLI({
             argv: ['sync'],
@@ -2505,7 +2562,9 @@ describe('dry-ai sync', () => {
           '',
         ].join('\n');
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
         await runCLI({
           argv: ['sync'],
           ...cliOptions,
@@ -2557,7 +2616,9 @@ describe('dry-ai sync', () => {
           '',
         ].join('\n');
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
         await runCLI({
           argv: ['sync'],
           ...cliOptions,
@@ -2614,7 +2675,9 @@ describe('dry-ai sync', () => {
           'Nested file\n',
         );
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
         await runCLI({
           argv: ['sync'],
           ...cliOptions,
@@ -2661,7 +2724,9 @@ describe('dry-ai sync', () => {
         );
         storeMockTextFile(mockFileSystem, orphanSource, 'Remove me\n');
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
         await runCLI({
           argv: ['sync'],
           ...cliOptions,

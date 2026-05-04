@@ -260,7 +260,7 @@ describe('dry-ai skills update-all', () => {
           }),
         );
 
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -399,7 +399,7 @@ describe('dry-ai skills update-all', () => {
         // Arrange: one skill with local edits (must be skipped) and one
         // clean skill (must be updated).
         const { skippedSkillOnDiskFiles } = arrangeOneSkippedOneUpdated();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -439,7 +439,7 @@ describe('dry-ai skills update-all', () => {
         // Arrange: one skill with local edits (must be skipped) and one
         // clean skill (must be updated).
         arrangeOneSkippedOneUpdated();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -474,7 +474,7 @@ describe('dry-ai skills update-all', () => {
         // Arrange: one skill with local edits (must be skipped) and one
         // clean skill (must be updated).
         arrangeOneSkippedOneUpdated();
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({

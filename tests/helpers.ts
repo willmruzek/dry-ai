@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto';
 import type os from 'node:os';
 import path from 'node:path';
 
+import { SystemError } from '@effect/platform/Error';
+import {
+  layerNoop as fileSystemLayerNoop,
+  type FileSystem,
+} from '@effect/platform/FileSystem';
+import { Effect } from 'effect';
+import type { Layer } from 'effect/Layer';
 import type fs from 'fs-extra';
 import { simpleGit } from 'simple-git';
 import { vi } from 'vitest';
@@ -70,6 +77,7 @@ export type TestEnv = {
   defaultConfigRoot: string;
   defaultOutputRoot: string;
   cliOptions: CLIOptions;
+  mockFileSystem: MockFileSystemState;
   stderrMessages: string[];
   stdoutMessages: string[];
 };
@@ -107,24 +115,58 @@ export function createTestStdioWriters(): TestStdioWriters {
 }
 
 /**
+ * Effect {@link FileSystem} layer backed by {@link MockFileSystemState} (tests only; never real disk).
+ */
+export function mockFileSystemLayer(
+  state: MockFileSystemState,
+): Layer<FileSystem> {
+  return fileSystemLayerNoop({
+    exists: (filePath: string) =>
+      Effect.sync(() => mockPathExists(state, filePath)),
+    readFileString: (filePath: string) => {
+      const normalizedPath = normalizeMockPath(filePath);
+
+      if (!state.files.has(normalizedPath)) {
+        return Effect.fail(
+          new SystemError({
+            module: 'FileSystem',
+            method: 'readFileString',
+            reason: 'NotFound',
+            description: 'No such file or directory',
+            pathOrDescriptor: filePath,
+          }),
+        );
+      }
+
+      return Effect.succeed(state.files.get(normalizedPath)!);
+    },
+  });
+}
+
+/**
  * Creates the minimal CLI options needed for tests, optionally with explicit config and output roots.
  */
 export function createTestEnv({
   defaultConfigRoot = '',
   defaultOutputRoot = '',
+  mockFileSystem: mockFileSystemInput,
 }: {
   defaultConfigRoot?: string;
   defaultOutputRoot?: string;
+  mockFileSystem?: MockFileSystemState;
 } = {}): TestEnv {
   const stdioWriters = createTestStdioWriters();
+  const mockFileSystem = mockFileSystemInput ?? createMockFileSystemState();
 
   return {
     defaultConfigRoot,
     defaultOutputRoot,
+    mockFileSystem,
     cliOptions: {
       executableName: 'dry-ai',
       version: '9.9.9-test',
       stdioWriters,
+      fileSystemLayer: mockFileSystemLayer(mockFileSystem),
     },
     stderrMessages: stdioWriters.stderrMessages,
     stdoutMessages: stdioWriters.stdoutMessages,

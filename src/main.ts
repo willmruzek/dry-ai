@@ -53,6 +53,7 @@ async function main(): Promise<void> {
   await runCLI({
     argv: process.argv.slice(2),
     executableName: EXECUTABLE_NAME,
+    fileSystemLayer: nodeFileSystemLayer,
     version: await readCliVersion(),
   });
 }

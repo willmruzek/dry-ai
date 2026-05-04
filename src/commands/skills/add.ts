@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   cleanupRemoteRepoCheckout,
   cloneRemoteRepo,
@@ -113,7 +113,7 @@ export async function runSkillsAddCommand(
   await ensureSkillsRoot(context);
   await ensureSkillsLockfile(context);
 
-  let lockfile = await loadSkillsLockfile(context);
+  let lockfile = await loadSkillsLockfile(env);
   const checkout = await cloneRemoteRepo({
     ref: input.ref,
     repo,

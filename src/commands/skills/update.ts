@@ -1,4 +1,4 @@
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   cleanupRemoteSkillSnapshot,
   computeDirectoryHashes,
@@ -28,7 +28,7 @@ export async function runSkillsUpdateCommand(
   const { context, runtime } = env;
   const { force, skillName } = input;
 
-  const lockfile = await loadSkillsLockfile(context);
+  const lockfile = await loadSkillsLockfile(env);
   const managedSkill = findManagedSkill(lockfile, { name: skillName });
 
   if (!managedSkill) {

@@ -6,8 +6,6 @@ import fs from 'fs-extra';
 import { glob } from 'glob';
 import { z } from 'zod';
 
-import type { CLIRuntime } from '../cli.js';
-
 import {
   buildSyncTargets,
   createAgentCmdSyncSpec,
@@ -25,6 +23,7 @@ import {
   type SyncTarget,
   type TargetRoots,
 } from './agents.js';
+import type { CLIRuntime } from './command-env.js';
 import type { AgentsContext } from './context.js';
 import {
   commandFrontmatterSchema,
