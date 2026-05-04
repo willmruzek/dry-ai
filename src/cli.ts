@@ -87,7 +87,10 @@ function getRootOptions(program: Command): RootOptions {
 }
 
 /**
- * Returns true if --test or --output-root was passed.
+ * Determines whether the CLI requested an output root via flags.
+ *
+ * @param rootOptions - Parsed root options from the CLI
+ * @returns `true` if `--test` was enabled or `--output-root` was provided, `false` otherwise.
  */
 function wasRequestedOutputRootUsed(rootOptions: RootOptions): boolean {
   return rootOptions.test || rootOptions.outputRoot !== undefined;
@@ -152,7 +155,10 @@ function resolveCLIOptions(options: CLIOptions): ResolvedCLIOptions {
 }
 
 /**
- * Builds and returns the Commander program with all subcommands and global flags registered.
+ * Constructs the CLI program with global flags, output routing, and all subcommands registered.
+ *
+ * @param options - Configuration for the CLI (executable name, version, stdio writers, and optional exit override)
+ * @returns The configured Commander program ready for parsing and execution
  */
 export function createCLI(options: CLIOptions): Command {
   const resolvedOptions = resolveCLIOptions(options);
@@ -244,7 +250,16 @@ export function createCLI(options: CLIOptions): Command {
 }
 
 /**
- * Parses argv and runs the matching command.
+ * Run the CLI using the supplied argv and CLI options.
+ *
+ * Enables Commander exit override when `exitOverride` is `true`, then parses
+ * and executes the matching command handlers for the provided `argv`.
+ *
+ * @param input - Object containing CLI runtime inputs:
+ *   - `argv`: The argument vector to parse (e.g., `process.argv`).
+ *   - `exitOverride`: When `true`, calls Commander’s `exitOverride()` to prevent
+ *     the CLI from calling `process.exit`.
+ *   - other `CLIOptions`: Options forwarded to `createCLI`.
  */
 export async function runCLI(
   input: {

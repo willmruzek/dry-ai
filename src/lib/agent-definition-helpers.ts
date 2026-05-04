@@ -24,7 +24,10 @@ type DefinedSource<TSource extends SourceDefinitionConfig> = Omit<
 };
 
 /**
- * Defines one ownership-key namespace and how to derive keys within it.
+ * Create a defined ownership-key namespace from the provided configuration.
+ *
+ * @param input - Configuration with `prefix`, `descriptionLabel`, and `createSuffix` used to derive keys
+ * @returns An object exposing `prefix`, `descriptionLabel`, and `createKey(value)` which produces a key by concatenating the configured `prefix` with the suffix produced for `value`
  */
 function defineOwnershipKey(input: OwnershipKeyConfig): DefinedOwnershipKey {
   return {
@@ -36,6 +39,11 @@ function defineOwnershipKey(input: OwnershipKeyConfig): DefinedOwnershipKey {
   };
 }
 
+/**
+ * Convert a source configuration by replacing its `ownershipKey` with a defined ownership key.
+ *
+ * @returns The original `source` object with `ownershipKey` replaced by a `DefinedOwnershipKey` containing `prefix`, `descriptionLabel`, and `createKey`.
+ */
 function defineSource<TSource extends SourceDefinitionConfig>(
   source: TSource,
 ): DefinedSource<TSource> {
@@ -45,6 +53,12 @@ function defineSource<TSource extends SourceDefinitionConfig>(
   };
 }
 
+/**
+ * Produces a new agent object where the `command`, `rule`, and `skill` sources are converted to their defined variants.
+ *
+ * @param agent - An agent definition containing `command`, `rule`, and `skill` as SourceDefinitionConfig objects
+ * @returns The input agent with `command`, `rule`, and `skill` replaced by their corresponding DefinedSource forms (each has a derived `ownershipKey`)
+ */
 export function defineAgent<
   const TAgent extends {
     command: SourceDefinitionConfig;

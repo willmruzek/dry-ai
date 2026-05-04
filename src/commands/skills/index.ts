@@ -33,7 +33,13 @@ const skillsUpdateOptionsSchema = z.object({
 type SkillsUpdateOptions = z.output<typeof skillsUpdateOptionsSchema>;
 
 /**
- * Registers the managed skills command tree on the parent CLI program.
+ * Register the `skills` managed-skill command subtree on a parent CLI program.
+ *
+ * @param input - Configuration object
+ * @param input.program - The parent Commander `Command` instance to attach the `skills` command to
+ * @param input.commandName - The top-level CLI executable name used in help examples
+ * @param input.resolveEnv - Function that returns the current command environment when a subcommand runs
+ * @returns The configured `skills` `Command` instance
  */
 export function addSkillsCommand(input: {
   program: Command;

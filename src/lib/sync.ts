@@ -132,7 +132,11 @@ type SyncManifestEntry = z.output<typeof syncManifestEntrySchema>;
 type SyncManifest = z.output<typeof syncManifestSchema>;
 
 /**
- * Validates and returns the agent name from an artifact spec, throwing if it is unrecognized.
+ * Validate that a string is a recognized sync agent and return it.
+ *
+ * @param agent - The agent identifier to validate
+ * @returns The validated `SyncAgent` string
+ * @throws Error if `agent` is not a supported sync agent
  */
 function parseSyncAgent(agent: string): SyncAgent {
   if (isSyncAgent(agent)) {
@@ -143,7 +147,11 @@ function parseSyncAgent(agent: string): SyncAgent {
 }
 
 /**
- * Derives the ownership key claimed by one artifact spec for conflict detection.
+ * Derives the ownership key claimed by an artifact spec for conflict detection.
+ *
+ * @param desiredSpec - Desired sync spec supplying the `kind` and `name` used in the key
+ * @param artifactSpec - Artifact spec supplying the `agent` and `managedArtifactPath` used as the `outputPath`
+ * @returns The ownership key composed of `agent`, `kind`, `name`, and `outputPath` that identifies claimed ownership of the artifact
  */
 function deriveOwnershipKeyForArtifactSpec(
   desiredSpec: DesiredSyncSpec,
@@ -160,7 +168,10 @@ function deriveOwnershipKeyForArtifactSpec(
 }
 
 /**
- * Returns the ownership key for a saved manifest entry.
+ * Derives the ownership key that uniquely identifies the owner of a manifest entry.
+ *
+ * @param manifestEntry - The manifest entry whose `agent`, `kind`, `name`, and `outputPath` are used
+ * @returns The ownership key constructed from the entry's `agent`, `kind`, `name`, and `outputPath`
  */
 function deriveOwnershipKeyForManifestEntry(
   manifestEntry: SyncManifestEntry,
@@ -172,9 +183,13 @@ function deriveOwnershipKeyForManifestEntry(
 }
 
 /**
- * Returns the first manifest agent id that is syntactically readable but no
- * longer registered. Other malformed manifest shapes keep the generic recovery
- * path below.
+ * Finds the first agent string in a parsed manifest that is not a registered SyncAgent.
+ *
+ * Scans `parsedManifest.outputs` (if present and an array) and returns the first `agent`
+ * value that is a string but fails `isSyncAgent`.
+ *
+ * @param parsedManifest - The parsed manifest JSON to inspect
+ * @returns The unregistered agent string if found, otherwise `undefined`
  */
 function findUnregisteredManifestAgent(
   parsedManifest: unknown,
@@ -214,15 +229,11 @@ export async function ensureTargetDirectories(
 }
 
 /**
- * Reads the sync manifest from disk, or returns an empty manifest if none
- * exists yet.
+ * Load the sync manifest from disk; fall back to an empty manifest when the file is missing, unreadable, or does not match the expected layout.
  *
- * Any failure to read, parse, or validate falls back to an empty manifest and
- * warns that removed outputs may need manual cleanup.
- *
- * On the next sync after a fallback, current outputs are re-evaluated from
- * on-disk state, so existing matching outputs may still be reported as
- * `(unchanged)` rather than `(installed)`.
+ * @param manifestPath - Filesystem path to the sync-manifest.json file
+ * @returns The validated SyncManifest, or an empty manifest when no valid file can be read
+ * @throws If the manifest references an unregistered agent (instructs removal of those entries or deletion of the manifest)
  */
 export async function loadSyncManifest(
   manifestPath: string,
@@ -272,7 +283,13 @@ export async function loadSyncManifest(
 }
 
 /**
- * Serializes and writes the sync manifest to manifestPath.
+ * Write the sync manifest to disk at the given path.
+ *
+ * Ensures the manifest file's parent directory exists, then writes the manifest
+ * as pretty-printed JSON (2-space indentation) with a trailing newline.
+ *
+ * @param manifestPath - Filesystem path where the manifest will be written
+ * @param manifest - The manifest object to serialize (including `version` and `outputs`)
  */
 export async function saveSyncManifest(
   manifestPath: string,
@@ -287,7 +304,13 @@ export async function saveSyncManifest(
 }
 
 /**
- * Creates a normalized sync manifest with deterministic output ordering.
+ * Build a canonical sync manifest from a list of manifest entries.
+ *
+ * Duplicate entries sharing the same `outputPath` are deduplicated by keeping the last
+ * entry for that path, and the resulting manifest outputs are sorted deterministically.
+ *
+ * @param entries - Manifest entries to include (later entries override earlier ones for the same `outputPath`)
+ * @returns A sync manifest object with the current manifest version and a deterministically ordered `outputs` array
  */
 export function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
   const entriesByOutputPath = new Map<string, SyncManifestEntry>();
@@ -303,7 +326,9 @@ export function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
 }
 
 /**
- * Returns the markdown source files found directly under a source root.
+ * List markdown files located directly under a directory.
+ *
+ * @returns Sorted array of file paths for `*.md` files found immediately inside `rootDir`
  */
 async function getMarkdownFilePaths(rootDir: string): Promise<string[]> {
   await fs.ensureDir(rootDir);
@@ -314,7 +339,11 @@ async function getMarkdownFilePaths(rootDir: string): Promise<string[]> {
 }
 
 /**
- * Writes one markdown file after rendering its frontmatter and body content.
+ * Render `metadata` as frontmatter, combine it with `body`, ensure the parent directory exists, and write the result to `filePath`.
+ *
+ * @param filePath - Destination path for the rendered markdown file
+ * @param metadata - Frontmatter object to include at the top of the file
+ * @param body - Markdown body content placed after the frontmatter
  */
 async function writeMarkdownFile<Metadata extends Record<string, unknown>>(
   filePath: string,
@@ -326,13 +355,11 @@ async function writeMarkdownFile<Metadata extends Record<string, unknown>>(
 }
 
 /**
- * Computes a content hash for one artifact spec. The goal is to prevent
- * overwriting local file changes by identifying the bytes that WOULD be written
- * on the next sync. Markdown artifacts hash the exact rendered output
- * (frontmatter + body). Directory artifacts hash a sorted, serialized snapshot
- * of per-file SHA-256 hashes under the source directory. The hash is stable
- * across runs as long as the effective content is unchanged, and is used to
- * detect the `unchanged` branch.
+ * Compute a stable content hash representing the bytes that would be written for the given artifact spec.
+ *
+ * For markdown artifacts the hash is derived from the rendered output (frontmatter + body). For directory artifacts the hash is derived from a deterministic snapshot of per-file SHA-256 hashes under the source directory.
+ *
+ * @returns A hex-encoded SHA-256 hash of the artifact's would-be-on-disk content
  */
 async function computeArtifactSpecContentHash(
   artifactSpec: ArtifactSpec,
@@ -355,10 +382,10 @@ async function computeArtifactSpecContentHash(
 }
 
 /**
- * SHA-256 of the bytes currently on disk for this artifact spec, using the same
- * serialization as {@link computeArtifactSpecContentHash} so it can be compared
- * to the would-be-written hash. Returns `undefined` if the artifact is
- * missing or cannot be read.
+ * Compute the SHA-256 hex digest for an artifact's on-disk content.
+ *
+ * @param artifactSpec - The artifact spec whose materialized content to hash
+ * @returns The SHA-256 hex digest of the on-disk content if present and readable, `undefined` otherwise.
  */
 async function computeOnDiskArtifactContentHash(
   artifactSpec: ArtifactSpec,
@@ -395,11 +422,9 @@ async function computeOnDiskArtifactContentHash(
 }
 
 /**
- * On-disk path that must exist for an artifact spec to be treated as already materialized.
- * Matches what `writeArtifactSpec` creates: markdown artifacts use `fileWritePath`
- * (the file), which can differ from `managedArtifactPath` when that path names a
- * parent directory (e.g. Cursor commands). Directory artifacts use
- * `managedArtifactPath` as the copy root.
+ * Return the on-disk path whose existence indicates the artifact spec is materialized.
+ *
+ * @returns The path that must exist for this artifact: `fileWritePath` for markdown artifacts, otherwise `managedArtifactPath`.
  */
 function getArtifactSpecMaterializedPath(artifactSpec: ArtifactSpec): string {
   return artifactSpec.artifactType === 'markdown'
@@ -408,13 +433,9 @@ function getArtifactSpecMaterializedPath(artifactSpec: ArtifactSpec): string {
 }
 
 /**
- * Determines the applied change type by comparing on-disk bytes to the
- * would-be-written hash (manifest does not store content hashes).
+ * Determine whether an artifact will be installed, updated, or left unchanged by comparing the desired content hash with on-disk content.
  *
- * - `unchanged`: the artifact path exists and on-disk content hashes to the
- *   desired value.
- * - `installed`: the artifact path does not exist on disk.
- * - `updated`: the artifact exists but on-disk content does not match.
+ * @returns `'installed'` if the artifact path does not exist on disk, `'unchanged'` if the on-disk content hash equals the desired hash, `'updated'` otherwise.
  */
 async function detectAppliedChangeType(input: {
   artifactSpec: ArtifactSpec;
@@ -437,9 +458,12 @@ async function detectAppliedChangeType(input: {
 }
 
 /**
- * Applies one sync item: computes a content hash per target, decides the
- * applied change type, and writes the output iff the change type is not
- * `unchanged`.
+ * Applies a desired sync spec by computing content hashes for its artifact specs,
+ * determining each artifact's applied change type, and writing outputs for artifacts
+ * that are not `unchanged`.
+ *
+ * @param desiredSpec - The desired sync specification containing artifact specs to apply
+ * @returns The applied sync result containing the original `desiredSpec` and an array of per-artifact changes. Each change includes the parsed agent, the artifact spec, and the `changeType` (`installed`, `updated`, or `unchanged`).
  */
 async function applyDesiredSyncSpec(
   desiredSpec: DesiredSyncSpec,
@@ -513,6 +537,13 @@ async function writeArtifactSpec(artifactSpec: ArtifactSpec): Promise<void> {
   );
 }
 
+/**
+ * Assembles desired sync specifications for all commands, rules, and skills found in the source roots.
+ *
+ * @param context - Context containing source and target root locations used to discover artifacts
+ * @param runtime - Runtime utilities and configuration used while building specs
+ * @returns An array of DesiredSyncSpec objects describing the desired artifacts to be synchronized (commands, rules, and skills)
+ */
 export async function buildDesiredSyncSpecs(
   context: AgentsContext,
   runtime: CLIRuntime,
@@ -525,7 +556,15 @@ export async function buildDesiredSyncSpecs(
 }
 
 /**
- * Builds sync specs for command sources after validating their frontmatter.
+ * Builds desired sync specs for command markdown files in the commands source root.
+ *
+ * For each markdown file directly under context.sourceRoots.commands, parses and validates
+ * its frontmatter against the command schema and, if valid, produces artifact specs per agent.
+ * Files with invalid frontmatter or that do not produce artifact specs are skipped.
+ *
+ * @param context - Provides sourceRoots (commands) and targetRoots used to construct artifact specs
+ * @param runtime - Runtime utilities used for validation and agent-specific builders
+ * @returns An array of DesiredSyncSpec objects for commands that passed validation and produced artifact specs
  */
 async function buildCommandSyncSpecs(
   context: AgentsContext,
@@ -576,7 +615,11 @@ async function buildCommandSyncSpecs(
 }
 
 /**
- * Builds sync specs for rule sources after validating their frontmatter.
+ * Builds desired sync specifications for rule markdown files under the rules source root.
+ *
+ * Scans rule Markdown files, parses and validates their frontmatter, and converts each valid file into a DesiredSyncSpec with artifact specs for configured agents. Files whose frontmatter fails validation or that produce no artifact specs are skipped.
+ *
+ * @returns An array of DesiredSyncSpec objects for rule sources that passed validation and produced artifact specs
  */
 async function buildRuleSyncSpecs(
   context: AgentsContext,
@@ -625,7 +668,13 @@ async function buildRuleSyncSpecs(
 }
 
 /**
- * Builds sync specs for local skill directories.
+ * Collects desired sync specs for each skill subdirectory found under the skills source root.
+ *
+ * Ignores non-directory entries and produces one DesiredSyncSpec per skill directory, where
+ * each spec's `artifactSpecs` contains artifact specifications built for every supported agent.
+ *
+ * @param context - AgentsContext containing `sourceRoots.skills` (the skills root to scan) and `targetRoots` used when building artifact specs
+ * @returns An array of DesiredSyncSpec objects, one per skill directory found under `sourceRoots.skills`
  */
 async function buildSkillSyncSpecs(
   context: AgentsContext,
@@ -685,7 +734,16 @@ async function copyDirectoryContents(
 }
 
 /**
- * Collects the syncable and skipped items after analyzing output namespace conflicts.
+ * Determine which desired specs can be applied and which must be skipped due to ownership/output conflicts, and partition previous manifest entries for removal or preservation.
+ *
+ * @param input.previousManifest - The previously saved sync manifest whose outputs will be compared against desired outputs
+ * @param input.desiredSpecs - The desired sync specifications to evaluate for syncability
+ * @returns An object describing planned changes:
+ * - `syncableSpecs`: desired specs with conflict-free artifact specs that should be applied
+ * - `skippedSpecs`: desired specs that were skipped due to ownership conflicts, each with conflict descriptions
+ * - `desiredOutputPaths`: set of output paths that remain desired after conflict resolution
+ * - `removedEntries`: manifest entries whose outputs are no longer desired and should be removed
+ * - `preservedEntries`: manifest entries preserved because their ownership keys were skipped
  */
 export function prepareSyncChanges(input: {
   previousManifest: SyncManifest;
@@ -714,6 +772,12 @@ export function prepareSyncChanges(input: {
   };
 }
 
+/**
+ * Applies a prepared set of sync changes: removes stale outputs and materializes each syncable desired spec.
+ *
+ * @param changes - The prepared sync changes containing `syncableSpecs` to apply and `removedEntries` to delete.
+ * @returns An object with `appliedSpecs` — results for each applied desired spec — and `removedEntries` that were removed. 
+ */
 export async function applySyncChanges(
   changes: SyncChanges,
 ): Promise<SyncApplyResult> {
@@ -732,7 +796,14 @@ export async function applySyncChanges(
 }
 
 /**
- * Collects the syncable and skipped specs after analyzing output namespace conflicts.
+ * Analyze desired specs for ownership conflicts and split them into syncable and skipped groups.
+ *
+ * @param specs - The desired sync specifications to analyze for ownership collisions.
+ * @returns An object containing:
+ *   - `syncableSpecs`: desired specs where conflicting artifact specs have been removed so only non-conflicting artifact specs remain;
+ *   - `skippedSpecs`: entries for specs that had one or more conflicting artifact specs, each with the original `desiredSpec` and a sorted, deduplicated list of `conflictDescriptions`;
+ *   - `skippedOwnershipKeys`: ownership keys that are involved in conflicts and should be preserved in the manifest;
+ *   - `desiredOutputPaths`: the set of artifact output paths produced by the syncable artifact specs.
  */
 function collectSyncability(specs: DesiredSyncSpec[]): SyncabilityResult {
   const candidates: DesiredSpecCandidate[] = [];
@@ -830,7 +901,9 @@ function collectSyncability(specs: DesiredSyncSpec[]): SyncabilityResult {
 }
 
 /**
- * Converts applied sync specs into manifest entries for desired outputs.
+ * Produce manifest entries for every artifact written or kept from applied sync results.
+ *
+ * @returns An array of manifest entries where each entry contains the `agent`, `kind`, `name`, and `outputPath` corresponding to an applied artifact
  */
 export function collectManifestEntriesFromApplied(
   appliedSpecs: AppliedSyncResult[],
@@ -846,7 +919,12 @@ export function collectManifestEntriesFromApplied(
 }
 
 /**
- * Partitions previous manifest entries into removed and preserved entries.
+ * Determines which entries from a previous sync manifest should be removed and which should be preserved.
+ *
+ * @param manifestEntries - The manifest's existing output entries to evaluate.
+ * @param input.desiredOutputPaths - Output paths that are still desired by the new desired specs; entries with these paths are left as-is.
+ * @param input.skippedOwnershipKeys - Ownership keys claimed by specs that were skipped due to conflicts; manifest entries matching these keys are preserved.
+ * @returns An object with `removedEntries` — manifest entries that should be deleted, and `preservedEntries` — entries that should be retained. 
  */
 function partitionManifestEntries(
   manifestEntries: SyncManifestEntry[],
@@ -890,7 +968,14 @@ async function removeStaleOutputs(
 }
 
 /**
- * Renders a sync summary grouped by agent, item kind, and skipped conflicts.
+ * Render a human-readable sync report grouped by agent, item kind, and skipped conflicts.
+ *
+ * The report includes an "Applied changes" section showing per-agent changes (omitted for agents with nothing to report)
+ * and a "Skipped conflicts" section listing desired specs that were not applied with their conflict descriptions.
+ *
+ * @param result - The outcome of applying sync changes, containing applied specs and removed entries
+ * @param changes - The prepared sync changes, including skipped specs and their conflict descriptions
+ * @returns A multi-line string describing applied changes per agent and any skipped conflicts
  */
 export function renderSyncReport(
   result: SyncApplyResult,
@@ -1043,7 +1128,10 @@ function colorChangeType(changeType: SyncChangeType): string {
 }
 
 /**
- * Renders one styled applied-item line in the sync summary.
+ * Format a single reported sync change into a styled, indented summary line.
+ *
+ * @param reportedChange - The reported change containing `name` and `changeType` to render
+ * @returns An indented, human-readable line with the item name and its change type (styled for terminal output)
  */
 function renderReportedSyncChangeLine(
   reportedChange: ReportedAgentSyncChange,
@@ -1052,7 +1140,10 @@ function renderReportedSyncChangeLine(
 }
 
 /**
- * Returns a readable label for one sync spec in conflict warnings.
+ * Produce a human-readable label for a desired sync spec suitable for conflict or status messages.
+ *
+ * @param spec - The desired sync specification to label
+ * @returns A string like `kind "name" from sourcePath` identifying the spec
  */
 function formatDesiredSyncSpecLabel(spec: DesiredSyncSpec): string {
   return `${spec.kind} "${spec.name}" from ${spec.sourcePath}`;

@@ -12,7 +12,10 @@ import { runCLI } from './cli.js';
 const EXECUTABLE_NAME = 'dry-ai';
 
 /**
- * Reads the CLI version from the package manifest at the repository root.
+ * Determine the CLI version from the repository's root package.json.
+ *
+ * @returns The `version` field from the repository root's package.json
+ * @throws Error if the repository/package root cannot be located
  */
 async function getCLIVersion(): Promise<string> {
   const packageRoot = await packageDirectory({

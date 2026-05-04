@@ -23,6 +23,12 @@ export const looseAgentFrontmatterRecordSchema = z.preprocess(
   z.union([z.record(z.string(), z.unknown()), z.undefined()]),
 );
 
+/**
+ * Produce metadata for a command definition by extracting `name`, `description`, and any remaining frontmatter fields.
+ *
+ * @param input - The source object for a command (frontmatter fields and content) from which metadata should be derived
+ * @returns An object containing `name`, `description`, and any other frontmatter properties from `input`; keys with no value are omitted
+ */
 function metadataFromCommandInput(
   input: AgentCmdSource & Record<string, unknown>,
 ): Record<string, unknown> {
@@ -36,6 +42,15 @@ function metadataFromCommandInput(
   return compactObject({ name, description, ...yaml });
 }
 
+/**
+ * Extracts metadata for a rule from its source object.
+ *
+ * Returns an object containing the rule's `description` plus any other frontmatter/YAML properties,
+ * excluding the `name`, `sourceFileStem`, and `body` fields.
+ *
+ * @param input - The parsed rule source (includes frontmatter fields and source properties)
+ * @returns An object with `description` (if present) and the remaining YAML/frontmatter properties
+ */
 function metadataFromRuleInput(
   input: AgentRuleSource & Record<string, unknown>,
 ): Record<string, unknown> {

@@ -93,7 +93,9 @@ export type DirectoryArtifactSpec = Extract<
 export type MarkdownArtifactMetadata = MarkdownArtifactSpec['metadata'];
 
 /**
- * Returns all ownership definitions registered across every agent and item kind.
+ * Collects ownership key definitions from every registered agent for command, rule, and skill kinds.
+ *
+ * @returns An array of ownership key definition objects—one for each command, rule, and skill entry of every agent, in the iteration order of SYNC_AGENTS.
  */
 function listOwnershipDefinitions() {
   return SYNC_AGENTS.flatMap((agent) => {
@@ -108,7 +110,10 @@ function listOwnershipDefinitions() {
 }
 
 /**
- * Builds the map of output root directory paths for every agent, each resolved relative to baseDir.
+ * Build a mapping of each agent's named target roots to their resolved filesystem paths.
+ *
+ * @param baseDir - Base directory used to resolve each target root's configured path segments
+ * @returns A record mapping agent keys to an inner record of root name → resolved path string
  */
 export function createTargetRoots(baseDir: string): TargetRoots {
   return Object.fromEntries(
@@ -132,7 +137,9 @@ export function createTargetRoots(baseDir: string): TargetRoots {
 }
 
 /**
- * Returns the display label used for one agent in user-facing sync reports.
+ * Get the agent's display label for use in user-facing sync reports.
+ *
+ * @returns The agent's human-readable display label
  */
 export function getAgentLabel(agent: SyncAgent): string {
   return AGENT_DEFINITIONS[agent].displayLabel;
@@ -146,14 +153,20 @@ export function describeSupportedAgents(): string {
 }
 
 /**
- * Returns every output root directory path from the given TargetRoots map.
+ * List all resolved target root directory paths for every sync agent.
+ *
+ * @param targetRoots - Mapping of agent → root name → resolved path
+ * @returns An array of resolved root directory paths across all agents
  */
 export function listTargetRootPaths(targetRoots: TargetRoots): string[] {
   return SYNC_AGENTS.flatMap((agent) => Object.values(targetRoots[agent]));
 }
 
 /**
- * Returns the ownership key for the given agent, item kind, and input.
+ * Create an ownership key string for a specific agent item.
+ *
+ * @param value - The identifier or input used to construct the ownership key (format depends on `kind`)
+ * @returns The ownership key for the specified `agent` and `kind`
  */
 export function createOwnershipKey(
   agent: SyncAgent,
@@ -239,7 +252,12 @@ function formatValidationIssues(input: {
 }
 
 /**
- * Reads the per-agent blocks from parsed frontmatter and returns a map of agent → raw section value.
+ * Collects per-agent frontmatter sections and returns them keyed by recognized sync agent.
+ *
+ * @param input.filePath - Source file path used in diagnostics
+ * @param input.kind - Frontmatter kind, either `'command'` or `'rule'`, which determines the expected section shape
+ * @param input.sections - The raw `agents` frontmatter block to collect values from
+ * @returns A map from recognized `SyncAgent` to the raw section value, or `null` if any unsupported agents were present (an informational message is logged in that case)
  */
 function getAgentSpecificValues<K extends 'command' | 'rule'>(
   runtime: CLIRuntime,
@@ -281,8 +299,13 @@ function getAgentSpecificValues<K extends 'command' | 'rule'>(
 }
 
 /**
- * Builds one command artifact spec per agent. Skips an agent when
- * `agents.<agent>` is present but not a YAML object (records a warning).
+ * Build a command artifact spec for each supported agent based on the file's frontmatter and body.
+ *
+ * For agents whose `agents.<agent>` section fails the agent's frontmatter schema validation this function
+ * skips that agent and records a warning; if the input contains unsupported agent names the function
+ * returns `null`.
+ *
+ * @returns A readonly array of `ArtifactSpec` objects for the agents that produced valid specs, or `null` if no specs were produced.
  */
 export function buildCommandArtifactSpecsByAgent(
   runtime: CLIRuntime,
@@ -346,8 +369,16 @@ export function buildCommandArtifactSpecsByAgent(
 }
 
 /**
- * Builds one rule artifact spec per agent. Skips an agent when
- * `agents.<agent>` is present but not a YAML object (records a warning).
+ * Build one rule artifact spec for each supported agent that provides a valid `agents.<agent>` section.
+ *
+ * Skips agents whose frontmatter section fails schema validation (a warning is logged for each skipped agent).
+ *
+ * @param input - Input data for building rule artifact specs
+ * @param input.filePath - Path to the source markdown file (used to derive the source name/stem)
+ * @param input.body - Markdown body content
+ * @param input.frontmatter - Parsed rule frontmatter for the file
+ * @param input.targetRoots - Resolved target root paths per agent
+ * @returns A read-only array of artifact specs for agents that passed validation, or `null` if no specs were produced
  */
 export function buildRuleArtifactSpecsByAgent(
   runtime: CLIRuntime,

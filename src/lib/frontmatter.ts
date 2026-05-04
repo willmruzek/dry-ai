@@ -34,7 +34,9 @@ export type CommandFrontmatter = z.infer<typeof commandFrontmatterSchema>;
 export type RuleFrontmatter = z.infer<typeof ruleFrontmatterSchema>;
 
 /**
- * Returns whether a value is a non-null plain object and not an array.
+ * Checks whether a value is a non-null object that is not an array.
+ *
+ * @returns `true` if `value` is an object (not `null`) and not an array, `false` otherwise.
  */
 export function isPlainObject(
   value: unknown,
@@ -43,7 +45,10 @@ export function isPlainObject(
 }
 
 /**
- * Parses a markdown-like file into optional YAML frontmatter metadata and body.
+ * Extracts YAML frontmatter metadata and the trimmed body from a Markdown string.
+ *
+ * @param fileContent - The Markdown document to parse; may include YAML frontmatter
+ * @returns An object with `metadata` set to the parsed frontmatter as a plain object (or `{}` when absent or not a plain object) and `body` set to the trimmed document content
  */
 export function parseMdWithFrontmatter(fileContent: string): {
   metadata: Record<string, unknown>;
@@ -58,7 +63,12 @@ export function parseMdWithFrontmatter(fileContent: string): {
 }
 
 /**
- * Validates parsed frontmatter against a schema and logs a skip message when validation fails.
+ * Validate frontmatter metadata against a Zod schema and return the validated value or `null`; logs an informational skip message if validation fails.
+ *
+ * @param filePath - Path of the source file whose frontmatter is being validated (used in the logged message)
+ * @param metadata - Parsed frontmatter object to validate
+ * @param schema - Zod schema used to validate `metadata`
+ * @returns `T` if validation succeeds, `null` otherwise
  */
 export function validateFrontmatter<T>(
   runtime: CLIRuntime,
