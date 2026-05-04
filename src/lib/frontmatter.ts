@@ -8,9 +8,9 @@ export { compactObject } from './object-helpers.js';
 export const nonEmptyStringSchema = z.string().trim().min(1);
 
 /**
- * `agents` blocks are not validated with strict per-agent schemas at parse
- * time, so a valid Copilot block can coexist with an invalid Cursor block (and
- * vice versa); each agent is validated when building sync output.
+ * Top-level command/rule frontmatter is strict; each `agents.<agent>` value is
+ * only checked to be a plain object (or omitted) when building that agent’s
+ * artifact—keys are passed through without dry-ai policy validation.
  */
 const looseAgentBlocksSchema = z.record(z.string(), z.unknown()).optional();
 
@@ -43,13 +43,14 @@ export function isPlainObject(
 }
 
 /**
- * Parses optional YAML frontmatter from a markdown-like file and returns its metadata and body.
+ * Parses a markdown-like file into optional YAML frontmatter metadata and body.
  */
-export function parseFrontmatter(fileContent: string): {
+export function parseMdWithFrontmatter(fileContent: string): {
   metadata: Record<string, unknown>;
   body: string;
 } {
   const parsed = matter(fileContent);
+
   return {
     metadata: isPlainObject(parsed.data) ? parsed.data : {},
     body: parsed.content.trim(),
@@ -86,6 +87,7 @@ export function validateFrontmatter<T>(
     .join('; ');
 
   runtime.logInfo(`Skipping invalid frontmatter in ${filePath}: ${issues}`);
+
   return null;
 }
 

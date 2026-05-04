@@ -1,5 +1,3 @@
-import type { SyncAgent, TargetRoots } from './agents.js';
-
 export const SYNC_ITEM_KINDS = ['command', 'rule', 'skill'] as const;
 
 export type SyncItemKind = (typeof SYNC_ITEM_KINDS)[number];
@@ -9,52 +7,33 @@ export type OwnershipKeyInput = {
   outputPath: string;
 };
 
-export type AgentCmdSyncSpec = {
+export type AgentCmdSource = {
   name: string;
   description: string;
   sourceFileStem: string;
   body: string;
-  disableModelInvocation: boolean | undefined;
 };
 
-export type AgentRuleSyncSpec = {
+export type AgentRuleSource = {
   name: string;
   description: string;
   sourceFileStem: string;
   body: string;
-  applyTo: string;
-  globs: string | undefined;
-  alwaysApply: boolean;
 };
 
-export type AgentSkillSyncSpec = {
+/** Rule source plus passthrough keys from `agents.copilot` in source frontmatter. */
+export type CopilotRuleSource = AgentRuleSource & Record<string, unknown>;
+
+/** Rule source plus passthrough keys from `agents.cursor` in source frontmatter. */
+export type CursorRuleSource = AgentRuleSource & Record<string, unknown>;
+
+export type AgentSkillSource = {
   name: string;
   sourceDir: string;
 };
 
-export type AgentSyncSpecByKind = {
-  command: AgentCmdSyncSpec;
-  rule: AgentRuleSyncSpec;
-  skill: AgentSkillSyncSpec;
+export type AgentSourceByKind = {
+  command: AgentCmdSource;
+  rule: AgentRuleSource;
+  skill: AgentSkillSource;
 };
-
-export type SyncTargetSpec =
-  | {
-      kind: 'command';
-      input: AgentCmdSyncSpec;
-      targetRoots: TargetRoots;
-      /** When set, only these agents get outputs; omit to sync all agents. */
-      agents?: readonly SyncAgent[];
-    }
-  | {
-      kind: 'rule';
-      input: AgentRuleSyncSpec;
-      targetRoots: TargetRoots;
-      /** When set, only these agents get outputs; omit to sync all agents. */
-      agents?: readonly SyncAgent[];
-    }
-  | {
-      kind: 'skill';
-      input: AgentSkillSyncSpec;
-      targetRoots: TargetRoots;
-    };

@@ -59,12 +59,14 @@ export type CLIRuntime = {
 export type CommandEnv = {
   context: AgentsContext;
   runtime: CLIRuntime;
+  rootOptions: RootOptions;
 };
 
 export type CLIOptions = {
   executableName?: string;
   version: string;
   stdioWriters?: StdioWriters;
+  exitOverride?: boolean;
 };
 
 type ResolvedCLIOptions = {
@@ -87,7 +89,7 @@ function getRootOptions(program: Command): RootOptions {
 /**
  * Returns true if --test or --output-root was passed.
  */
-function requestedOutputRootWasUsed(rootOptions: RootOptions): boolean {
+function wasRequestedOutputRootUsed(rootOptions: RootOptions): boolean {
   return rootOptions.test || rootOptions.outputRoot !== undefined;
 }
 
@@ -154,14 +156,22 @@ function resolveCLIOptions(options: CLIOptions): ResolvedCLIOptions {
  */
 export function createCLI(options: CLIOptions): Command {
   const resolvedOptions = resolveCLIOptions(options);
+
   const program = new Command();
+
   const executableName = resolvedOptions.executableName;
   const stdioWriters = resolvedOptions.stdioWriters;
   const runtime = wrapStdioWriters(stdioWriters);
-  const resolveEnv = (): CommandEnv => ({
-    context: resolveActiveContext(getRootOptions(program)),
-    runtime,
-  });
+
+  const resolveEnv = (): CommandEnv => {
+    const rootOptions = getRootOptions(program);
+
+    return {
+      context: resolveActiveContext(rootOptions),
+      runtime,
+      rootOptions,
+    };
+  };
 
   program.configureOutput({
     writeOut: (output) => {
@@ -217,7 +227,7 @@ export function createCLI(options: CLIOptions): Command {
 
       await runSyncCommand(env);
 
-      if (requestedOutputRootWasUsed(rootOptions)) {
+      if (wasRequestedOutputRootUsed(rootOptions)) {
         runtime.logInfo(
           `Generated output written to ${env.context.outputRoot}`,
         );
@@ -226,7 +236,7 @@ export function createCLI(options: CLIOptions): Command {
 
   addSkillsCommand({
     program,
-    commandName: `${executableName} skills`,
+    commandName: executableName,
     resolveEnv,
   });
 
@@ -234,17 +244,20 @@ export function createCLI(options: CLIOptions): Command {
 }
 
 /**
- * Parses argv and runs the matching command, returning the Commander program after completion.
+ * Parses argv and runs the matching command.
  */
 export async function runCLI(
   input: {
     argv: string[];
   } & CLIOptions,
-): Promise<Command> {
-  const { argv, ...options } = input;
+): Promise<void> {
+  const { argv, exitOverride, ...options } = input;
+
   const program = createCLI(options);
 
-  await program.parseAsync(argv, { from: 'user' });
+  if (exitOverride === true) {
+    program.exitOverride();
+  }
 
-  return program;
+  await program.parseAsync(argv, { from: 'user' });
 }
