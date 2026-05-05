@@ -15,7 +15,11 @@ import {
 } from '../../lib/skills.js';
 
 /**
- * Updates every managed skill from its tracked remote source and saves the refreshed lockfile.
+ * Update all managed skills from their tracked remote sources and persist the refreshed skills lockfile.
+ *
+ * For each managed skill this replaces the local managed directory with the remote snapshot (unless local edits are present and `input.force` is false), recomputes installed file hashes, updates the lockfile record with the new commit and hashes, saves the lockfile, and logs which skills were updated or skipped.
+ *
+ * @param input.force - When `true`, overwrite local edits; when `false`, skip skills with local modifications
  */
 export async function runSkillsUpdateAllCommand(
   env: CommandEnv,

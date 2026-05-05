@@ -115,7 +115,10 @@ export function createTestStdioWriters(): TestStdioWriters {
 }
 
 /**
- * Effect {@link FileSystem} layer backed by {@link MockFileSystemState} (tests only; never real disk).
+ * Creates a FileSystem Layer that operates against an in-memory MockFileSystemState for tests (never touches real disk).
+ *
+ * @param state - The in-memory mock filesystem state used by the layer
+ * @returns A Layer that provides a FileSystem backed by the provided `state`
  */
 export function mockFileSystemLayer(
   state: MockFileSystemState,
@@ -144,7 +147,12 @@ export function mockFileSystemLayer(
 }
 
 /**
- * Creates the minimal CLI options needed for tests, optionally with explicit config and output roots.
+ * Builds a TestEnv with CLI options and an in-memory mock filesystem for tests.
+ *
+ * @param defaultConfigRoot - Optional override for the default configuration root used by the TestEnv.
+ * @param defaultOutputRoot - Optional override for the default output root used by the TestEnv.
+ * @param mockFileSystem - Optional existing MockFileSystemState to use; when omitted a fresh mock filesystem state is created.
+ * @returns A TestEnv containing the configured roots, the mock filesystem state, test CLI options (including a fileSystemLayer), and arrays capturing stdout/stderr messages.
  */
 export function createTestEnv({
   defaultConfigRoot = '',

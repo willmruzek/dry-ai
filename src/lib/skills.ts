@@ -82,6 +82,11 @@ export async function ensureSkillsRoot(context: AgentsContext): Promise<void> {
   await fs.ensureDir(context.sourceRoots.skills);
 }
 
+/**
+ * Ensure a skills lockfile exists at the path defined in `context`, creating and saving an empty lockfile when it is missing.
+ *
+ * @param context - Execution context containing `skillsLockfilePath` and filesystem access used to read/write the lockfile
+ */
 export async function ensureSkillsLockfile(
   context: AgentsContext,
 ): Promise<void> {
@@ -92,6 +97,13 @@ export async function ensureSkillsLockfile(
   await saveSkillsLockfile(context, { lockfile: createEmptySkillsLockfile() });
 }
 
+/**
+ * Load the repository's skills lockfile, validate it against the schema, and return a sorted lockfile object.
+ *
+ * @param env - Environment containing `context` (with `skillsLockfilePath`) and `runtime` (providing the filesystem layer) used to locate and read the lockfile.
+ * @returns The decoded and lexicographically sorted `SkillsLockfile`.
+ * @throws {InvalidSkillsLockfile} When a lockfile exists but fails schema parsing/validation.
+ */
 export async function loadSkillsLockfile(
   env: SkillsLockfileEnv,
 ): Promise<SkillsLockfile> {
