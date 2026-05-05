@@ -1,6 +1,7 @@
 import type { FileSystem } from '@effect/platform/FileSystem';
 import type { Layer } from 'effect/Layer';
 
+import type { RootOptions } from './command-options.js';
 import type { AgentsContext } from './context.js';
 
 /**
@@ -23,4 +24,5 @@ export type CLIRuntime = {
 export type CommandEnv = {
   context: AgentsContext;
   runtime: CLIRuntime;
+  rootOptions: RootOptions;
 };

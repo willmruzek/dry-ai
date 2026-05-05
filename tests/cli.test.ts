@@ -153,6 +153,7 @@ describe('runCLI', () => {
           rehash-all               Refresh stored file hashes for all managed skills
           update [options] <name>  Update a managed skill from its tracked source
           update-all [options]     Update all managed skills from their tracked sources
+
         Examples:
           dry-ai skills list
           dry-ai skills add anthropics/skills --skill skill-creator
