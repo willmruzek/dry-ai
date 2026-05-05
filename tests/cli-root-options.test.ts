@@ -126,7 +126,9 @@ describe('dry-ai root options', () => {
           JSON.stringify(seededLockfile),
         );
 
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Act
         await runCLI({
@@ -177,7 +179,9 @@ describe('dry-ai root options', () => {
         );
         storeMockTextFile(mockFileSystem, skillSourceFilePath, '# My Skill\n');
 
-        const { cliOptions, stderrMessages } = createTestEnv();
+        const { cliOptions, stderrMessages } = createTestEnv({
+          mockFileSystem,
+        });
 
         // Act
         await runCLI({

@@ -3,6 +3,14 @@ import { z } from 'zod';
 
 export const nonEmptyOptionStringSchema = z.string().trim().min(1);
 
+export const rootOptionsSchema = z.object({
+  test: z.boolean().optional().default(false),
+  configRoot: nonEmptyOptionStringSchema.optional(),
+  outputRoot: nonEmptyOptionStringSchema.optional(),
+});
+
+export type RootOptions = z.output<typeof rootOptionsSchema>;
+
 /**
  * Parses a value with a Zod schema, throwing a Commander InvalidArgumentError on failure.
  */

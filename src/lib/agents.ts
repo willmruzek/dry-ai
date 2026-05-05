@@ -1,13 +1,12 @@
 import path from 'node:path';
 
-import type { CLIRuntime } from '../cli.js';
-
 import { AGENT_DEFINITIONS } from './agent-definitions.js';
 import {
   type OwnershipKeyInput,
   type AgentRuleSource,
   type SyncItemKind,
 } from './agent-types.js';
+import type { CLIRuntime } from './command-env.js';
 import type { CommandFrontmatter, RuleFrontmatter } from './frontmatter.js';
 
 export { AGENT_DEFINITIONS } from './agent-definitions.js';

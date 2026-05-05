@@ -1,4 +1,4 @@
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   findManagedSkill,
   formatManagedSkillSummary,
@@ -20,7 +20,7 @@ export async function runSkillsRemoveCommand(
   const { context, runtime } = env;
   const { skillName } = input;
 
-  const lockfile = await loadSkillsLockfile(context);
+  const lockfile = await loadSkillsLockfile(env);
   const managedSkill = findManagedSkill(lockfile, { name: skillName });
 
   if (!managedSkill) {

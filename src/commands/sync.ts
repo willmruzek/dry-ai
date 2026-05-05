@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 
-import type { CommandEnv } from '../cli.js';
+import type { CommandEnv } from '../lib/command-env.js';
 import {
   applySyncChanges,
   buildDesiredSyncSpecs,

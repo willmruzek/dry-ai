@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { layer as nodeFileSystemLayer } from '@effect/platform-node/NodeFileSystem';
+import { FileSystem } from '@effect/platform/FileSystem';
+import { Effect, Schema } from 'effect';
 import { packageDirectory } from 'package-directory';
-import { z } from 'zod';
 
 import { runCLI } from './cli.js';
 
@@ -14,24 +15,35 @@ const EXECUTABLE_NAME = 'dry-ai';
 /**
  * Reads the CLI version from the package manifest at the repository root.
  */
-async function getCLIVersion(): Promise<string> {
-  const packageRoot = await packageDirectory({
-    cwd: path.dirname(fileURLToPath(import.meta.url)),
-  });
+async function readCliVersion(): Promise<string> {
+  const packageJsonVersionSchema = Schema.parseJson(
+    Schema.Struct({ version: Schema.String }),
+  );
 
-  if (!packageRoot) {
-    throw new Error('Could not find package root');
-  }
+  const decodePackageJsonVersion = Schema.decodeUnknown(
+    packageJsonVersionSchema,
+  );
 
-  const packageJsonPath = path.join(packageRoot, 'package.json');
-  const rawPackageJson = await fs.readFile(packageJsonPath, 'utf8');
-  const parsedPackageJson: unknown = JSON.parse(rawPackageJson);
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const packageRoot = yield* Effect.promise(() =>
+        packageDirectory({
+          cwd: path.dirname(fileURLToPath(import.meta.url)),
+        }),
+      );
 
-  const packageJsonSchema = z.object({
-    version: z.string().min(1),
-  });
+      if (!packageRoot) {
+        return yield* Effect.fail('Could not find package root');
+      }
 
-  return packageJsonSchema.parse(parsedPackageJson).version;
+      const packageJsonPath = path.join(packageRoot, 'package.json');
+      const fs = yield* FileSystem;
+      const raw = yield* fs.readFileString(packageJsonPath);
+      const pkg = yield* decodePackageJsonVersion(raw);
+
+      return pkg.version;
+    }).pipe(Effect.provide(nodeFileSystemLayer)),
+  );
 }
 
 /**
@@ -41,7 +53,8 @@ async function main(): Promise<void> {
   await runCLI({
     argv: process.argv.slice(2),
     executableName: EXECUTABLE_NAME,
-    version: await getCLIVersion(),
+    fileSystemLayer: nodeFileSystemLayer,
+    version: await readCliVersion(),
   });
 }
 

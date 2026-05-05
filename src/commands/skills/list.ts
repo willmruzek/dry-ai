@@ -1,4 +1,4 @@
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   ensureSkillsRoot,
   findManagedSkill,
@@ -16,7 +16,7 @@ export async function runSkillsListCommand(env: CommandEnv): Promise<void> {
 
   const [localSkillDirectories, lockfile] = await Promise.all([
     listLocalSkillDirectories(context),
-    loadSkillsLockfile(context),
+    loadSkillsLockfile(env),
   ]);
 
   const localSkillLines = localSkillDirectories.map((skillName) => {
