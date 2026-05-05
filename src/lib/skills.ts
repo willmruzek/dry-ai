@@ -78,8 +78,19 @@ export function createEmptySkillsLockfile(): SkillsLockfile {
   };
 }
 
-export async function ensureSkillsRoot(context: AgentsContext): Promise<void> {
-  await fs.ensureDir(context.sourceRoots.skills);
+export async function ensureSkillsRoot(env: SkillsLockfileEnv): Promise<void> {
+  const {
+    context,
+    runtime: { fileSystemLayer },
+  } = env;
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      yield* fs.makeDirectory(context.sourceRoots.skills, {
+        recursive: true,
+      });
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
 }
 
 /**
@@ -183,17 +194,35 @@ export function removeManagedSkill(
 }
 
 export async function listLocalSkillDirectories(
-  context: AgentsContext,
+  env: SkillsLockfileEnv,
 ): Promise<string[]> {
-  await ensureSkillsRoot(context);
-  const entries = await fs.readdir(context.sourceRoots.skills, {
-    withFileTypes: true,
-  });
+  const {
+    context,
+    runtime: { fileSystemLayer },
+  } = env;
+  const skillsRoot = context.sourceRoots.skills;
 
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort((left, right) => left.localeCompare(right));
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+
+      yield* fs.makeDirectory(skillsRoot, { recursive: true });
+
+      const names = yield* fs.readDirectory(skillsRoot);
+
+      const directories = yield* Effect.forEach(names, (name) =>
+        Effect.gen(function* () {
+          const fullPath = path.join(skillsRoot, name);
+          const info = yield* fs.stat(fullPath);
+          return info.type === 'Directory' ? name : null;
+        }),
+      );
+
+      return directories
+        .filter((name): name is string => name !== null)
+        .sort((a, b) => a.localeCompare(b));
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
 }
 
 export function getManagedSkillDirectory(

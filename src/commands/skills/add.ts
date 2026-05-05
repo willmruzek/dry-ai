@@ -122,7 +122,7 @@ export async function runSkillsAddCommand(
     throw new Error('--as may only be used when importing exactly one skill');
   }
 
-  await ensureSkillsRoot(context);
+  await ensureSkillsRoot(env);
   await ensureSkillsLockfile(context);
 
   let lockfile = await loadSkillsLockfile(env);

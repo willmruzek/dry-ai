@@ -165,11 +165,7 @@ describe('dry-ai skills list', () => {
           ...environment.cliOptions,
         });
 
-        // Assert: `skills list` called `fs.ensureDir(skillsRoot)` and the
-        // directory is now present in the mock filesystem.
-        expect(mockedFs.ensureDir).toHaveBeenCalledWith(
-          DEFAULT_SKILLS_SOURCE_ROOT,
-        );
+        // Assert: the skills root was created and is visible to the in-memory mock filesystem.
         expect(mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT)).toBe(
           true,
         );
