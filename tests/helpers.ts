@@ -5,10 +5,13 @@ import path from 'node:path';
 import { SystemError } from '@effect/platform/Error';
 import {
   layerNoop as fileSystemLayerNoop,
+  Size,
+  type File,
   type FileSystem,
 } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 import type { Layer } from 'effect/Layer';
+import * as Option from 'effect/Option';
 import type fs from 'fs-extra';
 import { simpleGit } from 'simple-git';
 import { vi } from 'vitest';
@@ -126,6 +129,84 @@ export function mockFileSystemLayer(
   return fileSystemLayerNoop({
     exists: (filePath: string) =>
       Effect.sync(() => mockPathExists(state, filePath)),
+
+    makeDirectory: (directoryPath: string, options?: { recursive?: boolean }) =>
+      Effect.sync(() => {
+        if (options?.recursive === true) {
+          ensureMockDirectory(state, directoryPath);
+        } else {
+          const normalizedDirectoryPath = normalizeMockPath(directoryPath);
+          const parentDirectoryPath = path.dirname(normalizedDirectoryPath);
+
+          if (!state.directories.has(parentDirectoryPath)) {
+            throw new Error(
+              `Mock parent directory does not exist: ${parentDirectoryPath}`,
+            );
+          }
+
+          state.directories.add(normalizedDirectoryPath);
+        }
+      }),
+
+    readDirectory: (directoryPath: string) => {
+      const normalizedDirectoryPath = normalizeMockPath(directoryPath);
+
+      if (!state.directories.has(normalizedDirectoryPath)) {
+        return Effect.fail(
+          new SystemError({
+            module: 'FileSystem',
+            method: 'readDirectory',
+            reason: 'NotFound',
+            description: 'No such file or directory',
+            pathOrDescriptor: directoryPath,
+          }),
+        );
+      }
+
+      return Effect.sync(() =>
+        listMockDirectoryEntries(state, directoryPath).map(
+          (entry) => entry.name,
+        ),
+      );
+    },
+
+    stat: (filePath: string) => {
+      if (!mockPathExists(state, filePath)) {
+        return Effect.fail(
+          new SystemError({
+            module: 'FileSystem',
+            method: 'stat',
+            reason: 'NotFound',
+            description: 'No such file or directory',
+            pathOrDescriptor: filePath,
+          }),
+        );
+      }
+
+      return Effect.sync(() => {
+        const mockStat = getMockStatResult(state, filePath);
+
+        const info: File.Info = {
+          type: mockStat.isDirectory() ? 'Directory' : 'File',
+          mtime: Option.none(),
+          atime: Option.none(),
+          birthtime: Option.none(),
+          dev: 0,
+          ino: Option.none(),
+          mode: 0o644,
+          nlink: Option.none(),
+          uid: Option.none(),
+          gid: Option.none(),
+          rdev: Option.none(),
+          size: Size(0n),
+          blksize: Option.none(),
+          blocks: Option.none(),
+        };
+
+        return info;
+      });
+    },
+
     readFileString: (filePath: string) => {
       const normalizedPath = normalizeMockPath(filePath);
 
