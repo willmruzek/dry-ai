@@ -14,7 +14,13 @@ import {
 } from '../../lib/skills.js';
 
 /**
- * Refreshes the stored file hashes for one managed skill using the current local directory contents.
+ * Update the lockfile record for a managed skill by recomputing file hashes from its local managed directory.
+ *
+ * @param env - Command environment providing context and runtime for filesystem and lockfile operations
+ * @param input - Input object containing the skill to rehash
+ * @param input.skillName - The name of the managed skill to refresh hashes for
+ * @throws Error if the managed skill is not present in the lockfile
+ * @throws Error if the managed skill's local directory does not exist
  */
 export async function runSkillsRehashCommand(
   env: CommandEnv,

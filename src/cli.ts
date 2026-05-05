@@ -72,7 +72,12 @@ function requestedOutputRootWasUsed(rootOptions: RootOptions): boolean {
 }
 
 /**
- * Builds an AgentsContext from the parsed root options, expanding ~ in paths and applying --test path defaults.
+ * Create an AgentsContext from validated root CLI options, resolving and normalizing filesystem roots.
+ *
+ * Expands user home (`~`) in provided paths and applies the `--test` default output location when appropriate.
+ *
+ * @param rootOptions - Parsed and validated global CLI options
+ * @returns An AgentsContext with `inputRoot` and/or `outputRoot` set when the corresponding options were resolved
  */
 export function resolveActiveContext(rootOptions: RootOptions): AgentsContext {
   const requestedConfigRoot = resolveRequestedConfigRoot({
@@ -90,9 +95,10 @@ export function resolveActiveContext(rootOptions: RootOptions): AgentsContext {
 }
 
 /**
- * Derives the logging half of {@link CLIRuntime} from raw stdio writers
- * (newline convention). The caller merges in `fileSystemLayer` to form a full
- * {@link CLIRuntime}.
+ * Creates logging functions that write messages with a trailing newline to the provided stdio writers.
+ *
+ * @param stdioWriters - Writers used for standard output (`writeOut`) and error (`writeErr`)
+ * @returns An object with `logInfo(message)` and `logWarn(message)` that write to `writeOut` and `writeErr`, respectively
  */
 function wrapStdioWriters(
   stdioWriters: StdioWriters,
@@ -122,7 +128,10 @@ export function createProductionStdioWriters(): StdioWriters {
 }
 
 /**
- * Merges the provided CLIOptions with production defaults, returning a fully resolved options object.
+ * Apply defaults to a CLIOptions object and return a fully populated ResolvedCLIOptions.
+ *
+ * @param options - Partial CLI configuration provided by the caller
+ * @returns A normalized options object where `executableName` defaults to `"dry-ai"`, `stdioWriters` defaults to production writers, and `fileSystemLayer` is preserved
  */
 function resolveCLIOptions(options: CLIOptions): ResolvedCLIOptions {
   return {
@@ -134,7 +143,13 @@ function resolveCLIOptions(options: CLIOptions): ResolvedCLIOptions {
 }
 
 /**
- * Builds and returns the Commander program with all subcommands and global flags registered.
+ * Create and configure the CLI program with global flags, output handling, and built-in subcommands.
+ *
+ * The returned program is preconfigured with global options (including --test, --config-root, --output-root),
+ * output routing to the provided stdio writers, and the bundled subcommands (`sync` and `skills`).
+ *
+ * @param options - CLI configuration (may include executableName, version, stdioWriters, and the required fileSystemLayer)
+ * @returns The configured Commander `Command` ready to parse and execute argv
  */
 export function createCLI(options: CLIOptions): Command {
   const resolvedOptions = resolveCLIOptions(options);

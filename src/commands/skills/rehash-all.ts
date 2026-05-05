@@ -14,6 +14,8 @@ import {
 
 /**
  * Refreshes the stored file hashes for every managed skill using current local directory contents.
+ *
+ * Recomputes file hashes for each managed skill found locally, updates the skills lockfile with the new file records, and persists the lockfile. Skills whose local directory is missing are skipped and reported via runtime logs.
  */
 export async function runSkillsRehashAllCommand(
   env: CommandEnv,
