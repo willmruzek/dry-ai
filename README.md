@@ -145,7 +145,7 @@ dry-ai skills update-all --force
 
 ### Example Rule
 
-Rules are markdown files under `rules/`. Required top-level fields are validated (`description`, etc.). Under `agents`, each agent’s block must be a YAML mapping when present; all keys in that mapping are copied into that agent’s generated file (after stripping nullish values). Dry-ai does not infer Cursor fields from Copilot fields or vice versa.
+Rules are markdown files under `rules/`. Required top-level fields are validated (`description`, etc.). Under `agents`, each agent's block must be a YAML mapping when present; all keys in that mapping are copied into that agent's generated file (after stripping `undefined` values). Dry-ai does not infer Cursor fields from Copilot fields or vice versa.
 
 Common keys:
 
