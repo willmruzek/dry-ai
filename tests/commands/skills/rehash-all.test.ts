@@ -144,7 +144,7 @@ describe('dry-ai skills rehash-all', () => {
           SECOND_SKILL.files,
         );
 
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({

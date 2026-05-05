@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   computeDirectoryHashes,
   createUpdatedSkillRecord,
@@ -14,12 +14,14 @@ import {
 
 /**
  * Refreshes the stored file hashes for every managed skill using current local directory contents.
+ *
+ * Recomputes file hashes for each managed skill found locally, updates the skills lockfile with the new file records, and persists the lockfile. Skills whose local directory is missing are skipped and reported via runtime logs.
  */
 export async function runSkillsRehashAllCommand(
   env: CommandEnv,
 ): Promise<void> {
   const { context, runtime } = env;
-  let lockfile = await loadSkillsLockfile(context);
+  let lockfile = await loadSkillsLockfile(env);
 
   if (lockfile.skills.length === 0) {
     runtime.logInfo('No managed skills to rehash.');

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import dedent from 'dedent';
 import { z } from 'zod';
 
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   nonEmptyOptionStringSchema,
   parseOptionsObject,

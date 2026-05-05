@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 
-import type { CommandEnv } from '../../cli.js';
+import type { CommandEnv } from '../../lib/command-env.js';
 import {
   cleanupRemoteRepoCheckout,
   cloneRemoteRepo,
@@ -79,7 +79,19 @@ function resolveRequestedImportPath(input: {
 }
 
 /**
- * Imports one or more managed skills from a remote repository into the local skills directory.
+ * Import one or more managed skills from a remote repository into the local skills directory and update the skills lockfile.
+ *
+ * @param env - Runtime environment providing contextual services (context and runtime)
+ * @param repo - Remote repository identifier (e.g., remote URL or shortcut) to import from
+ * @param repoPath - Optional path within the remote repository that contains the skills (may be undefined)
+ * @param skillNames - List of requested skill names or import specifiers to import
+ * @param asName - Optional explicit local name to assign to the imported skill; may only be used when importing exactly one skill
+ * @param pin - If true, record the imported skill at the specific commit; otherwise record the provided ref
+ * @param ref - Optional branch, tag, or commit-ish to check out from the remote repository
+ *
+ * @throws Error - If `skillNames` is empty after normalization
+ * @throws Error - If `--as` is provided while importing more than one skill
+ * @throws Error - If a target local skill directory already exists for an import
  */
 export async function runSkillsAddCommand(
   env: CommandEnv,
@@ -113,7 +125,7 @@ export async function runSkillsAddCommand(
   await ensureSkillsRoot(context);
   await ensureSkillsLockfile(context);
 
-  let lockfile = await loadSkillsLockfile(context);
+  let lockfile = await loadSkillsLockfile(env);
   const checkout = await cloneRemoteRepo({
     ref: input.ref,
     repo,

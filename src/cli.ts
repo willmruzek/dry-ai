@@ -1,9 +1,12 @@
+import type { FileSystem } from '@effect/platform/FileSystem';
 import { Command } from 'commander';
+import type { Layer } from 'effect/Layer';
 import { z } from 'zod';
 
 import { addSkillsCommand } from './commands/skills/index.js';
 import { runSyncCommand } from './commands/sync.js';
 import { describeSupportedAgents } from './lib/agents.js';
+import type { CLIRuntime, CommandEnv } from './lib/command-env.js';
 import {
   nonEmptyOptionStringSchema,
   parseOptionValue,
@@ -15,6 +18,8 @@ import {
   resolveRequestedOutputRoot,
   type AgentsContext,
 } from './lib/context.js';
+
+export type { CLIRuntime, CommandEnv } from './lib/command-env.js';
 
 const rootOptionsSchema = z.object({
   test: z.boolean().optional().default(false),
@@ -34,43 +39,18 @@ export type StdioWriters = {
   writeErr: (output: string) => void;
 };
 
-/**
- * The line-oriented output interface available to every command action.
- *
- * Both methods append a trailing newline. The `log*` prefix is used to make
- * call sites trivially greppable ("where do we emit CLI output?") without
- * colliding with `console.log` / `console.warn` or arbitrary variables.
- *
- * Commands should not reach for the underlying {@link StdioWriters.writeOut}
- * / {@link StdioWriters.writeErr} stream writes; that raw byte-level stream
- * access is confined to the CLI layer (Commander help/version output).
- */
-export type CLIRuntime = {
-  /** Writes an informational message to stdout, with an appended newline. */
-  logInfo: (message: string) => void;
-  /** Writes a warning message to stderr, with an appended newline. */
-  logWarn: (message: string) => void;
-};
-
-/**
- * The shared environment passed into every command action: the
- * resolved domain context plus the runtime used for CLI output.
- */
-export type CommandEnv = {
-  context: AgentsContext;
-  runtime: CLIRuntime;
-};
-
 export type CLIOptions = {
   executableName?: string;
   version: string;
   stdioWriters?: StdioWriters;
+  fileSystemLayer: Layer<FileSystem>;
 };
 
 type ResolvedCLIOptions = {
   executableName: string;
   version: string;
   stdioWriters: StdioWriters;
+  fileSystemLayer: Layer<FileSystem>;
 };
 
 /**
@@ -92,7 +72,12 @@ function requestedOutputRootWasUsed(rootOptions: RootOptions): boolean {
 }
 
 /**
- * Builds an AgentsContext from the parsed root options, expanding ~ in paths and applying --test path defaults.
+ * Create an AgentsContext from validated root CLI options, resolving and normalizing filesystem roots.
+ *
+ * Expands user home (`~`) in provided paths and applies the `--test` default output location when appropriate.
+ *
+ * @param rootOptions - Parsed and validated global CLI options
+ * @returns An AgentsContext with `inputRoot` and/or `outputRoot` set when the corresponding options were resolved
  */
 export function resolveActiveContext(rootOptions: RootOptions): AgentsContext {
   const requestedConfigRoot = resolveRequestedConfigRoot({
@@ -110,10 +95,14 @@ export function resolveActiveContext(rootOptions: RootOptions): AgentsContext {
 }
 
 /**
- * Derives a {@link CLIRuntime} from a pair of raw stdio writers by wrapping
- * each writer with the line-oriented newline convention.
+ * Creates logging functions that write messages with a trailing newline to the provided stdio writers.
+ *
+ * @param stdioWriters - Writers used for standard output (`writeOut`) and error (`writeErr`)
+ * @returns An object with `logInfo(message)` and `logWarn(message)` that write to `writeOut` and `writeErr`, respectively
  */
-function wrapStdioWriters(stdioWriters: StdioWriters): CLIRuntime {
+function wrapStdioWriters(
+  stdioWriters: StdioWriters,
+): Pick<CLIRuntime, 'logInfo' | 'logWarn'> {
   return {
     logInfo(message) {
       stdioWriters.writeOut(`${message}\n`);
@@ -139,25 +128,38 @@ export function createProductionStdioWriters(): StdioWriters {
 }
 
 /**
- * Merges the provided CLIOptions with production defaults, returning a fully resolved options object.
+ * Apply defaults to a CLIOptions object and return a fully populated ResolvedCLIOptions.
+ *
+ * @param options - Partial CLI configuration provided by the caller
+ * @returns A normalized options object where `executableName` defaults to `"dry-ai"`, `stdioWriters` defaults to production writers, and `fileSystemLayer` is preserved
  */
 function resolveCLIOptions(options: CLIOptions): ResolvedCLIOptions {
   return {
     executableName: options.executableName ?? 'dry-ai',
     version: options.version,
     stdioWriters: options.stdioWriters ?? createProductionStdioWriters(),
+    fileSystemLayer: options.fileSystemLayer,
   };
 }
 
 /**
- * Builds and returns the Commander program with all subcommands and global flags registered.
+ * Create and configure the CLI program with global flags, output handling, and built-in subcommands.
+ *
+ * The returned program is preconfigured with global options (including --test, --config-root, --output-root),
+ * output routing to the provided stdio writers, and the bundled subcommands (`sync` and `skills`).
+ *
+ * @param options - CLI configuration (may include executableName, version, stdioWriters, and the required fileSystemLayer)
+ * @returns The configured Commander `Command` ready to parse and execute argv
  */
 export function createCLI(options: CLIOptions): Command {
   const resolvedOptions = resolveCLIOptions(options);
   const program = new Command();
   const executableName = resolvedOptions.executableName;
   const stdioWriters = resolvedOptions.stdioWriters;
-  const runtime = wrapStdioWriters(stdioWriters);
+  const runtime: CLIRuntime = {
+    ...wrapStdioWriters(stdioWriters),
+    fileSystemLayer: resolvedOptions.fileSystemLayer,
+  };
   const resolveEnv = (): CommandEnv => ({
     context: resolveActiveContext(getRootOptions(program)),
     runtime,

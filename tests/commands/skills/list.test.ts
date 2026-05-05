@@ -123,7 +123,7 @@ describe('dry-ai skills list', () => {
           }),
         );
 
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
@@ -157,7 +157,7 @@ describe('dry-ai skills list', () => {
           false,
         );
 
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({

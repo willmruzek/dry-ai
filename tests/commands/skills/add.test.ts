@@ -83,11 +83,17 @@ const mockedGit = createMockedGit();
 function createTestEnv({
   defaultConfigRoot = DEFAULT_CONFIG_ROOT,
   defaultOutputRoot = VIRTUAL_HOME_DIR,
+  mockFileSystem,
 }: {
   defaultConfigRoot?: string;
   defaultOutputRoot?: string;
+  mockFileSystem?: MockFileSystemState;
 } = {}): TestEnv {
-  return createBaseTestEnv({ defaultConfigRoot, defaultOutputRoot });
+  return createBaseTestEnv({
+    defaultConfigRoot,
+    defaultOutputRoot,
+    ...(mockFileSystem !== undefined ? { mockFileSystem } : {}),
+  });
 }
 
 describe('dry-ai skills add', () => {
@@ -133,7 +139,7 @@ describe('dry-ai skills add', () => {
         ['https://github.com/anthropics/skills.git'],
       ])('imports one skill when repo is provided as %s', async (repo) => {
         // Arrange
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
         const defaultSkillsLockfilePath = path.join(
           environment.defaultConfigRoot,
           'skills.lock.json',
@@ -301,7 +307,7 @@ describe('dry-ai skills add', () => {
           },
         });
 
-        const environment = createTestEnv();
+        const environment = createTestEnv({ mockFileSystem });
         const skillsSourceRoot = path.join(
           environment.defaultConfigRoot,
           'skills',

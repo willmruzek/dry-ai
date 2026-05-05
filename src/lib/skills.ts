@@ -2,50 +2,62 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
+import { FileSystem } from '@effect/platform/FileSystem';
+import { Data, Effect, Schema } from 'effect';
+import * as ParseResult from 'effect/ParseResult';
 import fs from 'fs-extra';
 import { simpleGit } from 'simple-git';
-import { z } from 'zod';
 
+import type { CommandEnv } from './command-env.js';
 import type { AgentsContext } from './context.js';
 
-const managedSkillFilesSchema = z.record(z.string(), z.string());
+/** Subset of {@link CommandEnv} used to load the skills lockfile via Effect `FileSystem`. */
+export type SkillsLockfileEnv = Pick<CommandEnv, 'context' | 'runtime'>;
 
-const skillLockEntrySchema = z.object({
-  name: z.string().min(1),
-  repo: z.string().min(1),
-  path: z.string().min(1),
-  ref: z.string().min(1).optional(),
-  commit: z.string().min(1),
-  files: managedSkillFilesSchema.optional(),
-  importedAt: z.string().datetime({ offset: true }),
-  updatedAt: z.string().datetime({ offset: true }),
+const ManagedSkillFiles = Schema.Record({
+  key: Schema.String,
+  value: Schema.String,
 });
 
-const skillsLockfileSchema = z
-  .object({
-    version: z.literal(1),
-    skills: z.array(skillLockEntrySchema),
-  })
-  .superRefine((lockfile, refinementContext) => {
-    const seenNames = new Set<string>();
+const SkillLockEntry = Schema.Struct({
+  name: Schema.String.pipe(Schema.minLength(1)),
+  repo: Schema.String.pipe(Schema.minLength(1)),
+  path: Schema.String.pipe(Schema.minLength(1)),
+  ref: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+  commit: Schema.String.pipe(Schema.minLength(1)),
+  files: Schema.optional(ManagedSkillFiles),
+  importedAt: Schema.String, // tighten with a DateTime schema if you want stricter ISO checks
+  updatedAt: Schema.String,
+});
 
-    lockfile.skills.forEach((skill, index) => {
-      if (seenNames.has(skill.name)) {
-        refinementContext.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Duplicate managed skill name: ${skill.name}`,
+const SkillsLockfile = Schema.Struct({
+  version: Schema.Literal(1),
+  skills: Schema.Array(SkillLockEntry),
+}).pipe(
+  Schema.filterEffect((lockfile) => {
+    const seen = new Set<string>();
+    for (const [index, skill] of lockfile.skills.entries()) {
+      if (seen.has(skill.name)) {
+        return Effect.succeed({
           path: ['skills', index, 'name'],
+          message: `Duplicate managed skill name: ${skill.name}`,
         });
-        return;
       }
+      seen.add(skill.name);
+    }
+    return Effect.succeed(true);
+  }),
+);
 
-      seenNames.add(skill.name);
-    });
-  });
+class InvalidSkillsLockfile extends Data.TaggedError('InvalidSkillsLockfile')<{
+  readonly message: string;
+  readonly lockfilePath: string;
+  readonly cause: ParseResult.ParseError;
+}> {}
 
-export type ManagedSkill = z.infer<typeof skillLockEntrySchema>;
-export type SkillsLockfile = z.infer<typeof skillsLockfileSchema>;
-export type ManagedSkillFiles = z.infer<typeof managedSkillFilesSchema>;
+export type ManagedSkill = Schema.Schema.Type<typeof SkillLockEntry>;
+export type SkillsLockfile = Schema.Schema.Type<typeof SkillsLockfile>;
+export type ManagedSkillFiles = Schema.Schema.Type<typeof ManagedSkillFiles>;
 
 export type RemoteSkillSnapshot = {
   cleanup: () => Promise<void>;
@@ -70,6 +82,11 @@ export async function ensureSkillsRoot(context: AgentsContext): Promise<void> {
   await fs.ensureDir(context.sourceRoots.skills);
 }
 
+/**
+ * Ensure a skills lockfile exists at the path defined in `context`, creating and saving an empty lockfile when it is missing.
+ *
+ * @param context - Execution context containing `skillsLockfilePath` and filesystem access used to read/write the lockfile
+ */
 export async function ensureSkillsLockfile(
   context: AgentsContext,
 ): Promise<void> {
@@ -80,30 +97,45 @@ export async function ensureSkillsLockfile(
   await saveSkillsLockfile(context, { lockfile: createEmptySkillsLockfile() });
 }
 
+/**
+ * Load the repository's skills lockfile, validate it against the schema, and return a sorted lockfile object.
+ *
+ * @param env - Environment containing `context` (with `skillsLockfilePath`) and `runtime` (providing the filesystem layer) used to locate and read the lockfile.
+ * @returns The decoded and lexicographically sorted `SkillsLockfile`.
+ * @throws {InvalidSkillsLockfile} When a lockfile exists but fails schema parsing/validation.
+ */
 export async function loadSkillsLockfile(
-  context: AgentsContext,
+  env: SkillsLockfileEnv,
 ): Promise<SkillsLockfile> {
-  if (!(await fs.pathExists(context.skillsLockfilePath))) {
-    return createEmptySkillsLockfile();
-  }
+  const {
+    context,
+    runtime: { fileSystemLayer },
+  } = env;
 
-  const rawLockfile = await fs.readFile(context.skillsLockfilePath, 'utf8');
-  const parsedJson: unknown = JSON.parse(rawLockfile);
-  const parsedLockfile = skillsLockfileSchema.safeParse(parsedJson);
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      if (!(yield* fs.exists(context.skillsLockfilePath))) {
+        return createEmptySkillsLockfile();
+      }
 
-  if (parsedLockfile.success) {
-    return sortSkillsLockfile(parsedLockfile.data);
-  }
+      const rawLockfile = yield* fs.readFileString(context.skillsLockfilePath);
 
-  const issues = parsedLockfile.error.issues
-    .map((issue) => {
-      const issuePath = issue.path.length > 0 ? issue.path.join('.') : 'root';
-      return `- ${issuePath}: ${issue.message}`;
-    })
-    .join('\n');
+      const decoded = yield* Schema.decodeUnknown(
+        Schema.parseJson(SkillsLockfile),
+      )(rawLockfile).pipe(
+        Effect.mapError(
+          (parseError) =>
+            new InvalidSkillsLockfile({
+              lockfilePath: context.skillsLockfilePath,
+              message: `Invalid skills lockfile at ${context.skillsLockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(parseError)}`,
+              cause: parseError,
+            }),
+        ),
+      );
 
-  throw new Error(
-    `Invalid skills lockfile at ${context.skillsLockfilePath}:\n${issues}`,
+      return sortSkillsLockfile(decoded);
+    }).pipe(Effect.provide(fileSystemLayer)),
   );
 }
 
