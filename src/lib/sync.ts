@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+import { SystemError } from '@effect/platform/Error';
+import { FileSystem } from '@effect/platform/FileSystem';
 import { Chalk } from 'chalk';
-import fs from 'fs-extra';
+import { Effect } from 'effect';
 import { glob } from 'glob';
 import { z } from 'zod';
 
@@ -23,8 +25,7 @@ import {
   type TargetRoots,
   AGENT_DEFINITIONS,
 } from './agents.js';
-import type { CLIRuntime } from './command-env.js';
-import type { AgentsContext } from './context.js';
+import type { CommandEnv } from './command-env.js';
 import {
   commandFrontmatterSchema,
   parseMdWithFrontmatter,
@@ -32,7 +33,7 @@ import {
   ruleFrontmatterSchema,
   validateFrontmatter,
 } from './frontmatter.js';
-import { computeDirectoryHashes } from './skills.js';
+import { computeDirectoryHashes, pathExistsInFileSystem } from './skills.js';
 
 /** Written to `sync-manifest.json`; bump when the manifest shape changes. */
 export const SYNC_MANIFEST_VERSION = 2 as const;
@@ -41,6 +42,75 @@ type SyncAppliedChangeType = 'installed' | 'updated' | 'unchanged';
 type SyncChangeType = SyncAppliedChangeType | 'removed';
 
 const chalk = new Chalk({ level: 3 });
+
+async function ensureDirectory(
+  env: CommandEnv,
+  directoryPath: string,
+): Promise<void> {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      yield* fs.makeDirectory(directoryPath, { recursive: true });
+    }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
+}
+
+async function readFileUtf8(
+  env: CommandEnv,
+  filePath: string,
+): Promise<string> {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      return yield* fs.readFileString(filePath);
+    }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
+}
+
+async function writeTextFile(
+  env: CommandEnv,
+  filePath: string,
+  content: string,
+): Promise<void> {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      yield* fs.makeDirectory(path.dirname(filePath), { recursive: true });
+      yield* fs.writeFile(filePath, new TextEncoder().encode(content));
+    }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
+}
+
+async function removePath(env: CommandEnv, targetPath: string): Promise<void> {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      yield* fs.remove(targetPath, { recursive: true, force: true });
+    }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
+}
+
+/**
+ * Clears a directory’s contents and ensures the directory exists (like `fs-extra.emptyDir`).
+ */
+async function emptyDirectory(
+  env: CommandEnv,
+  directoryPath: string,
+): Promise<void> {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      yield* fs.remove(directoryPath, { recursive: true, force: true }).pipe(
+        Effect.catchIf(
+          (error): error is SystemError =>
+            error instanceof SystemError && error.reason === 'NotFound',
+          () => Effect.void,
+        ),
+      );
+      yield* fs.makeDirectory(directoryPath, { recursive: true });
+    }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
+}
 
 const syncAgentSchema = z.custom<SyncAgent>(
   (value) => typeof value === 'string' && isSyncAgent(value),
@@ -205,10 +275,13 @@ function findUnregisteredManifestAgent(
  * Ensures that all target root directories exist before generated files are written.
  */
 export async function ensureTargetDirectories(
+  env: CommandEnv,
   targetRoots: TargetRoots,
 ): Promise<void> {
   await Promise.all(
-    listTargetRootPaths(targetRoots).map((dir) => fs.ensureDir(dir)),
+    listTargetRootPaths(targetRoots).map((directoryPath) =>
+      ensureDirectory(env, directoryPath),
+    ),
   );
 }
 
@@ -224,18 +297,18 @@ export async function ensureTargetDirectories(
  * `(unchanged)` rather than `(installed)`.
  */
 export async function loadSyncManifest(
+  env: CommandEnv,
   manifestPath: string,
-  runtime: CLIRuntime,
 ): Promise<SyncManifest> {
-  if (!(await fs.pathExists(manifestPath))) {
+  if (!(await pathExistsInFileSystem(env, manifestPath))) {
     return createSyncManifest([]);
   }
 
   let rawManifest: string;
   try {
-    rawManifest = await fs.readFile(manifestPath, 'utf8');
+    rawManifest = await readFileUtf8(env, manifestPath);
   } catch {
-    runtime.logWarn(
+    env.runtime.logWarn(
       `Could not read sync-manifest.json. Removed commands, rules, or skills may leave untracked files behind that require manual cleanup.`,
     );
     return createSyncManifest([]);
@@ -245,7 +318,7 @@ export async function loadSyncManifest(
   try {
     parsedManifest = JSON.parse(rawManifest);
   } catch {
-    runtime.logWarn(
+    env.runtime.logWarn(
       `sync-manifest.json is damaged or incomplete. Removed config entries may leave untracked files behind that require manual cleanup.`,
     );
     return createSyncManifest([]);
@@ -264,7 +337,7 @@ export async function loadSyncManifest(
     );
   }
 
-  runtime.logWarn(
+  env.runtime.logWarn(
     `sync-manifest.json did not match the expected layout. Removed config entries may leave untracked files behind that require manual cleanup.`,
   );
   return createSyncManifest([]);
@@ -274,14 +347,15 @@ export async function loadSyncManifest(
  * Serializes and writes the sync manifest to manifestPath.
  */
 export async function saveSyncManifest(
+  env: CommandEnv,
   manifestPath: string,
   manifest: SyncManifest,
 ): Promise<void> {
-  await fs.ensureDir(path.dirname(manifestPath));
-  await fs.writeFile(
+  await ensureDirectory(env, path.dirname(manifestPath));
+  await writeTextFile(
+    env,
     manifestPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
-    'utf8',
   );
 }
 
@@ -304,8 +378,11 @@ export function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
 /**
  * Returns the markdown source files found directly under a source root.
  */
-async function getMarkdownFilePaths(rootDir: string): Promise<string[]> {
-  await fs.ensureDir(rootDir);
+async function getMarkdownFilePaths(
+  env: CommandEnv,
+  rootDir: string,
+): Promise<string[]> {
+  await ensureDirectory(env, rootDir);
 
   const matches = await glob([path.join(rootDir, '*.md')]);
 
@@ -316,12 +393,12 @@ async function getMarkdownFilePaths(rootDir: string): Promise<string[]> {
  * Writes one markdown file after rendering its frontmatter and body content.
  */
 async function writeMarkdownFile<Metadata extends Record<string, unknown>>(
+  env: CommandEnv,
   filePath: string,
   metadata: Metadata,
   body: string,
 ): Promise<void> {
-  await fs.ensureDir(path.dirname(filePath));
-  await fs.writeFile(filePath, renderMarkdown({ metadata, body }), 'utf8');
+  await writeTextFile(env, filePath, renderMarkdown({ metadata, body }));
 }
 
 /**
@@ -334,6 +411,7 @@ async function writeMarkdownFile<Metadata extends Record<string, unknown>>(
  * detect the `unchanged` branch.
  */
 async function computeArtifactSpecContentHash(
+  env: CommandEnv,
   artifactSpec: ArtifactSpec,
 ): Promise<string> {
   if (artifactSpec.artifactType === 'markdown') {
@@ -344,7 +422,7 @@ async function computeArtifactSpecContentHash(
     return createHash('sha256').update(content).digest('hex');
   }
 
-  const fileHashes = await computeDirectoryHashes(artifactSpec.sourceDir);
+  const fileHashes = await computeDirectoryHashes(env, artifactSpec.sourceDir);
   const serialized = JSON.stringify(
     Object.entries(fileHashes).sort(([left], [right]) =>
       left.localeCompare(right),
@@ -360,15 +438,16 @@ async function computeArtifactSpecContentHash(
  * missing or cannot be read.
  */
 async function computeOnDiskArtifactContentHash(
+  env: CommandEnv,
   artifactSpec: ArtifactSpec,
 ): Promise<string | undefined> {
   if (artifactSpec.artifactType === 'markdown') {
     const filePath = artifactSpec.fileWritePath;
     try {
-      if (!(await fs.pathExists(filePath))) {
+      if (!(await pathExistsInFileSystem(env, filePath))) {
         return undefined;
       }
-      const content = await fs.readFile(filePath, 'utf8');
+      const content = await readFileUtf8(env, filePath);
       return createHash('sha256').update(content).digest('hex');
     } catch {
       return undefined;
@@ -376,10 +455,13 @@ async function computeOnDiskArtifactContentHash(
   }
 
   try {
-    if (!(await fs.pathExists(artifactSpec.managedArtifactPath))) {
+    if (
+      !(await pathExistsInFileSystem(env, artifactSpec.managedArtifactPath))
+    ) {
       return undefined;
     }
     const fileHashes = await computeDirectoryHashes(
+      env,
       artifactSpec.managedArtifactPath,
     );
     const serialized = JSON.stringify(
@@ -415,11 +497,15 @@ function getArtifactSpecMaterializedPath(artifactSpec: ArtifactSpec): string {
  * - `installed`: the artifact path does not exist on disk.
  * - `updated`: the artifact exists but on-disk content does not match.
  */
-async function detectAppliedChangeType(input: {
-  artifactSpec: ArtifactSpec;
-  desiredContentHash: string;
-}): Promise<SyncAppliedChangeType> {
-  const artifactExists = await fs.pathExists(
+async function detectAppliedChangeType(
+  env: CommandEnv,
+  input: {
+    artifactSpec: ArtifactSpec;
+    desiredContentHash: string;
+  },
+): Promise<SyncAppliedChangeType> {
+  const artifactExists = await pathExistsInFileSystem(
+    env,
     getArtifactSpecMaterializedPath(input.artifactSpec),
   );
 
@@ -427,7 +513,10 @@ async function detectAppliedChangeType(input: {
     return 'installed';
   }
 
-  const onDiskHash = await computeOnDiskArtifactContentHash(input.artifactSpec);
+  const onDiskHash = await computeOnDiskArtifactContentHash(
+    env,
+    input.artifactSpec,
+  );
   if (onDiskHash === input.desiredContentHash) {
     return 'unchanged';
   }
@@ -441,6 +530,7 @@ async function detectAppliedChangeType(input: {
  * `unchanged`.
  */
 async function applyDesiredSyncSpec(
+  env: CommandEnv,
   desiredSpec: DesiredSyncSpec,
 ): Promise<AppliedSyncResult> {
   const directoryHashCache = new Map<string, Promise<string>>();
@@ -454,7 +544,8 @@ async function applyDesiredSyncSpec(
             artifactSpec.sourceDir,
           );
           const contentHashPromise =
-            cachedHashPromise ?? computeArtifactSpecContentHash(artifactSpec);
+            cachedHashPromise ??
+            computeArtifactSpecContentHash(env, artifactSpec);
 
           if (!cachedHashPromise) {
             directoryHashCache.set(artifactSpec.sourceDir, contentHashPromise);
@@ -462,11 +553,13 @@ async function applyDesiredSyncSpec(
 
           desiredContentHash = await contentHashPromise;
         } else {
-          desiredContentHash =
-            await computeArtifactSpecContentHash(artifactSpec);
+          desiredContentHash = await computeArtifactSpecContentHash(
+            env,
+            artifactSpec,
+          );
         }
 
-        const changeType = await detectAppliedChangeType({
+        const changeType = await detectAppliedChangeType(env, {
           artifactSpec,
           desiredContentHash,
         });
@@ -484,7 +577,7 @@ async function applyDesiredSyncSpec(
     if (change.changeType === 'unchanged') {
       continue;
     }
-    await writeArtifactSpec(change.artifactSpec);
+    await writeArtifactSpec(env, change.artifactSpec);
   }
 
   return {
@@ -496,9 +589,13 @@ async function applyDesiredSyncSpec(
 /**
  * Writes one artifact spec to its output path, either as a markdown file or a directory copy.
  */
-async function writeArtifactSpec(artifactSpec: ArtifactSpec): Promise<void> {
+async function writeArtifactSpec(
+  env: CommandEnv,
+  artifactSpec: ArtifactSpec,
+): Promise<void> {
   if (artifactSpec.artifactType === 'markdown') {
     await writeMarkdownFile(
+      env,
       artifactSpec.fileWritePath,
       artifactSpec.metadata,
       artifactSpec.body,
@@ -507,19 +604,19 @@ async function writeArtifactSpec(artifactSpec: ArtifactSpec): Promise<void> {
   }
 
   await copyDirectoryContents(
+    env,
     artifactSpec.sourceDir,
     artifactSpec.managedArtifactPath,
   );
 }
 
 export async function buildDesiredSyncSpecs(
-  context: AgentsContext,
-  runtime: CLIRuntime,
+  env: CommandEnv,
 ): Promise<DesiredSyncSpec[]> {
   return [
-    ...(await buildCommandSyncSpecs(context, runtime)),
-    ...(await buildRuleSyncSpecs(context, runtime)),
-    ...(await buildSkillSyncSpecs(context)),
+    ...(await buildCommandSyncSpecs(env)),
+    ...(await buildRuleSyncSpecs(env)),
+    ...(await buildSkillSyncSpecs(env)),
   ];
 }
 
@@ -527,17 +624,20 @@ export async function buildDesiredSyncSpecs(
  * Builds sync specs for command sources after validating their frontmatter.
  */
 async function buildCommandSyncSpecs(
-  context: AgentsContext,
-  runtime: CLIRuntime,
+  env: CommandEnv,
 ): Promise<DesiredSyncSpec[]> {
+  const { context, runtime } = env;
   const { targetRoots } = context;
 
-  const commandFiles = await getMarkdownFilePaths(context.sourceRoots.commands);
+  const commandFiles = await getMarkdownFilePaths(
+    env,
+    context.sourceRoots.commands,
+  );
 
   const desiredSpecs: DesiredSyncSpec[] = [];
 
   for (const filePath of commandFiles) {
-    const rawContent = await fs.readFile(filePath, 'utf8');
+    const rawContent = await readFileUtf8(env, filePath);
 
     const { metadata, body } = parseMdWithFrontmatter(rawContent);
 
@@ -577,19 +677,17 @@ async function buildCommandSyncSpecs(
 /**
  * Builds sync specs for rule sources after validating their frontmatter.
  */
-async function buildRuleSyncSpecs(
-  context: AgentsContext,
-  runtime: CLIRuntime,
-): Promise<DesiredSyncSpec[]> {
+async function buildRuleSyncSpecs(env: CommandEnv): Promise<DesiredSyncSpec[]> {
+  const { context, runtime } = env;
   const { targetRoots } = context;
 
-  const ruleFiles = await getMarkdownFilePaths(context.sourceRoots.rules);
+  const ruleFiles = await getMarkdownFilePaths(env, context.sourceRoots.rules);
 
   const desiredSpecs: DesiredSyncSpec[] = [];
 
   for (const filePath of ruleFiles) {
     const fileName = path.basename(filePath, '.md');
-    const rawContent = await fs.readFile(filePath, 'utf8');
+    const rawContent = await readFileUtf8(env, filePath);
     const { metadata, body } = parseMdWithFrontmatter(rawContent);
     const ruleMetadata = validateFrontmatter(runtime, {
       filePath,
@@ -627,33 +725,45 @@ async function buildRuleSyncSpecs(
  * Builds sync specs for local skill directories.
  */
 async function buildSkillSyncSpecs(
-  context: AgentsContext,
+  env: CommandEnv,
 ): Promise<DesiredSyncSpec[]> {
+  const { context } = env;
   const { targetRoots } = context;
 
-  await fs.ensureDir(context.sourceRoots.skills);
+  await ensureDirectory(env, context.sourceRoots.skills);
 
-  const entries = await fs.readdir(context.sourceRoots.skills, {
-    withFileTypes: true,
-  });
+  const entryNames = await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      return yield* fs.readDirectory(context.sourceRoots.skills);
+    }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
 
   const desiredSpecs: DesiredSyncSpec[] = [];
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
+  for (const entryName of entryNames) {
+    const entryPath = path.join(context.sourceRoots.skills, entryName);
+    const info = await Effect.runPromise(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        return yield* fs.stat(entryPath);
+      }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+    );
+
+    if (info.type !== 'Directory') {
       continue;
     }
 
-    const sourceDir = path.join(context.sourceRoots.skills, entry.name);
+    const sourceDir = entryPath;
 
     desiredSpecs.push({
       kind: 'skill',
-      name: entry.name,
+      name: entryName,
       sourcePath: sourceDir,
       artifactSpecs: SYNC_AGENTS.map((agent) =>
         AGENT_DEFINITIONS[agent].skill.buildArtifactSpec({
           input: {
-            name: entry.name,
+            name: entryName,
             sourceDir,
           },
           targetRoots,
@@ -669,16 +779,27 @@ async function buildSkillSyncSpecs(
  * Clears targetDir and copies all direct entries from sourceDir into it.
  */
 async function copyDirectoryContents(
+  env: CommandEnv,
   sourceDir: string,
   targetDir: string,
 ): Promise<void> {
-  await fs.emptyDir(targetDir);
-  const entryNames = await fs.readdir(sourceDir);
+  await emptyDirectory(env, targetDir);
+  const entryNames = await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      return yield* fs.readDirectory(sourceDir);
+    }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
 
   for (const entryName of entryNames) {
-    await fs.copy(
-      path.join(sourceDir, entryName),
-      path.join(targetDir, entryName),
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem;
+        yield* fs.copy(
+          path.join(sourceDir, entryName),
+          path.join(targetDir, entryName),
+        );
+      }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
     );
   }
 }
@@ -714,14 +835,15 @@ export function prepareSyncChanges(input: {
 }
 
 export async function applySyncChanges(
+  env: CommandEnv,
   changes: SyncChanges,
 ): Promise<SyncApplyResult> {
-  await removeStaleOutputs(changes.removedEntries);
+  await removeStaleOutputs(env, changes.removedEntries);
 
   const appliedSpecs: AppliedSyncResult[] = [];
 
   for (const desiredSpec of changes.syncableSpecs) {
-    appliedSpecs.push(await applyDesiredSyncSpec(desiredSpec));
+    appliedSpecs.push(await applyDesiredSyncSpec(env, desiredSpec));
   }
 
   return {
@@ -881,10 +1003,11 @@ function partitionManifestEntries(
  * Removes stale dry-ai-managed outputs that are no longer part of the desired sync state.
  */
 async function removeStaleOutputs(
+  env: CommandEnv,
   removedEntries: SyncManifestEntry[],
 ): Promise<void> {
   for (const entry of removedEntries) {
-    await fs.remove(entry.outputPath);
+    await removePath(env, entry.outputPath);
   }
 }
 

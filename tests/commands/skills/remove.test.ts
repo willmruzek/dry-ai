@@ -1,7 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import fsExtra from 'fs-extra';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
@@ -9,7 +8,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   SAMPLE_NORMALIZED_REPO,
   VIRTUAL_HOME_DIR,
@@ -40,22 +39,6 @@ const KEPT_SKILL = {
   },
 } as const;
 
-vi.mock('fs-extra', () => ({
-  default: {
-    copy: vi.fn(),
-    emptyDir: vi.fn(),
-    ensureDir: vi.fn(),
-    mkdtemp: vi.fn(),
-    move: vi.fn(),
-    pathExists: vi.fn(),
-    readFile: vi.fn(),
-    readdir: vi.fn(),
-    remove: vi.fn(),
-    stat: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
-
 vi.mock('node:os', () => ({
   default: {
     homedir: vi.fn(),
@@ -67,19 +50,20 @@ vi.mock('node:os', () => ({
 // types each method as `MockedFunction<typeof fs.method>`, so
 // `.mockResolvedValue` / `.mockReturnValue` calls are checked against the real
 // module signatures without any explicit casts.
-const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
 describe('dry-ai skills remove', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
 
-    configureMockFileSystem(mockFileSystem, mockedFs, {
+    configureMockFileSystem({
+      handle: mockFileSystem,
       lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
     });
-    configureMockOs(mockedOs, {
+    configureMockOs({
+      mockedOs: mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
@@ -92,18 +76,18 @@ describe('dry-ai skills remove', () => {
         // so the removal of `REMOVED_SKILL` has an observable effect on both
         // the filesystem and the lockfile, while `KEPT_SKILL` can act as a
         // negative control for "leaves other entries untouched".
-        seedLocalSkillDirectory(
-          mockFileSystem,
-          DEFAULT_SKILLS_SOURCE_ROOT,
-          REMOVED_SKILL.name,
-          REMOVED_SKILL.files,
-        );
-        seedLocalSkillDirectory(
-          mockFileSystem,
-          DEFAULT_SKILLS_SOURCE_ROOT,
-          KEPT_SKILL.name,
-          KEPT_SKILL.files,
-        );
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: REMOVED_SKILL.name,
+          files: REMOVED_SKILL.files,
+        });
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: KEPT_SKILL.name,
+          files: KEPT_SKILL.files,
+        });
 
         const keptSkillLockfileEntry = {
           commit: KEPT_SKILL.commit,
@@ -114,10 +98,10 @@ describe('dry-ai skills remove', () => {
           repo: SAMPLE_NORMALIZED_REPO,
           updatedAt: SAMPLE_IMPORTED_AT,
         };
-        storeMockTextFile(
-          mockFileSystem,
-          DEFAULT_SKILLS_LOCKFILE_PATH,
-          JSON.stringify({
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
             version: 1,
             skills: [
               {
@@ -132,7 +116,7 @@ describe('dry-ai skills remove', () => {
               keptSkillLockfileEntry,
             ],
           }),
-        );
+        });
 
         const environment = createTestEnv({ mockFileSystem });
         const removedSkillDir = path.join(

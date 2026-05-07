@@ -42,7 +42,7 @@ export async function runSkillsUpdateAllCommand(
     const targetDir = getManagedSkillDirectory(context, {
       skillName: managedSkill.name,
     });
-    const localEditState = await detectLocalSkillEdits({
+    const localEditState = await detectLocalSkillEdits(env, {
       skillDir: targetDir,
       storedFiles: managedSkill.files,
     });
@@ -54,19 +54,19 @@ export async function runSkillsUpdateAllCommand(
       continue;
     }
 
-    const snapshot = await fetchRemoteSkillSnapshot({
+    const snapshot = await fetchRemoteSkillSnapshot(env, {
       ref: managedSkill.ref,
       repo: managedSkill.repo,
       skillPath: managedSkill.path,
     });
 
     try {
-      await replaceManagedSkillDirectory({
-        targetDir,
+      await replaceManagedSkillDirectory(env, {
         sourceDir: snapshot.sourceDir,
+        targetDir,
       });
 
-      const installedFiles = await computeDirectoryHashes(targetDir);
+      const installedFiles = await computeDirectoryHashes(env, targetDir);
 
       const updatedSkill = createUpdatedSkillRecord({
         commit: snapshot.commit,
@@ -82,7 +82,7 @@ export async function runSkillsUpdateAllCommand(
     }
   }
 
-  await saveSkillsLockfile(context, { lockfile });
+  await saveSkillsLockfile(env, { lockfile });
 
   if (updatedLines.length > 0) {
     runtime.logInfo(

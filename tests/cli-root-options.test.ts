@@ -1,7 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import fsExtra from 'fs-extra';
 import { glob } from 'glob';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +9,7 @@ import { runCLI } from '../src/cli.js';
 import {
   DEFAULT_CONFIG_ROOT,
   DEFAULT_SKILLS_LOCKFILE_PATH,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   VIRTUAL_HOME_DIR,
   configureMockFileSystem,
   configureMockOs,
@@ -18,22 +17,6 @@ import {
   createTestEnv,
   storeMockTextFile,
 } from './helpers.js';
-
-vi.mock('fs-extra', () => ({
-  default: {
-    copy: vi.fn(),
-    emptyDir: vi.fn(),
-    ensureDir: vi.fn(),
-    mkdtemp: vi.fn(),
-    move: vi.fn(),
-    pathExists: vi.fn(),
-    readFile: vi.fn(),
-    readdir: vi.fn(),
-    remove: vi.fn(),
-    stat: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
 
 vi.mock('node:os', () => ({
   default: {
@@ -53,7 +36,6 @@ vi.mock('glob', () => ({
 // mocked default export) but types each method as the corresponding
 // `MockedFunction<typeof fs.method>`, so `.mockResolvedValue` / `.mockReturnValue`
 // calls are checked against the real module signatures.
-const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
 
@@ -63,12 +45,13 @@ const mockedGlob = vi.mocked(glob);
 // requiring git or sync machinery.
 
 describe('dry-ai root options', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
-    configureMockFileSystem(mockFileSystem, mockedFs);
-    configureMockOs(mockedOs, {
+    configureMockFileSystem({ handle: mockFileSystem });
+    configureMockOs({
+      mockedOs: mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
@@ -120,11 +103,11 @@ describe('dry-ai root options', () => {
           ],
         };
 
-        storeMockTextFile(
-          mockFileSystem,
-          DEFAULT_SKILLS_LOCKFILE_PATH,
-          JSON.stringify(seededLockfile),
-        );
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify(seededLockfile),
+        });
 
         const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv({
           mockFileSystem,
@@ -157,10 +140,10 @@ describe('dry-ai root options', () => {
           'commands',
           'my-cmd.md',
         );
-        storeMockTextFile(
-          mockFileSystem,
-          commandSourcePath,
-          [
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: commandSourcePath,
+          content: [
             '---',
             'name: my-cmd',
             'description: Test command',
@@ -169,7 +152,7 @@ describe('dry-ai root options', () => {
             'Command body',
             '',
           ].join('\n'),
-        );
+        });
 
         const skillSourceFilePath = path.join(
           DEFAULT_CONFIG_ROOT,
@@ -177,7 +160,11 @@ describe('dry-ai root options', () => {
           'my-skill',
           'SKILL.md',
         );
-        storeMockTextFile(mockFileSystem, skillSourceFilePath, '# My Skill\n');
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: skillSourceFilePath,
+          content: '# My Skill\n',
+        });
 
         const { cliOptions, stderrMessages } = createTestEnv({
           mockFileSystem,

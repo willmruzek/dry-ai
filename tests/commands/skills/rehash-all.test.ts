@@ -1,6 +1,5 @@
 import os from 'node:os';
 
-import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
@@ -8,7 +7,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   SAMPLE_NORMALIZED_REPO,
   VIRTUAL_HOME_DIR,
@@ -44,22 +43,6 @@ const SECOND_SKILL = {
   },
 } as const;
 
-vi.mock('fs-extra', () => ({
-  default: {
-    copy: vi.fn(),
-    emptyDir: vi.fn(),
-    ensureDir: vi.fn(),
-    mkdtemp: vi.fn(),
-    move: vi.fn(),
-    pathExists: vi.fn(),
-    readFile: vi.fn(),
-    readdir: vi.fn(),
-    remove: vi.fn(),
-    stat: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
-
 vi.mock('node:os', () => ({
   default: {
     homedir: vi.fn(),
@@ -71,19 +54,20 @@ vi.mock('node:os', () => ({
 // types each method as `MockedFunction<typeof fs.method>`, so
 // `.mockResolvedValue` / `.mockReturnValue` calls are checked against the real
 // module signatures without any explicit casts.
-const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
 describe('dry-ai skills rehash-all', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
 
-    configureMockFileSystem(mockFileSystem, mockedFs, {
+    configureMockFileSystem({
+      handle: mockFileSystem,
       lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
     });
-    configureMockOs(mockedOs, {
+    configureMockOs({
+      mockedOs: mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
@@ -126,23 +110,23 @@ describe('dry-ai skills rehash-all', () => {
             },
           ],
         };
-        storeMockTextFile(
-          mockFileSystem,
-          DEFAULT_SKILLS_LOCKFILE_PATH,
-          JSON.stringify(seededLockfile),
-        );
-        seedLocalSkillDirectory(
-          mockFileSystem,
-          DEFAULT_SKILLS_SOURCE_ROOT,
-          FIRST_SKILL.name,
-          FIRST_SKILL.files,
-        );
-        seedLocalSkillDirectory(
-          mockFileSystem,
-          DEFAULT_SKILLS_SOURCE_ROOT,
-          SECOND_SKILL.name,
-          SECOND_SKILL.files,
-        );
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify(seededLockfile),
+        });
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: FIRST_SKILL.name,
+          files: FIRST_SKILL.files,
+        });
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: SECOND_SKILL.name,
+          files: SECOND_SKILL.files,
+        });
 
         const environment = createTestEnv({ mockFileSystem });
 
@@ -170,7 +154,10 @@ describe('dry-ai skills rehash-all', () => {
         // Assert: every entry has fresh hashes + updatedAt; commit/repo/path/
         // importedAt are unchanged.
         const savedLockfile = JSON.parse(
-          readMockTextFile(mockFileSystem, DEFAULT_SKILLS_LOCKFILE_PATH),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          }),
         ) as unknown;
         expect(savedLockfile).toEqual({
           version: 1,

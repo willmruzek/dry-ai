@@ -1,7 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
@@ -9,7 +8,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   SAMPLE_NORMALIZED_REPO,
   VIRTUAL_HOME_DIR,
@@ -20,6 +19,7 @@ import {
   createMockedGit,
   createTestEnv,
   hashFileSet,
+  isAgentsSkillCloneCheckoutDir,
   readMockTextFile,
   seedLocalSkillDirectory,
   seedRemoteSkillCheckout,
@@ -57,22 +57,6 @@ const SECOND_SKILL = {
   },
 } as const;
 
-vi.mock('fs-extra', () => ({
-  default: {
-    copy: vi.fn(),
-    emptyDir: vi.fn(),
-    ensureDir: vi.fn(),
-    mkdtemp: vi.fn(),
-    move: vi.fn(),
-    pathExists: vi.fn(),
-    readFile: vi.fn(),
-    readdir: vi.fn(),
-    remove: vi.fn(),
-    stat: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
-
 vi.mock('simple-git', () => ({
   simpleGit: vi.fn(),
 }));
@@ -88,7 +72,6 @@ vi.mock('node:os', () => ({
 // types each method as `MockedFunction<typeof fs.method>`, so
 // `.mockResolvedValue` / `.mockReturnValue` calls are checked against the real
 // module signatures without any explicit casts.
-const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
 // `mockedGit` stubs the subset of simple-git's chain used by `cloneRemoteRepo`.
@@ -99,19 +82,25 @@ const mockedGit = createMockedGit();
  * Seeds every managed skill's remote-source fixture files into one freshly
  * cloned checkout directory. `fetchRemoteSkillSnapshot` only reads the path
  * matching the current skill, so seeding both is cheap and keeps the
- * `onMkdtemp` callback uniform across the two clones performed per run.
+ * `checkoutImplementation` hook uniform across the two clones performed per run.
  */
-function seedAllRemoteSkills(
-  state: MockFileSystemState,
-  checkoutDir: string,
-): void {
+function seedAllRemoteSkills(options: {
+  handle: MockFileSystemHandle;
+  checkoutDir: string;
+}): void {
+  const { handle, checkoutDir } = options;
   for (const skill of [FIRST_SKILL, SECOND_SKILL]) {
-    seedRemoteSkillCheckout(state, checkoutDir, skill.path, skill.remoteFiles);
+    seedRemoteSkillCheckout({
+      handle,
+      checkoutDir,
+      skillPath: skill.path,
+      files: skill.remoteFiles,
+    });
   }
 }
 
 describe('dry-ai skills update-all', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   /**
    * Arranges the "one-skipped, one-updated" scenario used by the
@@ -133,27 +122,27 @@ describe('dry-ai skills update-all', () => {
       'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
     } as const;
 
-    seedLocalSkillDirectory(
-      mockFileSystem,
-      DEFAULT_SKILLS_SOURCE_ROOT,
-      FIRST_SKILL.name,
-      skippedSkillOnDiskFiles,
-    );
-    seedLocalSkillDirectory(
-      mockFileSystem,
-      DEFAULT_SKILLS_SOURCE_ROOT,
-      SECOND_SKILL.name,
-      SECOND_SKILL.localFiles,
-    );
+    seedLocalSkillDirectory({
+      handle: mockFileSystem,
+      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+      skillName: FIRST_SKILL.name,
+      files: skippedSkillOnDiskFiles,
+    });
+    seedLocalSkillDirectory({
+      handle: mockFileSystem,
+      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+      skillName: SECOND_SKILL.name,
+      files: SECOND_SKILL.localFiles,
+    });
 
     // The lockfile stores hashes of `FIRST_SKILL.localFiles` (the pre-edit
     // baseline); comparing those against the hashes of the actual on-disk
     // bytes (`skippedSkillOnDiskFiles`) yields `modified: true` with
     // `changedFiles: ['SKILL.md']`.
-    storeMockTextFile(
-      mockFileSystem,
-      DEFAULT_SKILLS_LOCKFILE_PATH,
-      JSON.stringify({
+    storeMockTextFile({
+      handle: mockFileSystem,
+      filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+      content: JSON.stringify({
         version: 1,
         skills: [
           {
@@ -176,7 +165,7 @@ describe('dry-ai skills update-all', () => {
           },
         ],
       }),
-    );
+    });
 
     return { skippedSkillOnDiskFiles };
   }
@@ -184,22 +173,22 @@ describe('dry-ai skills update-all', () => {
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
 
-    configureMockFileSystem(mockFileSystem, mockedFs, {
+    configureMockFileSystem({
+      handle: mockFileSystem,
       lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-      onMkdtemp: (state, tempDir, prefix) => {
-        // Two distinct `mkdtemp` callsites fire during update-all:
-        //   1. `cloneRemoteRepo` → prefix basename `agents-skill.` (seed it).
-        //   2. `replaceManagedSkillDirectory` → prefix basename
-        //      `<skillName>.` under the skills source root (leave empty).
-        if (path.basename(prefix).startsWith('agents-skill.')) {
-          seedAllRemoteSkills(state, tempDir);
+    });
+    configureMockGitClient({
+      mockedGit,
+      fetchedCommit: FETCHED_COMMIT,
+      checkoutImplementation: async (repoRoot) => {
+        if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+          return;
         }
+        seedAllRemoteSkills({ handle: mockFileSystem, checkoutDir: repoRoot });
       },
     });
-    configureMockGitClient(mockedGit, {
-      fetchedCommit: FETCHED_COMMIT,
-    });
-    configureMockOs(mockedOs, {
+    configureMockOs({
+      mockedOs: mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
@@ -219,23 +208,23 @@ describe('dry-ai skills update-all', () => {
         // match what's in the lockfile, so `detectLocalSkillEdits` returns
         // `modified: false` and both skills proceed through the full update
         // path (no --force required, no skips).
-        seedLocalSkillDirectory(
-          mockFileSystem,
-          DEFAULT_SKILLS_SOURCE_ROOT,
-          FIRST_SKILL.name,
-          FIRST_SKILL.localFiles,
-        );
-        seedLocalSkillDirectory(
-          mockFileSystem,
-          DEFAULT_SKILLS_SOURCE_ROOT,
-          SECOND_SKILL.name,
-          SECOND_SKILL.localFiles,
-        );
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: FIRST_SKILL.name,
+          files: FIRST_SKILL.localFiles,
+        });
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: SECOND_SKILL.name,
+          files: SECOND_SKILL.localFiles,
+        });
 
-        storeMockTextFile(
-          mockFileSystem,
-          DEFAULT_SKILLS_LOCKFILE_PATH,
-          JSON.stringify({
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
             version: 1,
             skills: [
               {
@@ -258,7 +247,7 @@ describe('dry-ai skills update-all', () => {
               },
             ],
           }),
-        );
+        });
 
         const environment = createTestEnv({ mockFileSystem });
 
@@ -287,7 +276,10 @@ describe('dry-ai skills update-all', () => {
         expect(mockFileSystem.lockfileWrites).toHaveLength(1);
 
         const savedLockfile = JSON.parse(
-          readMockTextFile(mockFileSystem, DEFAULT_SKILLS_LOCKFILE_PATH),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          }),
         ) as unknown;
         expect(savedLockfile).toEqual({
           version: 1,
@@ -321,28 +313,28 @@ describe('dry-ai skills update-all', () => {
           FIRST_SKILL.remoteFiles,
         )) {
           expect(
-            readMockTextFile(
-              mockFileSystem,
-              path.join(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
                 DEFAULT_SKILLS_SOURCE_ROOT,
                 FIRST_SKILL.name,
                 relativeFilePath,
               ),
-            ),
+            }),
           ).toBe(content);
         }
         for (const [relativeFilePath, content] of Object.entries(
           SECOND_SKILL.remoteFiles,
         )) {
           expect(
-            readMockTextFile(
-              mockFileSystem,
-              path.join(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
                 DEFAULT_SKILLS_SOURCE_ROOT,
                 SECOND_SKILL.name,
                 relativeFilePath,
               ),
-            ),
+            }),
           ).toBe(content);
         }
         expect(
@@ -410,10 +402,14 @@ describe('dry-ai skills update-all', () => {
         // Assert: `FIRST_SKILL`'s on-disk directory still holds the user's
         // edit verbatim — a skip must never overwrite local content.
         expect(
-          readMockTextFile(
-            mockFileSystem,
-            path.join(DEFAULT_SKILLS_SOURCE_ROOT, FIRST_SKILL.name, 'SKILL.md'),
-          ),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(
+              DEFAULT_SKILLS_SOURCE_ROOT,
+              FIRST_SKILL.name,
+              'SKILL.md',
+            ),
+          }),
         ).toBe(skippedSkillOnDiskFiles['SKILL.md']);
 
         // Assert: `SECOND_SKILL`'s directory was fully replaced with the
@@ -423,14 +419,14 @@ describe('dry-ai skills update-all', () => {
           SECOND_SKILL.remoteFiles,
         )) {
           expect(
-            readMockTextFile(
-              mockFileSystem,
-              path.join(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
                 DEFAULT_SKILLS_SOURCE_ROOT,
                 SECOND_SKILL.name,
                 relativeFilePath,
               ),
-            ),
+            }),
           ).toBe(content);
         }
       });
@@ -492,7 +488,10 @@ describe('dry-ai skills update-all', () => {
         // refreshed with the fetched commit, new remote-file hashes, and a
         // new `updatedAt`.
         const savedLockfile = JSON.parse(
-          readMockTextFile(mockFileSystem, DEFAULT_SKILLS_LOCKFILE_PATH),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          }),
         ) as unknown;
         expect(savedLockfile).toEqual({
           version: 1,

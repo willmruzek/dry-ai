@@ -1,7 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import fsExtra from 'fs-extra';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
@@ -9,7 +8,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   SAMPLE_NORMALIZED_REPO,
   VIRTUAL_HOME_DIR,
@@ -32,22 +31,6 @@ const SECOND_SKILL = {
   commit: '1234567890abcdef',
 } as const;
 
-vi.mock('fs-extra', () => ({
-  default: {
-    copy: vi.fn(),
-    emptyDir: vi.fn(),
-    ensureDir: vi.fn(),
-    mkdtemp: vi.fn(),
-    move: vi.fn(),
-    pathExists: vi.fn(),
-    readFile: vi.fn(),
-    readdir: vi.fn(),
-    remove: vi.fn(),
-    stat: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
-
 vi.mock('node:os', () => ({
   default: {
     homedir: vi.fn(),
@@ -55,23 +38,20 @@ vi.mock('node:os', () => ({
   },
 }));
 
-// `vi.mocked` is a pure type helper: it returns the mocked default export but
-// types each method as `MockedFunction<typeof fs.method>`, so
-// `.mockResolvedValue` / `.mockReturnValue` calls are checked against the real
-// module signatures without any explicit casts.
-const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
 describe('dry-ai skills list', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
 
-    configureMockFileSystem(mockFileSystem, mockedFs, {
+    configureMockFileSystem({
+      handle: mockFileSystem,
       lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
     });
-    configureMockOs(mockedOs, {
+    configureMockOs({
+      mockedOs: mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
@@ -85,20 +65,28 @@ describe('dry-ai skills list', () => {
         // reverse-alphabetical mock-insertion order verifies the output is
         // driven by `listLocalSkillDirectories`'s sort, not by insertion
         // order.
-        storeMockTextFile(
-          mockFileSystem,
-          path.join(DEFAULT_SKILLS_SOURCE_ROOT, SECOND_SKILL.name, 'SKILL.md'),
-          '---\nname: review-helper\n---\n\n# Review helper\n',
-        );
-        storeMockTextFile(
-          mockFileSystem,
-          path.join(DEFAULT_SKILLS_SOURCE_ROOT, FIRST_SKILL.name, 'SKILL.md'),
-          '---\nname: note-taker\n---\n\n# Note taker\n',
-        );
-        storeMockTextFile(
-          mockFileSystem,
-          DEFAULT_SKILLS_LOCKFILE_PATH,
-          JSON.stringify({
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: path.join(
+            DEFAULT_SKILLS_SOURCE_ROOT,
+            SECOND_SKILL.name,
+            'SKILL.md',
+          ),
+          content: '---\nname: review-helper\n---\n\n# Review helper\n',
+        });
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: path.join(
+            DEFAULT_SKILLS_SOURCE_ROOT,
+            FIRST_SKILL.name,
+            'SKILL.md',
+          ),
+          content: '---\nname: note-taker\n---\n\n# Note taker\n',
+        });
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
             version: 1,
             skills: [
               {
@@ -121,7 +109,7 @@ describe('dry-ai skills list', () => {
               },
             ],
           }),
-        );
+        });
 
         const environment = createTestEnv({ mockFileSystem });
 

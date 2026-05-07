@@ -1,6 +1,5 @@
-import fs from 'fs-extra';
-
 import type { CommandEnv } from '../lib/command-env.js';
+import { pathExistsInFileSystem } from '../lib/skills.js';
 import {
   applySyncChanges,
   buildDesiredSyncSpecs,
@@ -23,23 +22,24 @@ export async function runSyncCommand(env: CommandEnv): Promise<void> {
 
   if (
     rootOptions.configRoot !== undefined &&
-    !(await fs.pathExists(context.inputRoot))
+    !(await pathExistsInFileSystem(env, context.inputRoot))
   ) {
     throw new Error(`Config root does not exist: ${context.inputRoot}`);
   }
 
-  await ensureTargetDirectories(targetRoots);
+  await ensureTargetDirectories(env, targetRoots);
 
   const previousManifest = await loadSyncManifest(
+    env,
     context.syncManifestPath,
-    runtime,
   );
 
-  const desiredSpecs = await buildDesiredSyncSpecs(context, runtime);
+  const desiredSpecs = await buildDesiredSyncSpecs(env);
   const changes = prepareSyncChanges({ previousManifest, desiredSpecs });
-  const result = await applySyncChanges(changes);
+  const result = await applySyncChanges(env, changes);
 
   await saveSyncManifest(
+    env,
     context.syncManifestPath,
     createSyncManifest([
       ...collectManifestEntriesFromApplied(result.appliedSpecs),
