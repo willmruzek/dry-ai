@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { runCLI, type CLIOptions } from '../../../src/cli.js';
+import type { SyncAgent } from '../../../src/lib/agents.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
@@ -65,6 +66,15 @@ vi.mock('glob', () => ({
 
 const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
+
+/**
+ * Exhaustive `Record<SyncAgent, …>`: `satisfies` requires a key for every registry
+ * agent or TypeScript fails at compile time.
+ */
+const e2eOutputTreeTestCoverageByAgent = {
+  copilot: true,
+  cursor: true,
+} satisfies Record<SyncAgent, true>;
 
 let mockFileSystem: MockFileSystemHandle;
 
@@ -503,6 +513,12 @@ function collectAgentGeneratedFilePaths(agent: SyncAgentUnderTest): string[] {
  */
 const basicWrittenFilePaths =
   buildExpectedTrioProductFilePaths(VIRTUAL_HOME_DIR);
+
+describe('dry-ai sync registry contracts', () => {
+  it('keeps e2e output-tree coverage exhaustive for every SyncAgent', () => {
+    expect(e2eOutputTreeTestCoverageByAgent).toBeDefined();
+  });
+});
 
 const feature = await loadFeature('./sync.feature');
 
