@@ -232,10 +232,10 @@ function assertMockSyncManifestMatchesExpectedRows(
     ...o,
     outputPath: path.normalize(o.outputPath),
   }));
-  const sortedExpected = [...normalizedExpected].sort(
-    compareManifestEntryTuples,
-  );
-  const sortedActual = [...actualRows].sort(compareManifestEntryTuples);
+  const sortedExpected = normalizedExpected
+    .slice()
+    .sort(compareManifestEntryTuples);
+  const sortedActual = actualRows.slice().sort(compareManifestEntryTuples);
   expect(sortedActual).toEqual(sortedExpected);
 }
 
@@ -285,7 +285,7 @@ describe('dry-ai sync', () => {
           }
         }
 
-        return matches.sort();
+        return matches.slice().sort();
       },
     );
   });

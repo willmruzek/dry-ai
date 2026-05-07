@@ -1,7 +1,9 @@
+import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
+  type LoadSkillsLockfileError,
   findManagedSkill,
   formatManagedSkillSummary,
   loadSkillsLockfile,
@@ -23,28 +25,24 @@ type SkillsRemoveInput = {
 export function skillsRemoveEffect(options: {
   env: CommandEnv;
   input: SkillsRemoveInput;
-}): Effect.Effect<void, never, never> {
+}): Effect.Effect<void, LoadSkillsLockfileError, FileSystem> {
   const { env, input } = options;
   const { runtime } = env;
   const { skillName } = input;
 
   return Effect.gen(function* () {
-    const lockfile = yield* Effect.promise(() => loadSkillsLockfile(env));
+    const lockfile = yield* loadSkillsLockfile(env);
     const managedSkill = findManagedSkill(lockfile, { name: skillName });
 
     if (managedSkill === undefined) {
       throw new Error(managedSkillNotFoundMessage(skillName));
     }
 
-    yield* Effect.promise(() =>
-      removeManagedSkillDirectory(env, { skillName }),
-    );
+    yield* removeManagedSkillDirectory(env, { skillName });
 
-    yield* Effect.promise(() =>
-      saveSkillsLockfile(env, {
-        lockfile: removeManagedSkill(lockfile, { name: skillName }),
-      }),
-    );
+    yield* saveSkillsLockfile(env, {
+      lockfile: removeManagedSkill(lockfile, { name: skillName }),
+    });
 
     yield* Effect.sync(() => {
       runtime.logInfo(`Removed ${formatManagedSkillSummary(managedSkill)}`);
@@ -59,5 +57,9 @@ export function runSkillsRemoveCommand(
   env: CommandEnv,
   input: SkillsRemoveInput,
 ): Promise<void> {
-  return Effect.runPromise(skillsRemoveEffect({ env, input }));
+  return Effect.runPromise(
+    skillsRemoveEffect({ env, input }).pipe(
+      Effect.provide(env.runtime.fileSystemLayer),
+    ),
+  );
 }

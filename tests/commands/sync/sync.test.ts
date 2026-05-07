@@ -89,7 +89,7 @@ function installSyncTestGlobMock(): void {
         }
       }
 
-      return matches.sort();
+      return matches.slice().sort();
     },
   );
 }
@@ -329,10 +329,10 @@ function assertMockSyncManifestMatchesExpectedRows(
     ...o,
     outputPath: path.normalize(o.outputPath),
   }));
-  const sortedExpected = [...normalizedExpected].sort(
-    compareManifestEntryTuples,
-  );
-  const sortedActual = [...actualRows].sort(compareManifestEntryTuples);
+  const sortedExpected = normalizedExpected
+    .slice()
+    .sort(compareManifestEntryTuples);
+  const sortedActual = actualRows.slice().sort(compareManifestEntryTuples);
   expect(sortedActual).toEqual(sortedExpected);
 }
 
@@ -480,7 +480,7 @@ function buildAgentOutputPaths(input: {
     }
   }
 
-  return outputPaths.sort();
+  return outputPaths.slice().sort();
 }
 
 function collectAgentGeneratedFilePaths(agent: SyncAgentUnderTest): string[] {
@@ -491,6 +491,7 @@ function collectAgentGeneratedFilePaths(agent: SyncAgentUnderTest): string[] {
 
   return collectGeneratedHomeFilePaths()
     .filter((filePath) => filePath.startsWith(agentRoot))
+    .slice()
     .sort();
 }
 
@@ -2454,7 +2455,7 @@ describe('dry-ai sync', () => {
               const { outputs } = readSyncManifest();
               expect(outputs).toHaveLength(12);
               expect(outputs).toEqual(
-                [...outputs].sort(compareManifestEntryTuples),
+                outputs.slice().sort(compareManifestEntryTuples),
               );
 
               expect(
@@ -2680,7 +2681,7 @@ describe('dry-ai sync', () => {
                 ),
               );
               expect(manifest.outputs).toEqual(
-                [...manifest.outputs].sort(compareManifestEntryTuples),
+                manifest.outputs.slice().sort(compareManifestEntryTuples),
               );
             });
           });
@@ -2995,6 +2996,7 @@ describe('dry-ai sync', () => {
                 expect(
                   readSyncManifest()
                     .outputs.map((entry) => entry.name)
+                    .slice()
                     .sort(),
                 ).toEqual([expectedManifestName, expectedManifestName]);
               },
@@ -3126,6 +3128,7 @@ describe('dry-ai sync', () => {
                 expect(
                   readSyncManifest()
                     .outputs.map((entry) => entry.name)
+                    .slice()
                     .sort(),
                 ).toEqual([expectedManifestName, expectedManifestName]);
                 expect(mockFileSystem.files.has(nestedOutputPath)).toBe(false);
@@ -3196,6 +3199,7 @@ describe('dry-ai sync', () => {
               expect(
                 readSyncManifest()
                   .outputs.map((entry) => entry.name)
+                  .slice()
                   .sort(),
               ).toEqual(['real-skill', 'real-skill']);
             });
@@ -4116,6 +4120,7 @@ describe('dry-ai sync', () => {
                 expect(readSyncManifest().outputs).toEqual(
                   buildExpectedManifestTrio(VIRTUAL_HOME_DIR)
                     .filter((entry) => entry.kind !== 'command')
+                    .slice()
                     .sort(compareManifestEntryTuples),
                 );
               });

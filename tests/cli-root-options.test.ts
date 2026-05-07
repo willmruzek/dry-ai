@@ -78,7 +78,7 @@ describe('dry-ai root options', () => {
           }
         }
 
-        return matches.sort();
+        return [...matches].sort();
       },
     );
   });

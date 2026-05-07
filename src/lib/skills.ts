@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { PlatformError } from '@effect/platform/Error';
+import { SystemError } from '@effect/platform/Error';
 import { FileSystem } from '@effect/platform/FileSystem';
 import { Data, Effect, Schema } from 'effect';
 import * as ParseResult from 'effect/ParseResult';
@@ -57,19 +58,34 @@ export class InvalidSkillsLockfile extends Data.TaggedError(
   readonly cause: ParseResult.ParseError;
 }> {}
 
+export class ManagedSkillNotFoundError extends Data.TaggedError(
+  'ManagedSkillNotFoundError',
+)<{
+  readonly message: string;
+}> {}
+
+class RemoteSkillDirectoryInvalid extends Data.TaggedError(
+  'RemoteSkillDirectoryInvalid',
+)<{
+  readonly message: string;
+}> {}
+
+/** Errors produced by {@link loadSkillsLockfile} (I/O or invalid JSON/schema). */
+export type LoadSkillsLockfileError = InvalidSkillsLockfile | PlatformError;
+
 export type ManagedSkill = Schema.Schema.Type<typeof SkillLockEntry>;
 export type SkillsLockfile = Schema.Schema.Type<typeof SkillsLockfile>;
 export type ManagedSkillFiles = Schema.Schema.Type<typeof ManagedSkillFiles>;
 
 export type RemoteSkillSnapshot = {
-  cleanup: () => Promise<void>;
+  cleanup: () => Effect.Effect<void, PlatformError, FileSystem>;
   commit: string;
   sourceDir: string;
 };
 
 export type RemoteRepoCheckout = {
   checkoutDir: string;
-  cleanup: () => Promise<void>;
+  cleanup: () => Effect.Effect<void, PlatformError, FileSystem>;
   commit: string;
 };
 
@@ -80,132 +96,122 @@ export function createEmptySkillsLockfile(): SkillsLockfile {
   };
 }
 
-export async function ensureSkillsRoot(env: SkillsLockfileEnv): Promise<void> {
-  const {
-    context,
-    runtime: { fileSystemLayer },
-  } = env;
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      yield* fs.makeDirectory(context.sourceRoots.skills, {
-        recursive: true,
-      });
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+/**
+ * Ensure the skills source root directory exists (via Effect {@link FileSystem}).
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
+ */
+export function ensureSkillsRoot(
+  env: SkillsLockfileEnv,
+): Effect.Effect<void, PlatformError, FileSystem> {
+  const { context } = env;
+
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    yield* fs.makeDirectory(context.sourceRoots.skills, {
+      recursive: true,
+    });
+  });
 }
 
 /**
  * Ensure a skills lockfile exists at the path defined in `context`, creating and saving an empty lockfile when it is missing.
  *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
+ *
  * @param context - Execution context containing `skillsLockfilePath` and filesystem access used to read/write the lockfile
  */
-export async function ensureSkillsLockfile(
+export function ensureSkillsLockfile(
   env: SkillsLockfileEnv,
-): Promise<void> {
-  const {
-    context,
-    runtime: { fileSystemLayer },
-  } = env;
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      if (yield* fs.exists(context.skillsLockfilePath)) {
-        return;
-      }
+): Effect.Effect<void, PlatformError, FileSystem> {
+  const { context } = env;
 
-      yield* Effect.promise(() => {
-        return saveSkillsLockfile(env, {
-          lockfile: createEmptySkillsLockfile(),
-        });
-      });
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    if (yield* fs.exists(context.skillsLockfilePath)) {
+      return;
+    }
+
+    yield* saveSkillsLockfile(env, {
+      lockfile: createEmptySkillsLockfile(),
+    });
+  });
 }
 
 /**
  * Returns whether `filePath` exists according to the Effect {@link FileSystem}
  * service (same layer as lockfile and managed-skill directory I/O).
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
-export async function pathExistsInFileSystem(
-  env: Pick<CommandEnv, 'runtime'>,
+export function pathExistsInFileSystem(
   filePath: string,
-): Promise<boolean> {
-  const {
-    runtime: { fileSystemLayer },
-  } = env;
-
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      return yield* fs.exists(filePath);
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+): Effect.Effect<boolean, PlatformError, FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    return yield* fs.exists(filePath);
+  });
 }
 
 /**
  * Load the repository's skills lockfile, validate it against the schema, and return a sorted lockfile object.
  *
- * @param env - Environment containing `context` (with `skillsLockfilePath`) and `runtime` (providing the filesystem layer) used to locate and read the lockfile.
- * @returns The decoded and lexicographically sorted `SkillsLockfile`.
- * @throws {InvalidSkillsLockfile} When a lockfile exists but fails schema parsing/validation.
+ * Requires an Effect {@link FileSystem} service (provide `env.runtime.fileSystemLayer` at the command root).
+ *
+ * @param env - Environment containing `context` with `skillsLockfilePath`.
+ * @returns Effect that succeeds with the decoded and lexicographically sorted `SkillsLockfile`, or fails with {@link InvalidSkillsLockfile} when a lockfile exists but fails schema parsing/validation, or with a filesystem {@link PlatformError} when reading fails.
  */
-export async function loadSkillsLockfile(
+export function loadSkillsLockfile(
   env: SkillsLockfileEnv,
-): Promise<SkillsLockfile> {
-  const {
-    context,
-    runtime: { fileSystemLayer },
-  } = env;
+): Effect.Effect<SkillsLockfile, LoadSkillsLockfileError, FileSystem> {
+  const { context } = env;
 
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      if (!(yield* fs.exists(context.skillsLockfilePath))) {
-        return createEmptySkillsLockfile();
-      }
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    if (!(yield* fs.exists(context.skillsLockfilePath))) {
+      return createEmptySkillsLockfile();
+    }
 
-      const rawLockfile = yield* fs.readFileString(context.skillsLockfilePath);
+    const rawLockfile = yield* fs.readFileString(context.skillsLockfilePath);
 
-      const decoded = yield* Schema.decodeUnknown(
-        Schema.parseJson(SkillsLockfile),
-      )(rawLockfile).pipe(
-        Effect.mapError(
-          (parseError) =>
-            new InvalidSkillsLockfile({
-              lockfilePath: context.skillsLockfilePath,
-              message: `Invalid skills lockfile at ${context.skillsLockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(parseError)}`,
-              cause: parseError,
-            }),
-        ),
-      );
+    const decoded = yield* Schema.decodeUnknown(
+      Schema.parseJson(SkillsLockfile),
+    )(rawLockfile).pipe(
+      Effect.mapError(
+        (parseError) =>
+          new InvalidSkillsLockfile({
+            lockfilePath: context.skillsLockfilePath,
+            message: `Invalid skills lockfile at ${context.skillsLockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(parseError)}`,
+            cause: parseError,
+          }),
+      ),
+    );
 
-      return sortSkillsLockfile(decoded);
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+    return sortSkillsLockfile(decoded);
+  });
 }
 
-export async function saveSkillsLockfile(
+/**
+ * Write the skills lockfile to disk as sorted JSON (via Effect {@link FileSystem}).
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
+ */
+export function saveSkillsLockfile(
   env: SkillsLockfileEnv,
   { lockfile }: { lockfile: SkillsLockfile },
-): Promise<void> {
-  const {
-    context,
-    runtime: { fileSystemLayer },
-  } = env;
+): Effect.Effect<void, PlatformError, FileSystem> {
+  const { context } = env;
   const normalizedLockfile = sortSkillsLockfile(lockfile);
 
-  return await Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      yield* fs.writeFile(
-        context.skillsLockfilePath,
-        new TextEncoder().encode(
-          `${JSON.stringify(normalizedLockfile, null, 2)}\n`,
-        ),
-      );
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    yield* fs.writeFile(
+      context.skillsLockfilePath,
+      new TextEncoder().encode(
+        `${JSON.stringify(normalizedLockfile, null, 2)}\n`,
+      ),
+    );
+  });
 }
 
 export function findManagedSkill(
@@ -249,36 +255,37 @@ export function removeManagedSkill(
   });
 }
 
-export async function listLocalSkillDirectories(
+/**
+ * List names of subdirectories under the skills source root (via Effect {@link FileSystem}).
+ * Ensures the root exists, ignores non-directories, returns a sorted name list.
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
+ */
+export function listLocalSkillDirectories(
   env: SkillsLockfileEnv,
-): Promise<string[]> {
-  const {
-    context,
-    runtime: { fileSystemLayer },
-  } = env;
+): Effect.Effect<string[], PlatformError, FileSystem> {
+  const { context } = env;
   const skillsRoot = context.sourceRoots.skills;
 
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
 
-      yield* fs.makeDirectory(skillsRoot, { recursive: true });
+    yield* fs.makeDirectory(skillsRoot, { recursive: true });
 
-      const names = yield* fs.readDirectory(skillsRoot);
+    const names = yield* fs.readDirectory(skillsRoot);
 
-      const directories = yield* Effect.forEach(names, (name) =>
-        Effect.gen(function* () {
-          const fullPath = path.join(skillsRoot, name);
-          const info = yield* fs.stat(fullPath);
-          return info.type === 'Directory' ? name : null;
-        }),
-      );
+    const directories = yield* Effect.forEach(names, (name) =>
+      Effect.gen(function* () {
+        const fullPath = path.join(skillsRoot, name);
+        const info = yield* fs.stat(fullPath);
+        return info.type === 'Directory' ? name : null;
+      }),
+    );
 
-      return directories
-        .filter((name): name is string => name !== null)
-        .sort((a, b) => a.localeCompare(b));
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+    return [
+      ...directories.filter((name): name is string => name !== null),
+    ].sort((a, b) => a.localeCompare(b));
+  });
 }
 
 export function getManagedSkillDirectory(
@@ -435,326 +442,345 @@ export function createUpdatedSkillRecord(input: {
 /**
  * Returns a map of relative file path → SHA-256 hash for every file in directoryPath.
  *
- * @param env - Must provide {@link CommandEnv.runtime} `fileSystemLayer` for Effect `FileSystem` access.
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
-export async function computeDirectoryHashes(
-  env: Pick<CommandEnv, 'runtime'>,
+export function computeDirectoryHashes(
   directoryPath: string,
-): Promise<ManagedSkillFiles> {
-  const {
-    runtime: { fileSystemLayer },
-  } = env;
+): Effect.Effect<ManagedSkillFiles, PlatformError, FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    const relativeFilePaths = yield* listRelativeFilePaths(directoryPath);
+    const hashEntries: [string, string][] = [];
 
-  return Effect.runPromise(
-    computeDirectoryHashesEffect(directoryPath).pipe(
-      Effect.provide(fileSystemLayer),
-    ),
-  );
+    for (const relativeFilePath of relativeFilePaths) {
+      const fullPath = path.join(directoryPath, relativeFilePath);
+      const fileBytes = yield* fs.readFile(fullPath);
+      const digest = createHash('sha256').update(fileBytes).digest('hex');
+
+      hashEntries.push([toPortableRelativePath(relativeFilePath), digest]);
+    }
+
+    return Object.fromEntries(hashEntries);
+  });
 }
 
 /**
  * Detects whether a managed skill directory has local content changes relative to the lockfile snapshot.
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
-export async function detectLocalSkillEdits(
-  env: Pick<CommandEnv, 'runtime'>,
-  input: {
-    skillDir: string;
-    storedFiles: ManagedSkillFiles | undefined;
-  },
-): Promise<{ changedFiles: string[]; modified: boolean }> {
-  if (!input.storedFiles) {
+export function detectLocalSkillEdits(input: {
+  skillDir: string;
+  storedFiles: ManagedSkillFiles | undefined;
+}): Effect.Effect<
+  { changedFiles: string[]; modified: boolean },
+  PlatformError,
+  FileSystem
+> {
+  return Effect.gen(function* () {
+    if (!input.storedFiles) {
+      return {
+        changedFiles: [],
+        modified: false,
+      };
+    }
+
+    const skillDirExists = yield* pathExistsInFileSystem(input.skillDir);
+
+    if (!skillDirExists) {
+      return {
+        changedFiles: [],
+        modified: false,
+      };
+    }
+
+    const currentFiles = yield* computeDirectoryHashes(input.skillDir);
+    const changedFiles = [
+      ...new Set([
+        ...Object.keys(input.storedFiles),
+        ...Object.keys(currentFiles),
+      ]),
+    ]
+      .filter(
+        (relativeFilePath) =>
+          input.storedFiles?.[relativeFilePath] !==
+          currentFiles[relativeFilePath],
+      )
+      .slice()
+      .sort((left, right) => left.localeCompare(right));
+
     return {
-      changedFiles: [],
-      modified: false,
+      changedFiles,
+      modified: changedFiles.length > 0,
     };
-  }
-
-  if (!(await pathExistsInFileSystem(env, input.skillDir))) {
-    return {
-      changedFiles: [],
-      modified: false,
-    };
-  }
-
-  const currentFiles = await computeDirectoryHashes(env, input.skillDir);
-  const changedFiles = [
-    ...new Set([
-      ...Object.keys(input.storedFiles),
-      ...Object.keys(currentFiles),
-    ]),
-  ]
-    .filter(
-      (relativeFilePath) =>
-        input.storedFiles?.[relativeFilePath] !==
-        currentFiles[relativeFilePath],
-    )
-    .sort((left, right) => left.localeCompare(right));
-
-  return {
-    changedFiles,
-    modified: changedFiles.length > 0,
-  };
+  });
 }
 
 /**
  * Clones a remote repository into a temporary checkout and resolves the fetched commit.
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
-export async function cloneRemoteRepo(
-  env: SkillsLockfileEnv,
-  input: {
-    ref: string | undefined;
-    repo: string;
-  },
-): Promise<RemoteRepoCheckout> {
-  const {
-    runtime: { fileSystemLayer },
-  } = env;
+export function cloneRemoteRepo(input: {
+  ref: string | undefined;
+  repo: string;
+}): Effect.Effect<RemoteRepoCheckout, Error, FileSystem> {
+  return Effect.gen(function* () {
+    const normalizedRepo = normalizeRemoteRepo(input.repo);
 
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const normalizedRepo = normalizeRemoteRepo(input.repo);
+    const fs = yield* FileSystem;
+    const checkoutDir = yield* fs.makeTempDirectory({
+      prefix: path.join(os.tmpdir(), 'agents-skill.'),
+    });
 
-      const fs = yield* FileSystem;
-      const checkoutDir = yield* fs.makeTempDirectory({
-        prefix: path.join(os.tmpdir(), 'agents-skill.'),
-      });
+    const git = simpleGit(checkoutDir);
 
-      const git = simpleGit(checkoutDir);
-
-      const cloneWork = Effect.gen(function* () {
-        yield* Effect.promise(() => {
-          return git.init();
-        });
-
-        yield* Effect.promise(() => {
-          return git.addRemote('origin', normalizedRepo);
-        });
-
+    const commit = yield* Effect.tryPromise({
+      try: async () => {
+        await git.init();
+        await git.addRemote('origin', normalizedRepo);
         if (input.ref) {
-          const ref = input.ref;
-
-          yield* Effect.promise(() => {
-            return git.fetch('origin', ref, ['--depth', '1']);
-          });
+          await git.fetch('origin', input.ref, ['--depth', '1']);
         } else {
-          yield* Effect.promise(() => {
-            return git.fetch('origin', 'HEAD', ['--depth', '1']);
-          });
+          await git.fetch('origin', 'HEAD', ['--depth', '1']);
         }
-
-        yield* Effect.promise(() => {
-          return git.checkout(['--quiet', 'FETCH_HEAD']);
-        });
-
-        return {
-          checkoutDir,
-          cleanup: () =>
-            Effect.runPromise(
-              fs.remove(checkoutDir).pipe(Effect.provide(fileSystemLayer)),
-            ),
-          commit: yield* Effect.promise(() => {
-            return git.revparse(['HEAD']);
-          }),
-        };
-      });
-
-      return yield* cloneWork.pipe(
-        Effect.catchAll((error) => {
-          return Effect.gen(function* () {
-            yield* fs.remove(checkoutDir).pipe(Effect.ignoreLogged); // or mapError
-            return yield* Effect.fail(
-              toError({
-                prefix: `Failed to fetch repository from ${normalizedRepo}`,
-                error,
-              }),
-            );
-          });
+        await git.checkout(['--quiet', 'FETCH_HEAD']);
+        return await git.revparse(['HEAD']);
+      },
+      catch: (error) =>
+        toError({
+          prefix: `Failed to fetch repository from ${normalizedRepo}`,
+          error,
         }),
-      );
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+    }).pipe(
+      Effect.catchAll((error) =>
+        Effect.gen(function* () {
+          yield* fs
+            .remove(checkoutDir, { recursive: true, force: true })
+            .pipe(Effect.ignoreLogged);
+          return yield* Effect.fail(error);
+        }),
+      ),
+    );
+
+    return {
+      checkoutDir,
+      cleanup: () =>
+        fs.remove(checkoutDir, { recursive: true, force: true }).pipe(
+          Effect.catchIf(
+            (error): error is SystemError =>
+              error instanceof SystemError && error.reason === 'NotFound',
+            () => Effect.void,
+          ),
+        ),
+      commit,
+    };
+  });
 }
 
 /**
  * Removes one temporary repository checkout returned by `cloneRemoteRepo`.
  */
-export async function cleanupRemoteRepoCheckout(
+export function cleanupRemoteRepoCheckout(
   checkout: RemoteRepoCheckout,
-): Promise<void> {
-  await checkout.cleanup();
+): Effect.Effect<void, PlatformError, FileSystem> {
+  return checkout.cleanup();
 }
 
 /**
  * Returns the source directory path for a skill at its default location (`skills/<skillName>`), confirming the directory and SKILL.md exist.
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
-export async function resolveSkillSourceDir(
-  env: SkillsLockfileEnv,
-  input: {
-    checkoutDir: string;
-    repo: string;
-    skillName: string;
-  },
-): Promise<string> {
+export function resolveSkillSourceDir(input: {
+  checkoutDir: string;
+  repo: string;
+  skillName: string;
+}): Effect.Effect<string, Error | PlatformError, FileSystem> {
   const skillPath = resolveManagedSkillImportPath({
     skillName: input.skillName,
   });
-  const sourceDir = resolveRemoteSkillDirectory({
-    checkoutDir: input.checkoutDir,
-    skillPath,
-  });
 
-  await validateRemoteSkillDirectory(env, {
-    repo: normalizeRemoteRepo(input.repo),
-    skillPath,
-    sourceDir,
-  });
+  return Effect.gen(function* () {
+    const sourceDir = yield* Effect.try({
+      try: () =>
+        resolveRemoteSkillDirectory({
+          checkoutDir: input.checkoutDir,
+          skillPath,
+        }),
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error(String(cause)),
+    });
 
-  return sourceDir;
+    yield* validateRemoteSkillDirectoryEffect({
+      repo: normalizeRemoteRepo(input.repo),
+      skillPath,
+      sourceDir,
+    }).pipe(
+      Effect.catchTag('RemoteSkillDirectoryInvalid', (e) =>
+        Effect.fail(new Error(e.message)),
+      ),
+    );
+
+    return sourceDir;
+  });
 }
 
 /**
  * Returns the source directory path for a skill at an explicit repository-relative path, confirming the directory and SKILL.md exist.
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
-export async function resolveSkillSourceDirByPath(
-  env: SkillsLockfileEnv,
-  input: {
-    checkoutDir: string;
-    repo: string;
-    skillPath: string;
-  },
-): Promise<string> {
-  const normalizedSkillPath = normalizeImportedSkillPath(input.skillPath);
+export function resolveSkillSourceDirByPath(input: {
+  checkoutDir: string;
+  repo: string;
+  skillPath: string;
+}): Effect.Effect<string, Error | PlatformError, FileSystem> {
+  return Effect.gen(function* () {
+    const normalizedSkillPath = normalizeImportedSkillPath(input.skillPath);
 
-  if (normalizedSkillPath === undefined) {
-    throw new Error('Skill path may not be empty');
-  }
+    if (normalizedSkillPath === undefined) {
+      return yield* Effect.fail(new Error('Skill path may not be empty'));
+    }
 
-  const sourceDir = resolveRemoteSkillDirectory({
-    checkoutDir: input.checkoutDir,
-    skillPath: normalizedSkillPath,
+    const sourceDir = yield* Effect.try({
+      try: () =>
+        resolveRemoteSkillDirectory({
+          checkoutDir: input.checkoutDir,
+          skillPath: normalizedSkillPath,
+        }),
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error(String(cause)),
+    });
+
+    yield* validateRemoteSkillDirectoryEffect({
+      repo: normalizeRemoteRepo(input.repo),
+      skillPath: normalizedSkillPath,
+      sourceDir,
+    }).pipe(
+      Effect.catchTag('RemoteSkillDirectoryInvalid', (e) =>
+        Effect.fail(new Error(e.message)),
+      ),
+    );
+
+    return sourceDir;
   });
-
-  await validateRemoteSkillDirectory(env, {
-    repo: normalizeRemoteRepo(input.repo),
-    skillPath: normalizedSkillPath,
-    sourceDir,
-  });
-
-  return sourceDir;
 }
 
 /**
  * Fetches a validated remote skill directory snapshot for a specific repository path.
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
-export async function fetchRemoteSkillSnapshot(
-  env: SkillsLockfileEnv,
-  input: {
-    ref: string | undefined;
-    repo: string;
-    skillPath: string;
-  },
-): Promise<RemoteSkillSnapshot> {
+export function fetchRemoteSkillSnapshot(input: {
+  ref: string | undefined;
+  repo: string;
+  skillPath: string;
+}): Effect.Effect<RemoteSkillSnapshot, Error | PlatformError, FileSystem> {
   const normalizedRepo = normalizeRemoteRepo(input.repo);
-  const checkout = await cloneRemoteRepo(env, {
-    ref: input.ref,
-    repo: normalizedRepo,
-  });
 
-  try {
-    const sourceDir = resolveRemoteSkillDirectory({
-      checkoutDir: checkout.checkoutDir,
-      skillPath: input.skillPath,
+  return Effect.gen(function* () {
+    const checkout = yield* cloneRemoteRepo({
+      ref: input.ref,
+      repo: normalizedRepo,
     });
 
-    await validateRemoteSkillDirectory(env, {
+    const sourceDir = yield* Effect.try({
+      try: () =>
+        resolveRemoteSkillDirectory({
+          checkoutDir: checkout.checkoutDir,
+          skillPath: input.skillPath,
+        }),
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error(String(cause)),
+    });
+
+    yield* validateRemoteSkillDirectoryEffect({
       repo: normalizedRepo,
       skillPath: input.skillPath,
       sourceDir,
-    });
+    }).pipe(
+      Effect.catchAll((error) =>
+        Effect.gen(function* () {
+          yield* checkout.cleanup();
+          return yield* Effect.fail(
+            toError({
+              prefix: `Failed to fetch skill from ${normalizedRepo}`,
+              error,
+            }),
+          );
+        }),
+      ),
+    );
 
     return {
       cleanup: checkout.cleanup,
       commit: checkout.commit,
       sourceDir,
     };
-  } catch (error: unknown) {
-    await checkout.cleanup();
-    throw toError({
-      prefix: `Failed to fetch skill from ${normalizedRepo}`,
-      error,
-    });
-  }
+  });
 }
 
 /**
  * Removes one temporary remote skill snapshot returned by `fetchRemoteSkillSnapshot`.
  */
-export async function cleanupRemoteSkillSnapshot(
+export function cleanupRemoteSkillSnapshot(
   snapshot: RemoteSkillSnapshot,
-): Promise<void> {
-  await snapshot.cleanup();
+): Effect.Effect<void, PlatformError, FileSystem> {
+  return snapshot.cleanup();
 }
 
-export async function replaceManagedSkillDirectory(
-  env: SkillsLockfileEnv,
-  {
-    sourceDir,
-    targetDir,
-  }: {
-    sourceDir: string;
-    targetDir: string;
-  },
-): Promise<void> {
-  const {
-    runtime: { fileSystemLayer },
-  } = env;
-
+export function replaceManagedSkillDirectory({
+  sourceDir,
+  targetDir,
+}: {
+  sourceDir: string;
+  targetDir: string;
+}): Effect.Effect<void, PlatformError, FileSystem> {
   const targetParent = path.dirname(targetDir);
   const targetBase = path.basename(targetDir);
 
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
 
-      yield* fs.makeDirectory(targetParent, { recursive: true });
+    yield* fs.makeDirectory(targetParent, { recursive: true });
 
-      const stagingRoot = yield* fs.makeTempDirectory({
-        directory: targetParent,
-        prefix: `${targetBase}.`,
-      });
-      const stagedDir = path.join(stagingRoot, targetBase);
+    const stagingRoot = yield* fs.makeTempDirectory({
+      directory: targetParent,
+      prefix: `${targetBase}.`,
+    });
+    const stagedDir = path.join(stagingRoot, targetBase);
 
-      yield* Effect.gen(function* () {
-        yield* fs.copy(sourceDir, stagedDir);
-        yield* fs.remove(targetDir, { recursive: true, force: true });
-        yield* fs.rename(stagedDir, targetDir);
-      }).pipe(
-        Effect.ensuring(
-          fs
-            .remove(stagingRoot, { recursive: true, force: true })
-            .pipe(Effect.catchAll(() => Effect.void)),
-        ),
-      );
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+    yield* Effect.gen(function* () {
+      yield* fs.copy(sourceDir, stagedDir);
+      yield* fs.remove(targetDir, { recursive: true, force: true });
+      yield* fs.rename(stagedDir, targetDir);
+    }).pipe(
+      Effect.ensuring(
+        fs
+          .remove(stagingRoot, { recursive: true, force: true })
+          .pipe(Effect.catchAll(() => Effect.void)),
+      ),
+    );
+  });
 }
 
-export async function removeManagedSkillDirectory(
+/**
+ * Remove the on-disk directory for a managed skill via Effect {@link FileSystem}.
+ *
+ * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
+ */
+export function removeManagedSkillDirectory(
   env: SkillsLockfileEnv,
   { skillName }: { skillName: string },
-): Promise<void> {
-  const {
-    context,
-    runtime: { fileSystemLayer },
-  } = env;
+): Effect.Effect<void, PlatformError, FileSystem> {
+  const { context } = env;
   const directoryPath = getManagedSkillDirectory(context, { skillName });
 
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      yield* fs.remove(directoryPath, { recursive: true, force: true });
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    yield* fs.remove(directoryPath, { recursive: true, force: true });
+  });
 }
 
 export function formatManagedSkillSummary(skill: ManagedSkill): string {
@@ -800,27 +826,9 @@ function listRelativeFilePaths(
       }
     }
 
-    return relativeFilePaths.sort((left, right) => left.localeCompare(right));
-  });
-}
-
-function computeDirectoryHashesEffect(
-  directoryPath: string,
-): Effect.Effect<ManagedSkillFiles, PlatformError, FileSystem> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    const relativeFilePaths = yield* listRelativeFilePaths(directoryPath);
-    const hashEntries: [string, string][] = [];
-
-    for (const relativeFilePath of relativeFilePaths) {
-      const fullPath = path.join(directoryPath, relativeFilePath);
-      const fileBytes = yield* fs.readFile(fullPath);
-      const digest = createHash('sha256').update(fileBytes).digest('hex');
-
-      hashEntries.push([toPortableRelativePath(relativeFilePath), digest]);
-    }
-
-    return Object.fromEntries(hashEntries);
+    return [...relativeFilePaths].sort((left, right) =>
+      left.localeCompare(right),
+    );
   });
 }
 
@@ -896,45 +904,40 @@ function resolveRemoteSkillDirectory({
   return candidateDir;
 }
 
-async function validateRemoteSkillDirectory(
-  env: SkillsLockfileEnv,
-  input: {
-    repo: string;
-    skillPath: string;
-    sourceDir: string;
-  },
-): Promise<void> {
-  const {
-    runtime: { fileSystemLayer },
-  } = env;
+function validateRemoteSkillDirectoryEffect(input: {
+  repo: string;
+  skillPath: string;
+  sourceDir: string;
+}): Effect.Effect<
+  void,
+  RemoteSkillDirectoryInvalid | PlatformError,
+  FileSystem
+> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
 
-  return Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
+    if (!(yield* fs.exists(input.sourceDir))) {
+      return yield* new RemoteSkillDirectoryInvalid({
+        message: `Skill path does not exist in ${input.repo}: ${input.skillPath}`,
+      });
+    }
 
-      if (!(yield* fs.exists(input.sourceDir))) {
-        throw new Error(
-          `Skill path does not exist in ${input.repo}: ${input.skillPath}`,
-        );
-      }
+    const info = yield* fs.stat(input.sourceDir);
 
-      const info = yield* fs.stat(input.sourceDir);
+    if (info.type !== 'Directory') {
+      return yield* new RemoteSkillDirectoryInvalid({
+        message: `Skill path is not a directory in ${input.repo}: ${input.skillPath}`,
+      });
+    }
 
-      if (info.type !== 'Directory') {
-        throw new Error(
-          `Skill path is not a directory in ${input.repo}: ${input.skillPath}`,
-        );
-      }
+    const skillMarkdownPath = path.join(input.sourceDir, 'SKILL.md');
 
-      const skillMarkdownPath = path.join(input.sourceDir, 'SKILL.md');
-
-      if (!(yield* fs.exists(skillMarkdownPath))) {
-        throw new Error(
-          `Missing SKILL.md in imported skill directory: ${input.skillPath}`,
-        );
-      }
-    }).pipe(Effect.provide(fileSystemLayer)),
-  );
+    if (!(yield* fs.exists(skillMarkdownPath))) {
+      return yield* new RemoteSkillDirectoryInvalid({
+        message: `Missing SKILL.md in imported skill directory: ${input.skillPath}`,
+      });
+    }
+  });
 }
 
 function toError({ prefix, error }: { prefix: string; error: unknown }): Error {

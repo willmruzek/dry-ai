@@ -29,13 +29,13 @@ type SkillsUpdateAllInput = {
 export function skillsUpdateAllEffect(options: {
   env: CommandEnv;
   input: SkillsUpdateAllInput;
-}): Effect.Effect<void, never, never> {
+}) {
   const { env, input } = options;
   const { context, runtime } = env;
   const { force } = input;
 
   return Effect.gen(function* () {
-    let lockfile = yield* Effect.promise(() => loadSkillsLockfile(env));
+    let lockfile = yield* loadSkillsLockfile(env);
 
     if (lockfile.skills.length === 0) {
       yield* Effect.sync(() => {
@@ -51,12 +51,10 @@ export function skillsUpdateAllEffect(options: {
       const targetDir = getManagedSkillDirectory(context, {
         skillName: managedSkill.name,
       });
-      const localEditState = yield* Effect.promise(() =>
-        detectLocalSkillEdits(env, {
-          skillDir: targetDir,
-          storedFiles: managedSkill.files,
-        }),
-      );
+      const localEditState = yield* detectLocalSkillEdits({
+        skillDir: targetDir,
+        storedFiles: managedSkill.files,
+      });
 
       if (localEditState.modified && !force) {
         skippedLines.push(
@@ -65,37 +63,37 @@ export function skillsUpdateAllEffect(options: {
         continue;
       }
 
-      const snapshot = yield* Effect.promise(() =>
-        fetchRemoteSkillSnapshot(env, {
-          ref: managedSkill.ref,
-          repo: managedSkill.repo,
-          skillPath: managedSkill.path,
-        }),
-      );
-
-      yield* Effect.promise(async () => {
-        try {
-          await replaceManagedSkillDirectory(env, {
-            sourceDir: snapshot.sourceDir,
-            targetDir,
-          });
-
-          const installedFiles = await computeDirectoryHashes(env, targetDir);
-
-          const updatedSkill = createUpdatedSkillRecord({
-            commit: snapshot.commit,
-            existingSkill: managedSkill,
-            files: installedFiles,
-            updatedAt: timestampNow(),
-          });
-
-          lockfile = upsertManagedSkill(lockfile, { updatedSkill });
-          updatedLines.push(`- ${formatManagedSkillSummary(updatedSkill)}`);
-          await saveSkillsLockfile(env, { lockfile });
-        } finally {
-          await cleanupRemoteSkillSnapshot(snapshot);
-        }
+      const snapshot = yield* fetchRemoteSkillSnapshot({
+        ref: managedSkill.ref,
+        repo: managedSkill.repo,
+        skillPath: managedSkill.path,
       });
+
+      yield* Effect.gen(function* () {
+        yield* replaceManagedSkillDirectory({
+          sourceDir: snapshot.sourceDir,
+          targetDir,
+        });
+
+        const installedFiles = yield* computeDirectoryHashes(targetDir);
+
+        const updatedSkill = createUpdatedSkillRecord({
+          commit: snapshot.commit,
+          existingSkill: managedSkill,
+          files: installedFiles,
+          updatedAt: timestampNow(),
+        });
+
+        lockfile = upsertManagedSkill(lockfile, { updatedSkill });
+        updatedLines.push(`- ${formatManagedSkillSummary(updatedSkill)}`);
+        yield* saveSkillsLockfile(env, { lockfile });
+      }).pipe(
+        Effect.ensuring(
+          cleanupRemoteSkillSnapshot(snapshot).pipe(
+            Effect.catchAll(() => Effect.void),
+          ),
+        ),
+      );
     }
 
     if (updatedLines.length > 0) {
@@ -131,5 +129,9 @@ export function runSkillsUpdateAllCommand(
   env: CommandEnv,
   input: SkillsUpdateAllInput,
 ): Promise<void> {
-  return Effect.runPromise(skillsUpdateAllEffect({ env, input }));
+  return Effect.runPromise(
+    skillsUpdateAllEffect({ env, input }).pipe(
+      Effect.provide(env.runtime.fileSystemLayer),
+    ),
+  );
 }
