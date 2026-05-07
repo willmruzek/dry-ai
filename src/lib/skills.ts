@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
+import type { PlatformError } from '@effect/platform/Error';
 import { FileSystem } from '@effect/platform/FileSystem';
 import { Data, Effect, Schema } from 'effect';
 import * as ParseResult from 'effect/ParseResult';
-import fs from 'fs-extra';
 import { simpleGit } from 'simple-git';
 
 import type { CommandEnv } from './command-env.js';
@@ -99,13 +99,46 @@ export async function ensureSkillsRoot(env: SkillsLockfileEnv): Promise<void> {
  * @param context - Execution context containing `skillsLockfilePath` and filesystem access used to read/write the lockfile
  */
 export async function ensureSkillsLockfile(
-  context: AgentsContext,
+  env: SkillsLockfileEnv,
 ): Promise<void> {
-  if (await fs.pathExists(context.skillsLockfilePath)) {
-    return;
-  }
+  const {
+    context,
+    runtime: { fileSystemLayer },
+  } = env;
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      if (yield* fs.exists(context.skillsLockfilePath)) {
+        return;
+      }
 
-  await saveSkillsLockfile(context, { lockfile: createEmptySkillsLockfile() });
+      yield* Effect.promise(() => {
+        return saveSkillsLockfile(env, {
+          lockfile: createEmptySkillsLockfile(),
+        });
+      });
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
+}
+
+/**
+ * Returns whether `filePath` exists according to the Effect {@link FileSystem}
+ * service (same layer as lockfile and managed-skill directory I/O).
+ */
+export async function pathExistsInFileSystem(
+  env: Pick<CommandEnv, 'runtime'>,
+  filePath: string,
+): Promise<boolean> {
+  const {
+    runtime: { fileSystemLayer },
+  } = env;
+
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      return yield* fs.exists(filePath);
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
 }
 
 /**
@@ -151,14 +184,25 @@ export async function loadSkillsLockfile(
 }
 
 export async function saveSkillsLockfile(
-  context: AgentsContext,
+  env: SkillsLockfileEnv,
   { lockfile }: { lockfile: SkillsLockfile },
 ): Promise<void> {
+  const {
+    context,
+    runtime: { fileSystemLayer },
+  } = env;
   const normalizedLockfile = sortSkillsLockfile(lockfile);
-  await fs.writeFile(
-    context.skillsLockfilePath,
-    `${JSON.stringify(normalizedLockfile, null, 2)}\n`,
-    'utf8',
+
+  return await Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      yield* fs.writeFile(
+        context.skillsLockfilePath,
+        new TextEncoder().encode(
+          `${JSON.stringify(normalizedLockfile, null, 2)}\n`,
+        ),
+      );
+    }).pipe(Effect.provide(fileSystemLayer)),
   );
 }
 
@@ -378,34 +422,34 @@ export function createUpdatedSkillRecord(input: {
 
 /**
  * Returns a map of relative file path → SHA-256 hash for every file in directoryPath.
+ *
+ * @param env - Must provide {@link CommandEnv.runtime} `fileSystemLayer` for Effect `FileSystem` access.
  */
 export async function computeDirectoryHashes(
+  env: Pick<CommandEnv, 'runtime'>,
   directoryPath: string,
 ): Promise<ManagedSkillFiles> {
-  const relativeFilePaths = await listRelativeFilePaths(directoryPath);
-  const hashEntries = await Promise.all(
-    relativeFilePaths.map(async (relativeFilePath) => {
-      const fileBuffer = await fs.readFile(
-        path.join(directoryPath, relativeFilePath),
-      );
+  const {
+    runtime: { fileSystemLayer },
+  } = env;
 
-      return [
-        toPortableRelativePath(relativeFilePath),
-        createHash('sha256').update(fileBuffer).digest('hex'),
-      ] as const;
-    }),
+  return Effect.runPromise(
+    computeDirectoryHashesEffect(directoryPath).pipe(
+      Effect.provide(fileSystemLayer),
+    ),
   );
-
-  return Object.fromEntries(hashEntries);
 }
 
 /**
  * Detects whether a managed skill directory has local content changes relative to the lockfile snapshot.
  */
-export async function detectLocalSkillEdits(input: {
-  skillDir: string;
-  storedFiles: ManagedSkillFiles | undefined;
-}): Promise<{ changedFiles: string[]; modified: boolean }> {
+export async function detectLocalSkillEdits(
+  env: Pick<CommandEnv, 'runtime'>,
+  input: {
+    skillDir: string;
+    storedFiles: ManagedSkillFiles | undefined;
+  },
+): Promise<{ changedFiles: string[]; modified: boolean }> {
   if (!input.storedFiles) {
     return {
       changedFiles: [],
@@ -413,14 +457,14 @@ export async function detectLocalSkillEdits(input: {
     };
   }
 
-  if (!(await fs.pathExists(input.skillDir))) {
+  if (!(await pathExistsInFileSystem(env, input.skillDir))) {
     return {
       changedFiles: [],
       modified: false,
     };
   }
 
-  const currentFiles = await computeDirectoryHashes(input.skillDir);
+  const currentFiles = await computeDirectoryHashes(env, input.skillDir);
   const changedFiles = [
     ...new Set([
       ...Object.keys(input.storedFiles),
@@ -443,41 +487,80 @@ export async function detectLocalSkillEdits(input: {
 /**
  * Clones a remote repository into a temporary checkout and resolves the fetched commit.
  */
-export async function cloneRemoteRepo(input: {
-  ref: string | undefined;
-  repo: string;
-}): Promise<RemoteRepoCheckout> {
-  const normalizedRepo = normalizeRemoteRepo(input.repo);
-  const checkoutDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agents-skill.'));
+export async function cloneRemoteRepo(
+  env: SkillsLockfileEnv,
+  input: {
+    ref: string | undefined;
+    repo: string;
+  },
+): Promise<RemoteRepoCheckout> {
+  const {
+    runtime: { fileSystemLayer },
+  } = env;
 
-  try {
-    const git = simpleGit(checkoutDir);
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const normalizedRepo = normalizeRemoteRepo(input.repo);
 
-    await git.init();
-    await git.addRemote('origin', normalizedRepo);
+      const fs = yield* FileSystem;
+      const checkoutDir = yield* fs.makeTempDirectory({
+        prefix: path.join(os.tmpdir(), 'agents-skill.'),
+      });
 
-    if (input.ref) {
-      await git.fetch('origin', input.ref, ['--depth', '1']);
-    } else {
-      await git.fetch('origin', 'HEAD', ['--depth', '1']);
-    }
+      const git = simpleGit(checkoutDir);
 
-    await git.checkout(['--quiet', 'FETCH_HEAD']);
+      const cloneWork = Effect.gen(function* () {
+        yield* Effect.promise(() => {
+          return git.init();
+        });
 
-    return {
-      checkoutDir,
-      cleanup: async () => {
-        await fs.remove(checkoutDir);
-      },
-      commit: await git.revparse(['HEAD']),
-    };
-  } catch (error: unknown) {
-    await fs.remove(checkoutDir);
-    throw toError({
-      prefix: `Failed to fetch repository from ${normalizedRepo}`,
-      error,
-    });
-  }
+        yield* Effect.promise(() => {
+          return git.addRemote('origin', normalizedRepo);
+        });
+
+        if (input.ref) {
+          const ref = input.ref;
+
+          yield* Effect.promise(() => {
+            return git.fetch('origin', ref, ['--depth', '1']);
+          });
+        } else {
+          yield* Effect.promise(() => {
+            return git.fetch('origin', 'HEAD', ['--depth', '1']);
+          });
+        }
+
+        yield* Effect.promise(() => {
+          return git.checkout(['--quiet', 'FETCH_HEAD']);
+        });
+
+        return {
+          checkoutDir,
+          cleanup: () =>
+            Effect.runPromise(
+              fs.remove(checkoutDir).pipe(Effect.provide(fileSystemLayer)),
+            ),
+          commit: yield* Effect.promise(() => {
+            return git.revparse(['HEAD']);
+          }),
+        };
+      });
+
+      return yield* cloneWork.pipe(
+        Effect.catchAll((error) => {
+          return Effect.gen(function* () {
+            yield* fs.remove(checkoutDir).pipe(Effect.ignoreLogged); // or mapError
+            return yield* Effect.fail(
+              toError({
+                prefix: `Failed to fetch repository from ${normalizedRepo}`,
+                error,
+              }),
+            );
+          });
+        }),
+      );
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
 }
 
 /**
@@ -492,11 +575,14 @@ export async function cleanupRemoteRepoCheckout(
 /**
  * Returns the source directory path for a skill at its default location (`skills/<skillName>`), confirming the directory and SKILL.md exist.
  */
-export async function resolveSkillSourceDir(input: {
-  checkoutDir: string;
-  repo: string;
-  skillName: string;
-}): Promise<string> {
+export async function resolveSkillSourceDir(
+  env: SkillsLockfileEnv,
+  input: {
+    checkoutDir: string;
+    repo: string;
+    skillName: string;
+  },
+): Promise<string> {
   const skillPath = resolveManagedSkillImportPath({
     skillName: input.skillName,
   });
@@ -505,10 +591,10 @@ export async function resolveSkillSourceDir(input: {
     skillPath,
   });
 
-  await validateRemoteSkillDirectory({
-    sourceDir,
-    skillPath,
+  await validateRemoteSkillDirectory(env, {
     repo: normalizeRemoteRepo(input.repo),
+    skillPath,
+    sourceDir,
   });
 
   return sourceDir;
@@ -517,11 +603,14 @@ export async function resolveSkillSourceDir(input: {
 /**
  * Returns the source directory path for a skill at an explicit repository-relative path, confirming the directory and SKILL.md exist.
  */
-export async function resolveSkillSourceDirByPath(input: {
-  checkoutDir: string;
-  repo: string;
-  skillPath: string;
-}): Promise<string> {
+export async function resolveSkillSourceDirByPath(
+  env: SkillsLockfileEnv,
+  input: {
+    checkoutDir: string;
+    repo: string;
+    skillPath: string;
+  },
+): Promise<string> {
   const normalizedSkillPath = normalizeImportedSkillPath(input.skillPath);
 
   if (normalizedSkillPath === undefined) {
@@ -533,10 +622,10 @@ export async function resolveSkillSourceDirByPath(input: {
     skillPath: normalizedSkillPath,
   });
 
-  await validateRemoteSkillDirectory({
-    sourceDir,
-    skillPath: normalizedSkillPath,
+  await validateRemoteSkillDirectory(env, {
     repo: normalizeRemoteRepo(input.repo),
+    skillPath: normalizedSkillPath,
+    sourceDir,
   });
 
   return sourceDir;
@@ -545,13 +634,16 @@ export async function resolveSkillSourceDirByPath(input: {
 /**
  * Fetches a validated remote skill directory snapshot for a specific repository path.
  */
-export async function fetchRemoteSkillSnapshot(input: {
-  ref: string | undefined;
-  repo: string;
-  skillPath: string;
-}): Promise<RemoteSkillSnapshot> {
+export async function fetchRemoteSkillSnapshot(
+  env: SkillsLockfileEnv,
+  input: {
+    ref: string | undefined;
+    repo: string;
+    skillPath: string;
+  },
+): Promise<RemoteSkillSnapshot> {
   const normalizedRepo = normalizeRemoteRepo(input.repo);
-  const checkout = await cloneRemoteRepo({
+  const checkout = await cloneRemoteRepo(env, {
     ref: input.ref,
     repo: normalizedRepo,
   });
@@ -562,10 +654,10 @@ export async function fetchRemoteSkillSnapshot(input: {
       skillPath: input.skillPath,
     });
 
-    await validateRemoteSkillDirectory({
-      sourceDir,
-      skillPath: input.skillPath,
+    await validateRemoteSkillDirectory(env, {
       repo: normalizedRepo,
+      skillPath: input.skillPath,
+      sourceDir,
     });
 
     return {
@@ -591,33 +683,66 @@ export async function cleanupRemoteSkillSnapshot(
   await snapshot.cleanup();
 }
 
-export async function replaceManagedSkillDirectory({
-  targetDir,
-  sourceDir,
-}: {
-  targetDir: string;
-  sourceDir: string;
-}): Promise<void> {
-  await fs.ensureDir(path.dirname(targetDir));
-  const stagingRoot = await fs.mkdtemp(
-    path.join(path.dirname(targetDir), `${path.basename(targetDir)}.`),
-  );
-  const stagedDir = path.join(stagingRoot, path.basename(targetDir));
+export async function replaceManagedSkillDirectory(
+  env: SkillsLockfileEnv,
+  {
+    sourceDir,
+    targetDir,
+  }: {
+    sourceDir: string;
+    targetDir: string;
+  },
+): Promise<void> {
+  const {
+    runtime: { fileSystemLayer },
+  } = env;
 
-  try {
-    await fs.copy(sourceDir, stagedDir);
-    await fs.remove(targetDir);
-    await fs.move(stagedDir, targetDir, { overwrite: true });
-  } finally {
-    await fs.remove(stagingRoot);
-  }
+  const targetParent = path.dirname(targetDir);
+  const targetBase = path.basename(targetDir);
+
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+
+      yield* fs.makeDirectory(targetParent, { recursive: true });
+
+      const stagingRoot = yield* fs.makeTempDirectory({
+        directory: targetParent,
+        prefix: `${targetBase}.`,
+      });
+      const stagedDir = path.join(stagingRoot, targetBase);
+
+      yield* Effect.gen(function* () {
+        yield* fs.copy(sourceDir, stagedDir);
+        yield* fs.remove(targetDir, { recursive: true, force: true });
+        yield* fs.rename(stagedDir, targetDir);
+      }).pipe(
+        Effect.ensuring(
+          fs
+            .remove(stagingRoot, { recursive: true, force: true })
+            .pipe(Effect.catchAll(() => Effect.void)),
+        ),
+      );
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
 }
 
 export async function removeManagedSkillDirectory(
-  context: AgentsContext,
+  env: SkillsLockfileEnv,
   { skillName }: { skillName: string },
 ): Promise<void> {
-  await fs.remove(getManagedSkillDirectory(context, { skillName }));
+  const {
+    context,
+    runtime: { fileSystemLayer },
+  } = env;
+  const directoryPath = getManagedSkillDirectory(context, { skillName });
+
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
+      yield* fs.remove(directoryPath, { recursive: true, force: true });
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
 }
 
 export function formatManagedSkillSummary(skill: ManagedSkill): string {
@@ -636,31 +761,55 @@ export function timestampNow(): string {
 /**
  * Recursively lists all file paths inside a directory relative to that directory root.
  */
-async function listRelativeFilePaths(directoryPath: string): Promise<string[]> {
-  const directoryEntries = await fs.readdir(directoryPath, {
-    withFileTypes: true,
-  });
-  const relativeFilePaths: string[] = [];
+function listRelativeFilePaths(
+  directoryPath: string,
+): Effect.Effect<string[], PlatformError, FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    const names = yield* fs.readDirectory(directoryPath);
+    const relativeFilePaths: string[] = [];
 
-  for (const directoryEntry of directoryEntries) {
-    const entryPath = path.join(directoryPath, directoryEntry.name);
+    for (const name of names) {
+      const entryPath = path.join(directoryPath, name);
+      const info = yield* fs.stat(entryPath);
 
-    if (directoryEntry.isDirectory()) {
-      const nestedFilePaths = await listRelativeFilePaths(entryPath);
+      if (info.type === 'Directory') {
+        const nestedFilePaths = yield* listRelativeFilePaths(entryPath);
 
-      for (const nestedFilePath of nestedFilePaths) {
-        relativeFilePaths.push(path.join(directoryEntry.name, nestedFilePath));
+        for (const nestedFilePath of nestedFilePaths) {
+          relativeFilePaths.push(path.join(name, nestedFilePath));
+        }
+
+        continue;
       }
 
-      continue;
+      if (info.type === 'File') {
+        relativeFilePaths.push(name);
+      }
     }
 
-    if (directoryEntry.isFile()) {
-      relativeFilePaths.push(directoryEntry.name);
-    }
-  }
+    return relativeFilePaths.sort((left, right) => left.localeCompare(right));
+  });
+}
 
-  return relativeFilePaths.sort((left, right) => left.localeCompare(right));
+function computeDirectoryHashesEffect(
+  directoryPath: string,
+): Effect.Effect<ManagedSkillFiles, PlatformError, FileSystem> {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem;
+    const relativeFilePaths = yield* listRelativeFilePaths(directoryPath);
+    const hashEntries: [string, string][] = [];
+
+    for (const relativeFilePath of relativeFilePaths) {
+      const fullPath = path.join(directoryPath, relativeFilePath);
+      const fileBytes = yield* fs.readFile(fullPath);
+      const digest = createHash('sha256').update(fileBytes).digest('hex');
+
+      hashEntries.push([toPortableRelativePath(relativeFilePath), digest]);
+    }
+
+    return Object.fromEntries(hashEntries);
+  });
 }
 
 /**
@@ -735,32 +884,45 @@ function resolveRemoteSkillDirectory({
   return candidateDir;
 }
 
-async function validateRemoteSkillDirectory({
-  sourceDir,
-  skillPath,
-  repo,
-}: {
-  sourceDir: string;
-  skillPath: string;
-  repo: string;
-}): Promise<void> {
-  if (!(await fs.pathExists(sourceDir))) {
-    throw new Error(`Skill path does not exist in ${repo}: ${skillPath}`);
-  }
+async function validateRemoteSkillDirectory(
+  env: SkillsLockfileEnv,
+  input: {
+    repo: string;
+    skillPath: string;
+    sourceDir: string;
+  },
+): Promise<void> {
+  const {
+    runtime: { fileSystemLayer },
+  } = env;
 
-  const stats = await fs.stat(sourceDir);
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem;
 
-  if (!stats.isDirectory()) {
-    throw new Error(`Skill path is not a directory in ${repo}: ${skillPath}`);
-  }
+      if (!(yield* fs.exists(input.sourceDir))) {
+        throw new Error(
+          `Skill path does not exist in ${input.repo}: ${input.skillPath}`,
+        );
+      }
 
-  const skillMarkdownPath = path.join(sourceDir, 'SKILL.md');
+      const info = yield* fs.stat(input.sourceDir);
 
-  if (!(await fs.pathExists(skillMarkdownPath))) {
-    throw new Error(
-      `Missing SKILL.md in imported skill directory: ${skillPath}`,
-    );
-  }
+      if (info.type !== 'Directory') {
+        throw new Error(
+          `Skill path is not a directory in ${input.repo}: ${input.skillPath}`,
+        );
+      }
+
+      const skillMarkdownPath = path.join(input.sourceDir, 'SKILL.md');
+
+      if (!(yield* fs.exists(skillMarkdownPath))) {
+        throw new Error(
+          `Missing SKILL.md in imported skill directory: ${input.skillPath}`,
+        );
+      }
+    }).pipe(Effect.provide(fileSystemLayer)),
+  );
 }
 
 function toError({ prefix, error }: { prefix: string; error: unknown }): Error {

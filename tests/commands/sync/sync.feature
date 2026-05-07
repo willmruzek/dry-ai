@@ -4,7 +4,7 @@ Feature: dry-ai sync
   # So that Copilot and Cursor outputs under the output root reflect the configuration sources
 
   # Background:
-  #   Given the dry-ai sync Vitest suite with mocked fs-extra, glob, and os.homedir
+  #   Given the dry-ai sync Vitest suite with an in-memory Effect FileSystem mock, glob, and os.homedir
   #   And stdout and stderr are captured for assertions
   #   And a virtual configuration root with commands/, rules/, and skills/ directories
   #   And a virtual home directory is used as the default agent output root

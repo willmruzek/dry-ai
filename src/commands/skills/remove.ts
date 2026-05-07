@@ -17,7 +17,7 @@ export async function runSkillsRemoveCommand(
     skillName: string;
   },
 ): Promise<void> {
-  const { context, runtime } = env;
+  const { runtime } = env;
   const { skillName } = input;
 
   const lockfile = await loadSkillsLockfile(env);
@@ -27,8 +27,8 @@ export async function runSkillsRemoveCommand(
     throw new Error(`Managed skill not found: ${skillName}`);
   }
 
-  await removeManagedSkillDirectory(context, { skillName });
-  await saveSkillsLockfile(context, {
+  await removeManagedSkillDirectory(env, { skillName });
+  await saveSkillsLockfile(env, {
     lockfile: removeManagedSkill(lockfile, { name: skillName }),
   });
 

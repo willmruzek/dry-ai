@@ -1,7 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
@@ -20,6 +19,7 @@ import {
   createMockedGit,
   createTestEnv,
   hashFileSet,
+  isAgentsSkillCloneCheckoutDir,
   readMockTextFile,
   seedLocalSkillDirectory,
   seedRemoteSkillCheckout,
@@ -54,22 +54,6 @@ const TARGET_SKILL = {
   },
 } as const;
 
-vi.mock('fs-extra', () => ({
-  default: {
-    copy: vi.fn(),
-    emptyDir: vi.fn(),
-    ensureDir: vi.fn(),
-    mkdtemp: vi.fn(),
-    move: vi.fn(),
-    pathExists: vi.fn(),
-    readFile: vi.fn(),
-    readdir: vi.fn(),
-    remove: vi.fn(),
-    stat: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
-
 vi.mock('simple-git', () => ({
   simpleGit: vi.fn(),
 }));
@@ -81,7 +65,6 @@ vi.mock('node:os', () => ({
   },
 }));
 
-const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 const mockedGit = createMockedGit();
 
@@ -99,16 +82,16 @@ describe('dry-ai skills update', () => {
    *     `modified: false` and the update runs end-to-end (no `--force`).
    */
   function arrangeHappyPathUpdate(): void {
-    seedLocalSkillDirectory(
-      mockFileSystem,
-      DEFAULT_SKILLS_SOURCE_ROOT,
-      TARGET_SKILL.name,
-      TARGET_SKILL.localFiles,
-    );
-    storeMockTextFile(
-      mockFileSystem,
-      DEFAULT_SKILLS_LOCKFILE_PATH,
-      JSON.stringify({
+    seedLocalSkillDirectory({
+      handle: mockFileSystem,
+      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+      skillName: TARGET_SKILL.name,
+      files: TARGET_SKILL.localFiles,
+    });
+    storeMockTextFile({
+      handle: mockFileSystem,
+      filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+      content: JSON.stringify({
         version: 1,
         skills: [
           {
@@ -122,33 +105,33 @@ describe('dry-ai skills update', () => {
           },
         ],
       }),
-    );
+    });
   }
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
 
-    configureMockFileSystem(mockFileSystem, mockedFs, {
+    configureMockFileSystem({
+      handle: mockFileSystem,
       lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-      onMkdtemp: (state, tempDir, prefix) => {
-        // Two distinct `mkdtemp` callsites fire during update:
-        //   1. `cloneRemoteRepo` → prefix basename `agents-skill.` (seed it).
-        //   2. `replaceManagedSkillDirectory` → prefix basename
-        //      `<skillName>.` under the skills source root (leave empty).
-        if (path.basename(prefix).startsWith('agents-skill.')) {
-          seedRemoteSkillCheckout(
-            state,
-            tempDir,
-            TARGET_SKILL.path,
-            TARGET_SKILL.remoteFiles,
-          );
+    });
+    configureMockGitClient({
+      mockedGit,
+      fetchedCommit: FETCHED_COMMIT,
+      checkoutImplementation: async (repoRoot) => {
+        if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+          return;
         }
+        seedRemoteSkillCheckout({
+          handle: mockFileSystem,
+          checkoutDir: repoRoot,
+          skillPath: TARGET_SKILL.path,
+          files: TARGET_SKILL.remoteFiles,
+        });
       },
     });
-    configureMockGitClient(mockedGit, {
-      fetchedCommit: FETCHED_COMMIT,
-    });
-    configureMockOs(mockedOs, {
+    configureMockOs({
+      mockedOs: mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
@@ -181,14 +164,14 @@ describe('dry-ai skills update', () => {
           TARGET_SKILL.remoteFiles,
         )) {
           expect(
-            readMockTextFile(
-              mockFileSystem,
-              path.join(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
                 DEFAULT_SKILLS_SOURCE_ROOT,
                 TARGET_SKILL.name,
                 relativeFilePath,
               ),
-            ),
+            }),
           ).toBe(content);
         }
       });
@@ -238,7 +221,10 @@ describe('dry-ai skills update', () => {
         // hashes, new `updatedAt`) while `importedAt` is preserved from
         // the original import.
         const savedLockfile = JSON.parse(
-          readMockTextFile(mockFileSystem, DEFAULT_SKILLS_LOCKFILE_PATH),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          }),
         ) as unknown;
         expect(savedLockfile).toEqual({
           version: 1,
@@ -322,16 +308,16 @@ describe('dry-ai skills update', () => {
             '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
         };
 
-        seedLocalSkillDirectory(
-          mockFileSystem,
-          DEFAULT_SKILLS_SOURCE_ROOT,
-          TARGET_SKILL.name,
-          onDiskFiles,
-        );
-        storeMockTextFile(
-          mockFileSystem,
-          DEFAULT_SKILLS_LOCKFILE_PATH,
-          JSON.stringify({
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: TARGET_SKILL.name,
+          files: onDiskFiles,
+        });
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
             version: 1,
             skills: [
               {
@@ -345,7 +331,7 @@ describe('dry-ai skills update', () => {
               },
             ],
           }),
-        );
+        });
 
         return { onDiskFiles };
       }
@@ -367,14 +353,14 @@ describe('dry-ai skills update', () => {
         // modify local content.
         for (const [relativeFilePath, content] of Object.entries(onDiskFiles)) {
           expect(
-            readMockTextFile(
-              mockFileSystem,
-              path.join(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
                 DEFAULT_SKILLS_SOURCE_ROOT,
                 TARGET_SKILL.name,
                 relativeFilePath,
               ),
-            ),
+            }),
           ).toBe(content);
         }
 

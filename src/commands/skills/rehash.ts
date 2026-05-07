@@ -1,5 +1,3 @@
-import fs from 'fs-extra';
-
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
   computeDirectoryHashes,
@@ -8,6 +6,7 @@ import {
   formatManagedSkillSummary,
   getManagedSkillDirectory,
   loadSkillsLockfile,
+  pathExistsInFileSystem,
   saveSkillsLockfile,
   timestampNow,
   upsertManagedSkill,
@@ -39,11 +38,11 @@ export async function runSkillsRehashCommand(
 
   const targetDir = getManagedSkillDirectory(context, { skillName });
 
-  if (!(await fs.pathExists(targetDir))) {
+  if (!(await pathExistsInFileSystem(env, targetDir))) {
     throw new Error(`Managed skill directory not found: ${targetDir}`);
   }
 
-  const installedFiles = await computeDirectoryHashes(targetDir);
+  const installedFiles = await computeDirectoryHashes(env, targetDir);
   const updatedSkill = createUpdatedSkillRecord({
     commit: managedSkill.commit,
     existingSkill: managedSkill,
@@ -51,7 +50,7 @@ export async function runSkillsRehashCommand(
     updatedAt: timestampNow(),
   });
 
-  await saveSkillsLockfile(context, {
+  await saveSkillsLockfile(env, {
     lockfile: upsertManagedSkill(lockfile, { updatedSkill }),
   });
 

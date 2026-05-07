@@ -1,5 +1,3 @@
-import fs from 'fs-extra';
-
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
   cleanupRemoteRepoCheckout,
@@ -15,6 +13,7 @@ import {
   loadSkillsLockfile,
   normalizeImportedSkillPath,
   normalizeRemoteRepo,
+  pathExistsInFileSystem,
   replaceManagedSkillDirectory,
   resolveManagedSkillImportPath,
   resolveManagedSkillImportPathFromBase,
@@ -123,10 +122,10 @@ export async function runSkillsAddCommand(
   }
 
   await ensureSkillsRoot(env);
-  await ensureSkillsLockfile(context);
+  await ensureSkillsLockfile(env);
 
   let lockfile = await loadSkillsLockfile(env);
-  const checkout = await cloneRemoteRepo({
+  const checkout = await cloneRemoteRepo(env, {
     ref: input.ref,
     repo,
   });
@@ -155,22 +154,22 @@ export async function runSkillsAddCommand(
 
       const targetDir = getManagedSkillDirectory(context, { skillName });
 
-      if (await fs.pathExists(targetDir)) {
+      if (await pathExistsInFileSystem(env, targetDir)) {
         throw new Error(`A local skill directory already exists: ${targetDir}`);
       }
 
-      const sourceDir = await resolveSkillSourceDirByPath({
+      const sourceDir = await resolveSkillSourceDirByPath(env, {
         checkoutDir: checkout.checkoutDir,
         repo,
         skillPath: importedSkillPath,
       });
 
-      await replaceManagedSkillDirectory({
+      await replaceManagedSkillDirectory(env, {
         targetDir,
         sourceDir,
       });
 
-      const installedFiles = await computeDirectoryHashes(targetDir);
+      const installedFiles = await computeDirectoryHashes(env, targetDir);
 
       const importedSkill = createImportedSkillRecord({
         commit: checkout.commit,
@@ -185,7 +184,7 @@ export async function runSkillsAddCommand(
       lockfile = upsertManagedSkill(lockfile, {
         updatedSkill: importedSkill,
       });
-      await saveSkillsLockfile(context, { lockfile });
+      await saveSkillsLockfile(env, { lockfile });
       importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
     }
   } finally {

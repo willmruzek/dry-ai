@@ -1,13 +1,13 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import fsExtra from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
+  DEFAULT_SKILLS_LOCKFILE_PATH,
   type MockFileSystemState,
   SAMPLE_IMPORTED_AT,
   type TestEnv,
@@ -19,6 +19,7 @@ import {
   createMockedGit,
   createTestEnv as createBaseTestEnv,
   hashFileSet,
+  isAgentsSkillCloneCheckoutDir,
   mockPathExists,
   readMockTextFile,
   seedRemoteSkillCheckout,
@@ -39,22 +40,6 @@ const REMOTE_SKILL_FILES = {
   'rules.md': 'Check edge cases.\n',
 } as const;
 
-vi.mock('fs-extra', () => ({
-  default: {
-    copy: vi.fn(),
-    emptyDir: vi.fn(),
-    ensureDir: vi.fn(),
-    mkdtemp: vi.fn(),
-    move: vi.fn(),
-    pathExists: vi.fn(),
-    readFile: vi.fn(),
-    readdir: vi.fn(),
-    remove: vi.fn(),
-    stat: vi.fn(),
-    writeFile: vi.fn(),
-  },
-}));
-
 vi.mock('simple-git', () => ({
   simpleGit: vi.fn(),
 }));
@@ -70,7 +55,6 @@ vi.mock('node:os', () => ({
 // types each method as `MockedFunction<typeof fs.method>`, so
 // `.mockResolvedValue` / `.mockReturnValue` calls are checked against the real
 // module signatures without any explicit casts.
-const mockedFs = vi.mocked(fsExtra);
 const mockedOs = vi.mocked(os);
 
 // `mockedGit` stubs the subset of simple-git's chain used by `cloneRemoteRepo`.
@@ -102,23 +86,27 @@ describe('dry-ai skills add', () => {
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
 
-    configureMockFileSystem(mockFileSystem, mockedFs, {
+    configureMockFileSystem({
+      handle: mockFileSystem,
       lockfilePath: SKILLS_LOCKFILE_PATH,
-      onMkdtemp: (state, tempDir, prefix) => {
-        if (path.basename(prefix).startsWith('agents-skill.')) {
-          seedRemoteSkillCheckout(
-            state,
-            tempDir,
-            MANAGED_SKILL_PATH,
-            REMOTE_SKILL_FILES,
-          );
+    });
+    configureMockGitClient({
+      mockedGit,
+      fetchedCommit: FETCHED_COMMIT,
+      checkoutImplementation: async (repoRoot) => {
+        if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+          return;
         }
+        seedRemoteSkillCheckout({
+          handle: mockFileSystem,
+          checkoutDir: repoRoot,
+          skillPath: MANAGED_SKILL_PATH,
+          files: REMOTE_SKILL_FILES,
+        });
       },
     });
-    configureMockGitClient(mockedGit, {
-      fetchedCommit: FETCHED_COMMIT,
-    });
-    configureMockOs(mockedOs, {
+    configureMockOs({
+      mockedOs: mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
@@ -185,7 +173,10 @@ describe('dry-ai skills add', () => {
 
         // Assert: lockfile written twice — once to initialize, once with the added skill
         const savedLockfile = JSON.parse(
-          readMockTextFile(mockFileSystem, defaultSkillsLockfilePath),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: defaultSkillsLockfilePath,
+          }),
         ) as unknown;
         expect(savedLockfile).toEqual({
           version: 1,
@@ -204,22 +195,22 @@ describe('dry-ai skills add', () => {
 
         // Assert: skill files copied into the config source root
         expect(
-          readMockTextFile(
-            mockFileSystem,
-            path.join(targetSkillDir, 'SKILL.md'),
-          ),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(targetSkillDir, 'SKILL.md'),
+          }),
         ).toBe(REMOTE_SKILL_FILES['SKILL.md']);
         expect(
-          readMockTextFile(
-            mockFileSystem,
-            path.join(targetSkillDir, 'guides', 'checklist.md'),
-          ),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(targetSkillDir, 'guides', 'checklist.md'),
+          }),
         ).toBe(REMOTE_SKILL_FILES['guides/checklist.md']);
         expect(
-          readMockTextFile(
-            mockFileSystem,
-            path.join(targetSkillDir, 'rules.md'),
-          ),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(targetSkillDir, 'rules.md'),
+          }),
         ).toBe(REMOTE_SKILL_FILES['rules.md']);
 
         // Assert: both temporary directories (checkout and staging) cleaned up after import
@@ -231,8 +222,18 @@ describe('dry-ai skills add', () => {
           throw new Error('Expected exactly two temporary directories.');
         }
 
-        expect(mockPathExists(mockFileSystem, checkoutDirectory)).toBe(false);
-        expect(mockPathExists(mockFileSystem, stagingDirectory)).toBe(false);
+        expect(
+          mockPathExists({
+            handle: mockFileSystem,
+            targetPath: checkoutDirectory,
+          }),
+        ).toBe(false);
+        expect(
+          mockPathExists({
+            handle: mockFileSystem,
+            targetPath: stagingDirectory,
+          }),
+        ).toBe(false);
       });
     });
 
@@ -275,35 +276,39 @@ describe('dry-ai skills add', () => {
 
     describe('multiple skills', () => {
       it('imports multiple skills in one invocation and writes the lockfile once per skill', async () => {
-        // Arrange: seed two skills into the same remote checkout. Re-call
-        // `configureMockFileSystem` so `mockFileSystem.lockfileWrites` tracks
-        // writes to the *default* config root's lockfile path (the shared
-        // `beforeEach` tracks a different path used by other tests).
+        // Arrange: seed two skills into the same remote checkout. Use a fresh
+        // mock FS so lockfile tracking targets DEFAULT_SKILLS_LOCKFILE_PATH
+        // (the shared `beforeEach` tracks SKILLS_LOCKFILE_PATH under CONFIG_ROOT).
         const SECOND_SKILL_NAME = 'note-taker';
         const SECOND_SKILL_PATH = 'skills/note-taker';
         const SECOND_SKILL_FILES = {
           'SKILL.md': '---\nname: note-taker\n---\n\n# Note Taker\n',
         } as const;
 
-        configureMockFileSystem(mockFileSystem, mockedFs, {
-          lockfilePath: path.join(DEFAULT_CONFIG_ROOT, 'skills.lock.json'),
-          onMkdtemp: (state, tempDir, prefix) => {
-            if (!path.basename(prefix).startsWith('agents-skill.')) {
+        mockFileSystem = createMockFileSystemState();
+        configureMockFileSystem({
+          handle: mockFileSystem,
+          lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+        });
+        configureMockGitClient({
+          mockedGit,
+          fetchedCommit: FETCHED_COMMIT,
+          checkoutImplementation: async (repoRoot) => {
+            if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
               return;
             }
-
-            seedRemoteSkillCheckout(
-              state,
-              tempDir,
-              MANAGED_SKILL_PATH,
-              REMOTE_SKILL_FILES,
-            );
-            seedRemoteSkillCheckout(
-              state,
-              tempDir,
-              SECOND_SKILL_PATH,
-              SECOND_SKILL_FILES,
-            );
+            seedRemoteSkillCheckout({
+              handle: mockFileSystem,
+              checkoutDir: repoRoot,
+              skillPath: MANAGED_SKILL_PATH,
+              files: REMOTE_SKILL_FILES,
+            });
+            seedRemoteSkillCheckout({
+              handle: mockFileSystem,
+              checkoutDir: repoRoot,
+              skillPath: SECOND_SKILL_PATH,
+              files: SECOND_SKILL_FILES,
+            });
           },
         });
 
@@ -367,16 +372,24 @@ describe('dry-ai skills add', () => {
         // source root, proving each loop iteration completed its directory
         // replacement.
         expect(
-          readMockTextFile(
-            mockFileSystem,
-            path.join(skillsSourceRoot, MANAGED_SKILL_NAME, 'SKILL.md'),
-          ),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(
+              skillsSourceRoot,
+              MANAGED_SKILL_NAME,
+              'SKILL.md',
+            ),
+          }),
         ).toBe(REMOTE_SKILL_FILES['SKILL.md']);
         expect(
-          readMockTextFile(
-            mockFileSystem,
-            path.join(skillsSourceRoot, SECOND_SKILL_NAME, 'SKILL.md'),
-          ),
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(
+              skillsSourceRoot,
+              SECOND_SKILL_NAME,
+              'SKILL.md',
+            ),
+          }),
         ).toBe(SECOND_SKILL_FILES['SKILL.md']);
       });
 
