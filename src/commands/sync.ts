@@ -1,3 +1,5 @@
+import type { PlatformError } from '@effect/platform/Error';
+import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
 import type { CommandEnv } from '../lib/command-env.js';
@@ -22,7 +24,7 @@ import {
  */
 export function syncEffect(options: {
   env: CommandEnv;
-}): Effect.Effect<void, never, never> {
+}): Effect.Effect<void, Error | PlatformError, FileSystem> {
   const { env } = options;
   const { context, rootOptions, runtime } = env;
   const { targetRoots } = context;
@@ -30,34 +32,30 @@ export function syncEffect(options: {
   return Effect.gen(function* () {
     if (
       rootOptions.configRoot !== undefined &&
-      !(yield* Effect.promise(() =>
-        pathExistsInFileSystem(env, context.inputRoot),
-      ))
+      !(yield* pathExistsInFileSystem(context.inputRoot))
     ) {
-      throw new Error(`Config root does not exist: ${context.inputRoot}`);
+      return yield* Effect.fail(
+        new Error(`Config root does not exist: ${context.inputRoot}`),
+      );
     }
 
-    yield* Effect.promise(() => ensureTargetDirectories(env, targetRoots));
+    yield* ensureTargetDirectories(targetRoots);
 
-    const previousManifest = yield* Effect.promise(() =>
-      loadSyncManifest(env, context.syncManifestPath),
+    const previousManifest = yield* loadSyncManifest(
+      env,
+      context.syncManifestPath,
     );
 
-    const desiredSpecs = yield* Effect.promise(() =>
-      buildDesiredSyncSpecs(env),
-    );
+    const desiredSpecs = yield* buildDesiredSyncSpecs(env);
     const changes = prepareSyncChanges({ previousManifest, desiredSpecs });
-    const result = yield* Effect.promise(() => applySyncChanges(env, changes));
+    const result = yield* applySyncChanges(changes);
 
-    yield* Effect.promise(() =>
-      saveSyncManifest(
-        env,
-        context.syncManifestPath,
-        createSyncManifest([
-          ...collectManifestEntriesFromApplied(result.appliedSpecs),
-          ...changes.preservedEntries,
-        ]),
-      ),
+    yield* saveSyncManifest(
+      context.syncManifestPath,
+      createSyncManifest([
+        ...collectManifestEntriesFromApplied(result.appliedSpecs),
+        ...changes.preservedEntries,
+      ]),
     );
 
     runtime.logInfo(renderSyncReport(result, changes));
@@ -68,5 +66,7 @@ export function syncEffect(options: {
  * Runs the sync command, writing all command, rule, and skill outputs into their agent target directories.
  */
 export async function runSyncCommand(env: CommandEnv): Promise<void> {
-  return Effect.runPromise(syncEffect({ env }));
+  return Effect.runPromise(
+    syncEffect({ env }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
 }

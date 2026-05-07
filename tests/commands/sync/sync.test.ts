@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { runCLI, type CLIOptions } from '../../../src/cli.js';
+import type { SyncAgent } from '../../../src/lib/agents.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
@@ -66,6 +67,15 @@ vi.mock('glob', () => ({
 const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
 
+/**
+ * Exhaustive `Record<SyncAgent, …>`: `satisfies` requires a key for every registry
+ * agent or TypeScript fails at compile time.
+ */
+const e2eOutputTreeTestCoverageByAgent = {
+  copilot: true,
+  cursor: true,
+} satisfies Record<SyncAgent, true>;
+
 let mockFileSystem: MockFileSystemHandle;
 
 function installSyncTestGlobMock(): void {
@@ -89,7 +99,7 @@ function installSyncTestGlobMock(): void {
         }
       }
 
-      return matches.sort();
+      return matches.slice().sort();
     },
   );
 }
@@ -329,10 +339,10 @@ function assertMockSyncManifestMatchesExpectedRows(
     ...o,
     outputPath: path.normalize(o.outputPath),
   }));
-  const sortedExpected = [...normalizedExpected].sort(
-    compareManifestEntryTuples,
-  );
-  const sortedActual = [...actualRows].sort(compareManifestEntryTuples);
+  const sortedExpected = normalizedExpected
+    .slice()
+    .sort(compareManifestEntryTuples);
+  const sortedActual = actualRows.slice().sort(compareManifestEntryTuples);
   expect(sortedActual).toEqual(sortedExpected);
 }
 
@@ -480,7 +490,7 @@ function buildAgentOutputPaths(input: {
     }
   }
 
-  return outputPaths.sort();
+  return outputPaths.slice().sort();
 }
 
 function collectAgentGeneratedFilePaths(agent: SyncAgentUnderTest): string[] {
@@ -491,6 +501,7 @@ function collectAgentGeneratedFilePaths(agent: SyncAgentUnderTest): string[] {
 
   return collectGeneratedHomeFilePaths()
     .filter((filePath) => filePath.startsWith(agentRoot))
+    .slice()
     .sort();
 }
 
@@ -502,6 +513,12 @@ function collectAgentGeneratedFilePaths(agent: SyncAgentUnderTest): string[] {
  */
 const basicWrittenFilePaths =
   buildExpectedTrioProductFilePaths(VIRTUAL_HOME_DIR);
+
+describe('dry-ai sync registry contracts', () => {
+  it('keeps e2e output-tree coverage exhaustive for every SyncAgent', () => {
+    expect(e2eOutputTreeTestCoverageByAgent).toBeDefined();
+  });
+});
 
 const feature = await loadFeature('./sync.feature');
 
@@ -2454,7 +2471,7 @@ describe('dry-ai sync', () => {
               const { outputs } = readSyncManifest();
               expect(outputs).toHaveLength(12);
               expect(outputs).toEqual(
-                [...outputs].sort(compareManifestEntryTuples),
+                outputs.slice().sort(compareManifestEntryTuples),
               );
 
               expect(
@@ -2680,7 +2697,7 @@ describe('dry-ai sync', () => {
                 ),
               );
               expect(manifest.outputs).toEqual(
-                [...manifest.outputs].sort(compareManifestEntryTuples),
+                manifest.outputs.slice().sort(compareManifestEntryTuples),
               );
             });
           });
@@ -2995,6 +3012,7 @@ describe('dry-ai sync', () => {
                 expect(
                   readSyncManifest()
                     .outputs.map((entry) => entry.name)
+                    .slice()
                     .sort(),
                 ).toEqual([expectedManifestName, expectedManifestName]);
               },
@@ -3126,6 +3144,7 @@ describe('dry-ai sync', () => {
                 expect(
                   readSyncManifest()
                     .outputs.map((entry) => entry.name)
+                    .slice()
                     .sort(),
                 ).toEqual([expectedManifestName, expectedManifestName]);
                 expect(mockFileSystem.files.has(nestedOutputPath)).toBe(false);
@@ -3196,6 +3215,7 @@ describe('dry-ai sync', () => {
               expect(
                 readSyncManifest()
                   .outputs.map((entry) => entry.name)
+                  .slice()
                   .sort(),
               ).toEqual(['real-skill', 'real-skill']);
             });
@@ -4116,6 +4136,7 @@ describe('dry-ai sync', () => {
                 expect(readSyncManifest().outputs).toEqual(
                   buildExpectedManifestTrio(VIRTUAL_HOME_DIR)
                     .filter((entry) => entry.kind !== 'command')
+                    .slice()
                     .sort(compareManifestEntryTuples),
                 );
               });

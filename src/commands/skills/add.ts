@@ -1,3 +1,4 @@
+import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
 import type { CommandEnv } from '../../lib/command-env.js';
@@ -12,6 +13,7 @@ import {
   findManagedSkill,
   formatManagedSkillSummary,
   getManagedSkillDirectory,
+  type LoadSkillsLockfileError,
   loadSkillsLockfile,
   normalizeImportedSkillPath,
   normalizeRemoteRepo,
@@ -97,7 +99,7 @@ type SkillsAddInput = {
 export function skillsAddEffect(options: {
   env: CommandEnv;
   input: SkillsAddInput;
-}): Effect.Effect<void, never, never> {
+}): Effect.Effect<void, LoadSkillsLockfileError | Error, FileSystem> {
   const { env, input } = options;
   const { context, runtime } = env;
 
@@ -106,90 +108,95 @@ export function skillsAddEffect(options: {
     const normalizedBasePath = normalizeImportedSkillPath(input.repoPath);
 
     if (input.skillNames.length === 0) {
-      throw new Error('At least one skill name must be provided with --skill');
+      return yield* Effect.fail(
+        new Error('At least one skill name must be provided with --skill'),
+      );
     }
 
     const requestedSkillNames = normalizeRequestedSkillNames(input.skillNames);
 
     if (input.asName && requestedSkillNames.length !== 1) {
-      throw new Error('--as may only be used when importing exactly one skill');
+      return yield* Effect.fail(
+        new Error('--as may only be used when importing exactly one skill'),
+      );
     }
 
-    yield* Effect.promise(() => ensureSkillsRoot(env));
-    yield* Effect.promise(() => ensureSkillsLockfile(env));
+    yield* ensureSkillsRoot(env);
+    yield* ensureSkillsLockfile(env);
 
-    let lockfile = yield* Effect.promise(() => loadSkillsLockfile(env));
-    const checkout = yield* Effect.promise(() =>
-      cloneRemoteRepo(env, {
-        ref: input.ref,
-        repo,
-      }),
-    );
+    let lockfile = yield* loadSkillsLockfile(env);
+    const checkout = yield* cloneRemoteRepo({
+      ref: input.ref,
+      repo,
+    });
     const skippedSkillNames: string[] = [];
     const importedSkillSummaries: string[] = [];
 
-    yield* Effect.promise(async () => {
-      try {
-        for (const requestedSkillName of requestedSkillNames) {
-          const importedSkillPath = resolveRequestedImportPath({
-            basePath: normalizedBasePath,
-            requestedSkillName,
-          });
-          const skillName = deriveSkillName({
-            repo,
-            skillPath: importedSkillPath,
-            explicitName: input.asName,
-          });
-          const existingManagedSkill = findManagedSkill(lockfile, {
-            name: skillName,
-          });
+    yield* Effect.gen(function* () {
+      for (const requestedSkillName of requestedSkillNames) {
+        const importedSkillPath = resolveRequestedImportPath({
+          basePath: normalizedBasePath,
+          requestedSkillName,
+        });
+        const skillName = deriveSkillName({
+          repo,
+          skillPath: importedSkillPath,
+          explicitName: input.asName,
+        });
+        const existingManagedSkill = findManagedSkill(lockfile, {
+          name: skillName,
+        });
 
-          if (existingManagedSkill) {
-            skippedSkillNames.push(skillName);
-            continue;
-          }
-
-          const targetDir = getManagedSkillDirectory(context, { skillName });
-
-          if (await pathExistsInFileSystem(env, targetDir)) {
-            throw new Error(
-              `A local skill directory already exists: ${targetDir}`,
-            );
-          }
-
-          const sourceDir = await resolveSkillSourceDirByPath(env, {
-            checkoutDir: checkout.checkoutDir,
-            repo,
-            skillPath: importedSkillPath,
-          });
-
-          await replaceManagedSkillDirectory(env, {
-            targetDir,
-            sourceDir,
-          });
-
-          const installedFiles = await computeDirectoryHashes(env, targetDir);
-
-          const importedSkill = createImportedSkillRecord({
-            commit: checkout.commit,
-            files: installedFiles,
-            importedAt: timestampNow(),
-            name: skillName,
-            path: importedSkillPath,
-            ref: input.pin ? checkout.commit : input.ref,
-            repo,
-          });
-
-          lockfile = upsertManagedSkill(lockfile, {
-            updatedSkill: importedSkill,
-          });
-          await saveSkillsLockfile(env, { lockfile });
-          importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
+        if (existingManagedSkill) {
+          skippedSkillNames.push(skillName);
+          continue;
         }
-      } finally {
-        await cleanupRemoteRepoCheckout(checkout);
+
+        const targetDir = getManagedSkillDirectory(context, { skillName });
+
+        if (yield* pathExistsInFileSystem(targetDir)) {
+          return yield* Effect.fail(
+            new Error(`A local skill directory already exists: ${targetDir}`),
+          );
+        }
+
+        const sourceDir = yield* resolveSkillSourceDirByPath({
+          checkoutDir: checkout.checkoutDir,
+          repo,
+          skillPath: importedSkillPath,
+        });
+
+        const installedFiles = yield* computeDirectoryHashes(sourceDir);
+
+        const importedSkill = createImportedSkillRecord({
+          commit: checkout.commit,
+          files: installedFiles,
+          importedAt: timestampNow(),
+          name: skillName,
+          path: importedSkillPath,
+          ref: input.pin ? checkout.commit : input.ref,
+          repo,
+        });
+
+        lockfile = upsertManagedSkill(lockfile, {
+          updatedSkill: importedSkill,
+        });
+        yield* saveSkillsLockfile(env, { lockfile });
+
+        yield* replaceManagedSkillDirectory({
+          targetDir,
+          sourceDir,
+        });
+
+        importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
       }
-    });
+    }).pipe(
+      Effect.ensuring(
+        cleanupRemoteRepoCheckout(checkout).pipe(
+          Effect.catchAll(() => Effect.void),
+        ),
+      ),
+    );
 
     for (const importedSkillSummary of importedSkillSummaries) {
       yield* Effect.sync(() => {
@@ -232,5 +239,9 @@ export function runSkillsAddCommand(
   env: CommandEnv,
   input: SkillsAddInput,
 ): Promise<void> {
-  return Effect.runPromise(skillsAddEffect({ env, input }));
+  return Effect.runPromise(
+    skillsAddEffect({ env, input }).pipe(
+      Effect.provide(env.runtime.fileSystemLayer),
+    ),
+  );
 }

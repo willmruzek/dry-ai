@@ -1,3 +1,4 @@
+import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
 import type { CommandEnv } from '../../lib/command-env.js';
@@ -5,6 +6,7 @@ import {
   ensureSkillsRoot,
   findManagedSkill,
   formatManagedSkillSummary,
+  type LoadSkillsLockfileError,
   listLocalSkillDirectories,
   loadSkillsLockfile,
 } from '../../lib/skills.js';
@@ -16,18 +18,15 @@ import {
  */
 export function skillsListEffect(options: {
   env: CommandEnv;
-}): Effect.Effect<void, never, never> {
+}): Effect.Effect<void, LoadSkillsLockfileError, FileSystem> {
   const { env } = options;
   const { runtime } = env;
 
   return Effect.gen(function* () {
-    yield* Effect.promise(() => ensureSkillsRoot(env));
+    yield* ensureSkillsRoot(env);
 
     const [localSkillDirectories, lockfile] = yield* Effect.all(
-      [
-        Effect.promise(() => listLocalSkillDirectories(env)),
-        Effect.promise(() => loadSkillsLockfile(env)),
-      ],
+      [listLocalSkillDirectories(env), loadSkillsLockfile(env)],
       { concurrency: 'unbounded' },
     );
 
@@ -66,5 +65,7 @@ export function skillsListEffect(options: {
  * Lists local skills and annotates which ones are managed by the lockfile.
  */
 export function runSkillsListCommand(env: CommandEnv): Promise<void> {
-  return Effect.runPromise(skillsListEffect({ env }));
+  return Effect.runPromise(
+    skillsListEffect({ env }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
+  );
 }
