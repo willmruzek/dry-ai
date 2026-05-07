@@ -37,7 +37,7 @@ const TARGET_SKILL = {
   originalCommit: 'abcdef1234567890',
   // On-disk bytes whose hashes match the lockfile entry exactly, so
   // `detectLocalSkillEdits` returns `modified: false` and the update
-  // proceeds through the full fetch → replace → rehash pipeline.
+  // proceeds through the full fetch → replace → compute hashes pipeline.
   localFiles: {
     'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (old)\n',
     // Present locally but absent remotely — the replacement must delete
@@ -106,6 +106,48 @@ describe('dry-ai skills update', () => {
         ],
       }),
     });
+  }
+
+  /**
+   * Arranges the "local edits detected" scenario (edited `SKILL.md` vs lockfile
+   * hashes): `detectLocalSkillEdits` returns `modified: true`.
+   *
+   * Returns the on-disk file map so callers can assert bytes after a skip.
+   */
+  function arrangeSkillWithLocalEdits(): {
+    onDiskFiles: Record<string, string>;
+  } {
+    const onDiskFiles = {
+      ...TARGET_SKILL.localFiles,
+      'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
+    };
+
+    seedLocalSkillDirectory({
+      handle: mockFileSystem,
+      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+      skillName: TARGET_SKILL.name,
+      files: onDiskFiles,
+    });
+    storeMockTextFile({
+      handle: mockFileSystem,
+      filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+      content: JSON.stringify({
+        version: 1,
+        skills: [
+          {
+            commit: TARGET_SKILL.originalCommit,
+            files: hashFileSet(TARGET_SKILL.localFiles),
+            importedAt: SAMPLE_IMPORTED_AT,
+            name: TARGET_SKILL.name,
+            path: TARGET_SKILL.path,
+            repo: SAMPLE_NORMALIZED_REPO,
+            updatedAt: SAMPLE_IMPORTED_AT,
+          },
+        ],
+      }),
+    });
+
+    return { onDiskFiles };
   }
 
   beforeEach(() => {
@@ -274,7 +316,7 @@ describe('dry-ai skills update', () => {
     describe('no-op updates', () => {
       // priority: low
       it.todo(
-        'still runs the replace+rehash pipeline and bumps updatedAt when the remote contents are byte-identical to the local copy',
+        'still runs the replace pipeline and bumps updatedAt when the remote contents are byte-identical to the local copy',
       );
 
       // priority: med
@@ -284,58 +326,6 @@ describe('dry-ai skills update', () => {
     });
 
     describe('local edits without --force', () => {
-      /**
-       * Arranges the "local edits detected" skip scenario:
-       *
-       *   - On disk: `SKILL.md` holds user-edited bytes, while every
-       *     other file from `TARGET_SKILL.localFiles` (e.g. `legacy.md`)
-       *     is seeded with its baseline bytes so only `SKILL.md` shows as
-       *     changed.
-       *   - Lockfile: entry's `files` hashes match the PRE-edit baseline
-       *     (`TARGET_SKILL.localFiles`), so `detectLocalSkillEdits`
-       *     compares baseline-hashes to on-disk-edited-hashes and returns
-       *     `modified: true` with `changedFiles: ['SKILL.md']`.
-       *
-       * Returns the on-disk file set (including the edited `SKILL.md`) so
-       * tests can assert the user's content survives the run unchanged.
-       */
-      function arrangeSkillWithLocalEdits(): {
-        onDiskFiles: Record<string, string>;
-      } {
-        const onDiskFiles = {
-          ...TARGET_SKILL.localFiles,
-          'SKILL.md':
-            '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
-        };
-
-        seedLocalSkillDirectory({
-          handle: mockFileSystem,
-          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-          skillName: TARGET_SKILL.name,
-          files: onDiskFiles,
-        });
-        storeMockTextFile({
-          handle: mockFileSystem,
-          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          content: JSON.stringify({
-            version: 1,
-            skills: [
-              {
-                commit: TARGET_SKILL.originalCommit,
-                files: hashFileSet(TARGET_SKILL.localFiles),
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: TARGET_SKILL.name,
-                path: TARGET_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-            ],
-          }),
-        });
-
-        return { onDiskFiles };
-      }
-
       it('skips updating the skill when local edits are detected', async () => {
         // Arrange: on-disk `SKILL.md` bytes differ from lockfile hashes.
         const { onDiskFiles } = arrangeSkillWithLocalEdits();
@@ -398,15 +388,69 @@ describe('dry-ai skills update', () => {
     });
 
     describe('local edits with --force', () => {
-      // priority: med
-      it.todo(
-        'overwrites local edits with the fetched remote copy when --force is passed',
-      );
+      it('overwrites local edits with the remote copy and refreshes the lockfile when --force is passed', async () => {
+        // Arrange: same as the local-edits skip path — on-disk `SKILL.md` does
+        // not match lockfile hashes, so `modified` is true; `--force` must
+        // bypass the early return and run the full update.
+        arrangeSkillWithLocalEdits();
+        const environment = createTestEnv({ mockFileSystem });
 
-      // priority: med
-      it.todo(
-        'updates the lockfile hashes to match the newly installed remote files when --force is passed',
-      );
+        await runCLI({
+          argv: ['skills', 'update', TARGET_SKILL.name, '--force'],
+          ...environment.cliOptions,
+        });
+
+        for (const [relativeFilePath, content] of Object.entries(
+          TARGET_SKILL.remoteFiles,
+        )) {
+          expect(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                DEFAULT_SKILLS_SOURCE_ROOT,
+                TARGET_SKILL.name,
+                relativeFilePath,
+              ),
+            }),
+          ).toBe(content);
+        }
+        expect(
+          mockFileSystem.files.has(
+            path.join(
+              DEFAULT_SKILLS_SOURCE_ROOT,
+              TARGET_SKILL.name,
+              'legacy.md',
+            ),
+          ),
+        ).toBe(false);
+
+        expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+        const savedLockfile = JSON.parse(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          }),
+        ) as unknown;
+        expect(savedLockfile).toEqual({
+          version: 1,
+          skills: [
+            {
+              commit: FETCHED_COMMIT,
+              files: hashFileSet(TARGET_SKILL.remoteFiles),
+              importedAt: SAMPLE_IMPORTED_AT,
+              name: TARGET_SKILL.name,
+              path: TARGET_SKILL.path,
+              repo: SAMPLE_NORMALIZED_REPO,
+              updatedAt: UPDATED_AT,
+            },
+          ],
+        });
+
+        expect(environment.stderrMessages).toEqual([]);
+        expect(environment.stdoutMessages).toEqual([
+          `Updated ${TARGET_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${TARGET_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}\n`,
+        ]);
+      });
     });
 
     describe('pinned skills', () => {
@@ -438,8 +482,39 @@ describe('dry-ai skills update', () => {
       'rejects "dry-ai skills update" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
-    // priority: med
-    it.todo('throws when the skill name is not present in the lockfile');
+    it('throws when the skill name is not present in the lockfile', async () => {
+      // Arrange: lockfile lists a different managed skill, not `TARGET_SKILL`.
+      storeMockTextFile({
+        handle: mockFileSystem,
+        filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+        content: JSON.stringify({
+          version: 1,
+          skills: [
+            {
+              commit: '1234567890abcdef1234567890abcdef12345678',
+              files: { 'SKILL.md': 'b'.repeat(64) },
+              importedAt: SAMPLE_IMPORTED_AT,
+              name: 'other-skill',
+              path: 'skills/other',
+              repo: SAMPLE_NORMALIZED_REPO,
+              updatedAt: SAMPLE_IMPORTED_AT,
+            },
+          ],
+        }),
+      });
+      const environment = createTestEnv({ mockFileSystem });
+
+      await expect(
+        runCLI({
+          argv: ['skills', 'update', TARGET_SKILL.name],
+          ...environment.cliOptions,
+        }),
+      ).rejects.toThrow(
+        `Managed skill not found: ${TARGET_SKILL.name}. Run \`skills list\` to see managed skill names, or \`skills add <repo> --skill <name>\` to import one.`,
+      );
+
+      expect(mockFileSystem.lockfileWrites).toEqual([]);
+    });
 
     // priority: med
     it.todo(

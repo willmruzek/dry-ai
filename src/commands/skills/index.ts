@@ -11,8 +11,6 @@ import {
 
 import { runSkillsAddCommand } from './add.js';
 import { runSkillsListCommand } from './list.js';
-import { runSkillsRehashAllCommand } from './rehash-all.js';
-import { runSkillsRehashCommand } from './rehash.js';
 import { runSkillsRemoveCommand } from './remove.js';
 import { runSkillsUpdateAllCommand } from './update-all.js';
 import { runSkillsUpdateCommand } from './update.js';
@@ -58,7 +56,6 @@ export function addSkillsCommand(input: {
           ${commandName} skills add anthropics/skills --path . --skill review-helper
           ${commandName} skills add anthropics/skills --path tools --skill review-helper
           ${commandName} skills add vercel-labs/agent-skills --skill pr-review commit
-          ${commandName} skills rehash skill-creator
           ${commandName} skills update skill-creator
       `,
     )
@@ -127,20 +124,6 @@ export function addSkillsCommand(input: {
     .description('Remove a managed skill')
     .action(async (skillName: string) => {
       await runSkillsRemoveCommand(resolveEnv(), { skillName });
-    });
-
-  skills
-    .command('rehash <name>')
-    .description('Refresh stored file hashes for one managed skill')
-    .action(async (skillName: string) => {
-      await runSkillsRehashCommand(resolveEnv(), { skillName });
-    });
-
-  skills
-    .command('rehash-all')
-    .description('Refresh stored file hashes for all managed skills')
-    .action(async () => {
-      await runSkillsRehashAllCommand(resolveEnv());
     });
 
   skills

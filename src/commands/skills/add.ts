@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
   cleanupRemoteRepoCheckout,
@@ -74,7 +76,141 @@ function resolveRequestedImportPath(input: {
     skillName: input.requestedSkillName,
   });
 
-  return normalizeImportedSkillPath(importPath) ?? importPath;
+  return normalizeImportedSkillPath(importPath)!;
+}
+
+type SkillsAddInput = {
+  repo: string;
+  repoPath: string | undefined;
+  skillNames: string[];
+  asName: string | undefined;
+  pin: boolean;
+  ref: string | undefined;
+};
+
+/**
+ * Effect program: validate input, ensure roots/lockfile, clone remote, import
+ * each requested skill (or skip), persist lockfile per import, clean up
+ * checkout, then log. Composes with `Effect.runPromise` or `Effect.provide` in
+ * tests without involving Commander.
+ */
+export function skillsAddEffect(options: {
+  env: CommandEnv;
+  input: SkillsAddInput;
+}): Effect.Effect<void, never, never> {
+  const { env, input } = options;
+  const { context, runtime } = env;
+
+  return Effect.gen(function* () {
+    const repo = normalizeRemoteRepo(input.repo);
+    const normalizedBasePath = normalizeImportedSkillPath(input.repoPath);
+
+    if (input.skillNames.length === 0) {
+      throw new Error('At least one skill name must be provided with --skill');
+    }
+
+    const requestedSkillNames = normalizeRequestedSkillNames(input.skillNames);
+
+    if (input.asName && requestedSkillNames.length !== 1) {
+      throw new Error('--as may only be used when importing exactly one skill');
+    }
+
+    yield* Effect.promise(() => ensureSkillsRoot(env));
+    yield* Effect.promise(() => ensureSkillsLockfile(env));
+
+    let lockfile = yield* Effect.promise(() => loadSkillsLockfile(env));
+    const checkout = yield* Effect.promise(() =>
+      cloneRemoteRepo(env, {
+        ref: input.ref,
+        repo,
+      }),
+    );
+    const skippedSkillNames: string[] = [];
+    const importedSkillSummaries: string[] = [];
+
+    yield* Effect.promise(async () => {
+      try {
+        for (const requestedSkillName of requestedSkillNames) {
+          const importedSkillPath = resolveRequestedImportPath({
+            basePath: normalizedBasePath,
+            requestedSkillName,
+          });
+          const skillName = deriveSkillName({
+            repo,
+            skillPath: importedSkillPath,
+            explicitName: input.asName,
+          });
+          const existingManagedSkill = findManagedSkill(lockfile, {
+            name: skillName,
+          });
+
+          if (existingManagedSkill) {
+            skippedSkillNames.push(skillName);
+            continue;
+          }
+
+          const targetDir = getManagedSkillDirectory(context, { skillName });
+
+          if (await pathExistsInFileSystem(env, targetDir)) {
+            throw new Error(
+              `A local skill directory already exists: ${targetDir}`,
+            );
+          }
+
+          const sourceDir = await resolveSkillSourceDirByPath(env, {
+            checkoutDir: checkout.checkoutDir,
+            repo,
+            skillPath: importedSkillPath,
+          });
+
+          await replaceManagedSkillDirectory(env, {
+            targetDir,
+            sourceDir,
+          });
+
+          const installedFiles = await computeDirectoryHashes(env, targetDir);
+
+          const importedSkill = createImportedSkillRecord({
+            commit: checkout.commit,
+            files: installedFiles,
+            importedAt: timestampNow(),
+            name: skillName,
+            path: importedSkillPath,
+            ref: input.pin ? checkout.commit : input.ref,
+            repo,
+          });
+
+          lockfile = upsertManagedSkill(lockfile, {
+            updatedSkill: importedSkill,
+          });
+          await saveSkillsLockfile(env, { lockfile });
+          importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
+        }
+      } finally {
+        await cleanupRemoteRepoCheckout(checkout);
+      }
+    });
+
+    for (const importedSkillSummary of importedSkillSummaries) {
+      yield* Effect.sync(() => {
+        runtime.logInfo(`Imported ${importedSkillSummary}`);
+      });
+    }
+
+    if (skippedSkillNames.length > 0) {
+      yield* Effect.sync(() => {
+        runtime.logWarn(
+          `Skipped already-imported skills: ${skippedSkillNames.join(', ')}`,
+        );
+      });
+    }
+
+    if (importedSkillSummaries.length === 0) {
+      yield* Effect.sync(() => {
+        runtime.logInfo('No skills were imported.');
+      });
+    }
+  });
 }
 
 /**
@@ -88,120 +224,13 @@ function resolveRequestedImportPath(input: {
  * @param pin - If true, record the imported skill at the specific commit; otherwise record the provided ref
  * @param ref - Optional branch, tag, or commit-ish to check out from the remote repository
  *
- * @throws Error - If `skillNames` is empty after normalization
+ * @throws Error - If `--skill` is omitted or `--skill` produces no names after CLI parsing
  * @throws Error - If `--as` is provided while importing more than one skill
  * @throws Error - If a target local skill directory already exists for an import
  */
-export async function runSkillsAddCommand(
+export function runSkillsAddCommand(
   env: CommandEnv,
-  input: {
-    repo: string;
-    repoPath: string | undefined;
-    skillNames: string[];
-    asName: string | undefined;
-    pin: boolean;
-    ref: string | undefined;
-  },
+  input: SkillsAddInput,
 ): Promise<void> {
-  const { context, runtime } = env;
-  const repo = normalizeRemoteRepo(input.repo);
-  const normalizedBasePath = normalizeImportedSkillPath(input.repoPath);
-
-  if (input.skillNames.length === 0) {
-    throw new Error('At least one skill name must be provided with --skill');
-  }
-
-  const requestedSkillNames = normalizeRequestedSkillNames(input.skillNames);
-
-  if (requestedSkillNames.length === 0) {
-    throw new Error('At least one skill name must be provided with --skill');
-  }
-
-  if (input.asName && requestedSkillNames.length !== 1) {
-    throw new Error('--as may only be used when importing exactly one skill');
-  }
-
-  await ensureSkillsRoot(env);
-  await ensureSkillsLockfile(env);
-
-  let lockfile = await loadSkillsLockfile(env);
-  const checkout = await cloneRemoteRepo(env, {
-    ref: input.ref,
-    repo,
-  });
-  const skippedSkillNames: string[] = [];
-  const importedSkillSummaries: string[] = [];
-
-  try {
-    for (const requestedSkillName of requestedSkillNames) {
-      const importedSkillPath = resolveRequestedImportPath({
-        basePath: normalizedBasePath,
-        requestedSkillName,
-      });
-      const skillName = deriveSkillName({
-        repo,
-        skillPath: importedSkillPath,
-        explicitName: input.asName,
-      });
-      const existingManagedSkill = findManagedSkill(lockfile, {
-        name: skillName,
-      });
-
-      if (existingManagedSkill) {
-        skippedSkillNames.push(skillName);
-        continue;
-      }
-
-      const targetDir = getManagedSkillDirectory(context, { skillName });
-
-      if (await pathExistsInFileSystem(env, targetDir)) {
-        throw new Error(`A local skill directory already exists: ${targetDir}`);
-      }
-
-      const sourceDir = await resolveSkillSourceDirByPath(env, {
-        checkoutDir: checkout.checkoutDir,
-        repo,
-        skillPath: importedSkillPath,
-      });
-
-      await replaceManagedSkillDirectory(env, {
-        targetDir,
-        sourceDir,
-      });
-
-      const installedFiles = await computeDirectoryHashes(env, targetDir);
-
-      const importedSkill = createImportedSkillRecord({
-        commit: checkout.commit,
-        files: installedFiles,
-        importedAt: timestampNow(),
-        name: skillName,
-        path: importedSkillPath,
-        ref: input.pin ? checkout.commit : input.ref,
-        repo,
-      });
-
-      lockfile = upsertManagedSkill(lockfile, {
-        updatedSkill: importedSkill,
-      });
-      await saveSkillsLockfile(env, { lockfile });
-      importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
-    }
-  } finally {
-    await cleanupRemoteRepoCheckout(checkout);
-  }
-
-  for (const importedSkillSummary of importedSkillSummaries) {
-    runtime.logInfo(`Imported ${importedSkillSummary}`);
-  }
-
-  if (skippedSkillNames.length > 0) {
-    runtime.logWarn(
-      `Skipped already-imported skills: ${skippedSkillNames.join(', ')}`,
-    );
-  }
-
-  if (importedSkillSummaries.length === 0) {
-    runtime.logInfo('No skills were imported.');
-  }
+  return Effect.runPromise(skillsAddEffect({ env, input }));
 }

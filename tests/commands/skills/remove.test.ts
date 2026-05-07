@@ -1,9 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { Cause, Chunk, Runtime } from 'effect';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
+import { InvalidSkillsLockfile } from '../../../src/lib/skills.js';
 
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
@@ -19,6 +21,30 @@ import {
   seedLocalSkillDirectory,
   storeMockTextFile,
 } from '../../helpers.js';
+
+function findInvalidSkillsLockfileInCause(
+  err: unknown,
+): InvalidSkillsLockfile | undefined {
+  if (err instanceof InvalidSkillsLockfile) {
+    return err;
+  }
+  if (!Runtime.isFiberFailure(err)) {
+    return undefined;
+  }
+  const cause = err[Runtime.FiberFailureCauseId];
+  for (const failure of Chunk.toReadonlyArray(Cause.failures(cause))) {
+    if (failure instanceof InvalidSkillsLockfile) {
+      return failure;
+    }
+  }
+  for (const defect of Chunk.toReadonlyArray(Cause.defects(cause))) {
+    const nested = findInvalidSkillsLockfileInCause(defect);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return undefined;
+}
 
 const REMOVED_SKILL = {
   name: 'note-taker',
@@ -52,6 +78,10 @@ vi.mock('node:os', () => ({
 // module signatures without any explicit casts.
 const mockedOs = vi.mocked(os);
 
+/**
+ * Specs for `dry-ai skills remove` via {@link runCLI} (full CLI → Commander →
+ * `runSkillsRemoveCommand`).
+ */
 describe('dry-ai skills remove', () => {
   let mockFileSystem: MockFileSystemHandle;
 
@@ -165,64 +195,144 @@ describe('dry-ai skills remove', () => {
           `Removed ${REMOVED_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${REMOVED_SKILL.path} ref=HEAD commit=${REMOVED_SKILL.commit.slice(0, 7)}\n`,
         ]);
       });
-
-      // priority: med
-      it.todo(
-        'prints the removed skill summary ("Removed <summary>") to stdout',
-      );
-
-      // priority: med
-      it.todo('leaves other managed skill entries in the lockfile untouched');
-
-      // priority: low
-      it.todo('keeps stderr empty on a successful remove');
     });
 
     describe('partial on-disk state', () => {
-      // priority: med
+      // priority: med — real-world drift (manual deletes); ensures lockfile still updates.
       it.todo(
         'removes the lockfile entry even when the on-disk skill directory is already missing',
       );
     });
-
-    describe('config and output roots', () => {
-      // priority: med
-      it.todo('removes from the --config-root skills directory when provided');
-    });
   });
 
   describe('sad paths', () => {
-    // priority: low
-    it.todo(
-      'rejects "dry-ai skills remove" without a <name> positional argument with a commander.missingArgument error',
+    it('throws Managed skill not found when the name is absent from a non-empty lockfile', async () => {
+      // Arrange: lockfile lists only KEPT_SKILL; REMOVED_SKILL is not managed.
+      storeMockTextFile({
+        handle: mockFileSystem,
+        filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+        content: JSON.stringify({
+          version: 1,
+          skills: [
+            {
+              commit: KEPT_SKILL.commit,
+              files: { 'SKILL.md': 'b'.repeat(64) },
+              importedAt: SAMPLE_IMPORTED_AT,
+              name: KEPT_SKILL.name,
+              path: KEPT_SKILL.path,
+              repo: SAMPLE_NORMALIZED_REPO,
+              updatedAt: SAMPLE_IMPORTED_AT,
+            },
+          ],
+        }),
+      });
+
+      const environment = createTestEnv({ mockFileSystem });
+
+      // Act
+      await expect(
+        runCLI({
+          argv: ['skills', 'remove', REMOVED_SKILL.name],
+          ...environment.cliOptions,
+        }),
+      ).rejects.toThrow(
+        `Managed skill not found: ${REMOVED_SKILL.name}. Run \`skills list\` to see managed skill names, or \`skills add <repo> --skill <name>\` to import one.`,
+      );
+
+      // Assert
+      expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      expect(environment.stderrMessages).toEqual([]);
+      expect(environment.stdoutMessages).toEqual([]);
+    });
+
+    it('throws Managed skill not found when no lockfile exists on disk yet', async () => {
+      // Arrange: `loadSkillsLockfile` treats a missing file as an empty lockfile.
+      const environment = createTestEnv({ mockFileSystem });
+
+      // Act
+      await expect(
+        runCLI({
+          argv: ['skills', 'remove', REMOVED_SKILL.name],
+          ...environment.cliOptions,
+        }),
+      ).rejects.toThrow(
+        `Managed skill not found: ${REMOVED_SKILL.name}. Run \`skills list\` to see managed skill names, or \`skills add <repo> --skill <name>\` to import one.`,
+      );
+
+      // Assert
+      expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      expect(environment.stderrMessages).toEqual([]);
+      expect(environment.stdoutMessages).toEqual([]);
+    });
+
+    it.each([
+      {
+        description: 'unsupported lockfile version',
+        lockfileText: JSON.stringify({ version: 2, skills: [] }),
+      },
+      {
+        description: 'duplicate managed skill name',
+        lockfileText: JSON.stringify({
+          version: 1,
+          skills: [
+            {
+              name: 'dup-skill',
+              repo: SAMPLE_NORMALIZED_REPO,
+              path: 'skills/dup',
+              commit: 'a'.repeat(40),
+              importedAt: SAMPLE_IMPORTED_AT,
+              updatedAt: SAMPLE_IMPORTED_AT,
+            },
+            {
+              name: 'dup-skill',
+              repo: SAMPLE_NORMALIZED_REPO,
+              path: 'skills/dup-other',
+              commit: 'b'.repeat(40),
+              importedAt: SAMPLE_IMPORTED_AT,
+              updatedAt: SAMPLE_IMPORTED_AT,
+            },
+          ],
+        }),
+      },
+      {
+        description: 'malformed JSON',
+        lockfileText: '{"version":1,"skills":[}',
+      },
+    ] as const)(
+      'throws InvalidSkillsLockfile when lockfile has $description',
+      async ({ lockfileText }) => {
+        // Arrange
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: lockfileText,
+        });
+        const environment = createTestEnv({ mockFileSystem });
+
+        // Act — load runs inside Effect; failures surface as FiberFailure-wrapped causes.
+        try {
+          await runCLI({
+            argv: ['skills', 'remove', REMOVED_SKILL.name],
+            ...environment.cliOptions,
+          });
+          expect.fail('expected runCLI(skills remove) to reject');
+        } catch (err) {
+          const invalid = findInvalidSkillsLockfileInCause(err);
+          expect(invalid).toBeDefined();
+          expect(invalid!.lockfilePath).toBe(DEFAULT_SKILLS_LOCKFILE_PATH);
+          expect(invalid!.message).toMatch(/^Invalid skills lockfile at /);
+        }
+
+        // Assert
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+        expect(environment.stderrMessages).toEqual([]);
+        expect(environment.stdoutMessages).toEqual([]);
+      },
     );
 
-    // priority: low
-    it.todo(
-      'rejects "dry-ai skills remove" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
-    );
-
-    // priority: med
-    it.todo('throws when the skill name is not present in the lockfile');
-
-    // priority: low
-    it.todo(
-      'throws "Managed skill not found" when the lockfile is empty (never-imported case)',
-    );
-
-    // priority: low
-    it.todo(
-      'throws "Managed skill not found" when the lockfile file does not exist on disk',
-    );
-
-    // priority: low
+    // priority: med — removal uses FS; failures must surface instead of a misleading success path.
     it.todo(
       'propagates filesystem errors thrown while removing the skill directory',
-    );
-
-    // priority: low
-    it.todo(
-      'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',
     );
   });
 });
