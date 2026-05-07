@@ -7,3 +7,5 @@ dest
 output-test
 
 *.tsbuildinfo
+
+coverage

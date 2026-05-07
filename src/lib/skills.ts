@@ -49,7 +49,9 @@ const SkillsLockfile = Schema.Struct({
   }),
 );
 
-class InvalidSkillsLockfile extends Data.TaggedError('InvalidSkillsLockfile')<{
+export class InvalidSkillsLockfile extends Data.TaggedError(
+  'InvalidSkillsLockfile',
+)<{
   readonly message: string;
   readonly lockfilePath: string;
   readonly cause: ParseResult.ParseError;
@@ -211,6 +213,16 @@ export function findManagedSkill(
   { name }: { name: string },
 ): ManagedSkill | undefined {
   return lockfile.skills.find((skill) => skill.name === name);
+}
+
+/**
+ * Explains that a name is missing from the skills lockfile and suggests next steps.
+ */
+export function managedSkillNotFoundMessage(skillName: string): string {
+  return (
+    `Managed skill not found: ${skillName}. ` +
+    'Run `skills list` to see managed skill names, or `skills add <repo> --skill <name>` to import one.'
+  );
 }
 
 export function upsertManagedSkill(

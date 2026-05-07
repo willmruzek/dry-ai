@@ -149,8 +149,6 @@ describe('runCLI', () => {
           list                     List local skills
           add [options] <repo>     Add managed skills from a remote repository
           remove <name>            Remove a managed skill
-          rehash <name>            Refresh stored file hashes for one managed skill
-          rehash-all               Refresh stored file hashes for all managed skills
           update [options] <name>  Update a managed skill from its tracked source
           update-all [options]     Update all managed skills from their tracked sources
 
@@ -160,7 +158,6 @@ describe('runCLI', () => {
           dry-ai skills add anthropics/skills --path . --skill review-helper
           dry-ai skills add anthropics/skills --path tools --skill review-helper
           dry-ai skills add vercel-labs/agent-skills --skill pr-review commit
-          dry-ai skills rehash skill-creator
           dry-ai skills update skill-creator
         "
       `);
@@ -284,52 +281,6 @@ describe('runCLI', () => {
           "Usage: dry-ai skills remove [options] <name>
 
           Remove a managed skill
-
-          Options:
-            -h, --help  Display this message
-          "
-        `);
-      },
-    );
-
-    it.each(['--help', '-h'])(
-      'prints `skills rehash` help with %s',
-      async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
-
-        await runCLIHelp({
-          argv: ['skills', 'rehash', flag],
-          ...cliOptions,
-        });
-
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dry-ai skills rehash [options] <name>
-
-          Refresh stored file hashes for one managed skill
-
-          Options:
-            -h, --help  Display this message
-          "
-        `);
-      },
-    );
-
-    it.each(['--help', '-h'])(
-      'prints `skills rehash-all` help with %s',
-      async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
-
-        await runCLIHelp({
-          argv: ['skills', 'rehash-all', flag],
-          ...cliOptions,
-        });
-
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
-          "Usage: dry-ai skills rehash-all [options]
-
-          Refresh stored file hashes for all managed skills
 
           Options:
             -h, --help  Display this message

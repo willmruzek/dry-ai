@@ -171,24 +171,77 @@ describe('dry-ai skills list', () => {
     });
 
     describe('managed vs unmanaged annotation', () => {
-      // priority: med
-      it.todo(
-        'labels a local skill directory as "unmanaged" when it is not tracked by the lockfile',
-      );
+      it('labels a local directory as unmanaged when absent from the lockfile, and a lockfile-only entry as missing-local-directory', async () => {
+        // Arrange: two directories under the skills root — one tracked in the
+        // lockfile (`FIRST_SKILL`), one not (`extra-local`). The lockfile also
+        // references `SECOND_SKILL`, which has no on-disk directory.
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: path.join(
+            DEFAULT_SKILLS_SOURCE_ROOT,
+            FIRST_SKILL.name,
+            'SKILL.md',
+          ),
+          content: '---\nname: note-taker\n---\n\n# Note taker\n',
+        });
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: path.join(
+            DEFAULT_SKILLS_SOURCE_ROOT,
+            'extra-local',
+            'SKILL.md',
+          ),
+          content: '---\nname: extra-local\n---\n\n# Extra\n',
+        });
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
+            version: 1,
+            skills: [
+              {
+                commit: FIRST_SKILL.commit,
+                files: { 'SKILL.md': 'a'.repeat(64) },
+                importedAt: SAMPLE_IMPORTED_AT,
+                name: FIRST_SKILL.name,
+                path: FIRST_SKILL.path,
+                repo: SAMPLE_NORMALIZED_REPO,
+                updatedAt: SAMPLE_IMPORTED_AT,
+              },
+              {
+                commit: SECOND_SKILL.commit,
+                files: { 'SKILL.md': 'b'.repeat(64) },
+                importedAt: SAMPLE_IMPORTED_AT,
+                name: SECOND_SKILL.name,
+                path: SECOND_SKILL.path,
+                repo: SAMPLE_NORMALIZED_REPO,
+                updatedAt: SAMPLE_IMPORTED_AT,
+              },
+            ],
+          }),
+        });
 
-      // priority: med
-      it.todo(
-        'labels a lockfile entry as "missing-local-directory" when its on-disk directory is absent',
-      );
+        const environment = createTestEnv({ mockFileSystem });
+
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...environment.cliOptions,
+        });
+
+        expect(environment.stderrMessages).toEqual([]);
+        expect(environment.stdoutMessages).toEqual([
+          [
+            '- extra-local unmanaged',
+            `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FIRST_SKILL.commit.slice(0, 7)}`,
+            `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${SECOND_SKILL.commit.slice(0, 7)} missing-local-directory`,
+            '',
+          ].join('\n'),
+        ]);
+      });
 
       // priority: med
       it.todo(
         'prints managed skills before missing-local-directory entries in the output',
-      );
-
-      // priority: med
-      it.todo(
-        'renders a mixed output (managed + unmanaged + missing-local-directory) in a single invocation',
       );
     });
 

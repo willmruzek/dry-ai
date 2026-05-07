@@ -97,15 +97,6 @@ By default, imports track the requested ref. With no `--ref`, that means the rem
 - Purpose: Re-fetch all managed skills from their tracked sources and replace the local copied directories.
 - `--force`: Overwrites local edits instead of skipping the update.
 
-### `skills rehash`
-
-- Purpose: Refresh the stored file hashes for one managed skill using its current local contents.
-
-### `skills rehash-all`
-
-- Purpose: Refresh the stored file hashes for every managed skill using their current local contents.
-- Behavior: Skips managed entries whose local directory is missing.
-
 ### `skills remove`
 
 - Purpose: Delete a managed skill's local copied directory and remove its lockfile entry.
@@ -127,14 +118,7 @@ The lockfile records:
 
 Before replacing a managed skill, `dry-ai` compares the current local files against the hashes stored in `skills.lock.json`. If any file was added, removed, or edited locally, the update is skipped and a warning is printed so you do not lose your customizations by accident.
 
-For skills imported before hash tracking existed, use these commands to store hashes from the current local directory without fetching from the remote source:
-
-```sh
-dry-ai skills rehash review-helper
-dry-ai skills rehash-all
-```
-
-Use these commands to intentionally overwrite local edits:
+Use `--force` on `skills update` or `skills update-all` to intentionally overwrite local edits with the remote copy (and record new file hashes in the lockfile).
 
 ```sh
 dry-ai skills update review-helper --force

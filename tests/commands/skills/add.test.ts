@@ -23,6 +23,7 @@ import {
   mockPathExists,
   readMockTextFile,
   seedRemoteSkillCheckout,
+  storeMockTextFile,
 } from '../../helpers.js';
 
 // `skills add` tests exercise an *explicit* config root (not the default),
@@ -238,14 +239,38 @@ describe('dry-ai skills add', () => {
     });
 
     describe('flag variations', () => {
-      // priority: med
-      it.todo(
-        'stores the provided --ref string in the lockfile instead of the commit hash when --pin is not set',
-      );
+      it('stores the resolved commit as the lockfile ref when --pin is passed without --ref', async () => {
+        const environment = createTestEnv({ mockFileSystem });
+        const defaultSkillsLockfilePath = path.join(
+          environment.defaultConfigRoot,
+          'skills.lock.json',
+        );
+
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            'anthropics/skills',
+            '--skill',
+            MANAGED_SKILL_NAME,
+            '--pin',
+          ],
+          ...environment.cliOptions,
+        });
+
+        const savedLockfile = JSON.parse(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: defaultSkillsLockfilePath,
+          }),
+        ) as { skills: { ref: string }[] };
+
+        expect(savedLockfile.skills[0]?.ref).toBe(FETCHED_COMMIT);
+      });
 
       // priority: med
       it.todo(
-        'stores the resolved commit as the lockfile ref when --pin is passed without --ref',
+        'stores the provided --ref string in the lockfile instead of the commit hash when --pin is not set',
       );
 
       // priority: low
@@ -393,22 +418,183 @@ describe('dry-ai skills add', () => {
         ).toBe(SECOND_SKILL_FILES['SKILL.md']);
       });
 
-      // priority: low
-      it.todo(
-        'de-duplicates repeated --skill values, importing each skill only once',
-      );
+      it('de-duplicates repeated --skill values, importing each skill only once', async () => {
+        const environment = createTestEnv({ mockFileSystem });
+        const normalizedRepo = 'https://github.com/anthropics/skills.git';
+
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            'anthropics/skills',
+            '--skill',
+            MANAGED_SKILL_NAME,
+            MANAGED_SKILL_NAME,
+          ],
+          ...environment.cliOptions,
+        });
+
+        expect(environment.stderrMessages).toEqual([]);
+        expect(environment.stdoutMessages).toEqual([
+          `Imported ${MANAGED_SKILL_NAME} repo=${normalizedRepo} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+        ]);
+      });
     });
 
     describe('skipping already-imported skills', () => {
-      // priority: med
-      it.todo(
-        'skips a skill that is already present in the lockfile and still imports the remaining requested skills',
-      );
+      const SECOND_SKILL_NAME = 'note-taker';
+      const SECOND_SKILL_PATH = 'skills/note-taker';
+      const SECOND_SKILL_FILES = {
+        'SKILL.md': '---\nname: note-taker\n---\n\n# Note Taker\n',
+      } as const;
 
-      // priority: med
-      it.todo(
-        'warns about all skipped skills when every requested skill is already imported and logs "No skills were imported."',
-      );
+      function configureRemoteWithTwoSkills(): void {
+        configureMockGitClient({
+          mockedGit,
+          fetchedCommit: FETCHED_COMMIT,
+          checkoutImplementation: async (repoRoot) => {
+            if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+              return;
+            }
+            seedRemoteSkillCheckout({
+              handle: mockFileSystem,
+              checkoutDir: repoRoot,
+              skillPath: MANAGED_SKILL_PATH,
+              files: REMOTE_SKILL_FILES,
+            });
+            seedRemoteSkillCheckout({
+              handle: mockFileSystem,
+              checkoutDir: repoRoot,
+              skillPath: SECOND_SKILL_PATH,
+              files: SECOND_SKILL_FILES,
+            });
+          },
+        });
+      }
+
+      it('skips a skill that is already present in the lockfile and still imports the remaining requested skills', async () => {
+        mockFileSystem = createMockFileSystemState();
+        configureMockFileSystem({
+          handle: mockFileSystem,
+          lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+        });
+        configureRemoteWithTwoSkills();
+
+        const normalizedRepo = 'https://github.com/anthropics/skills.git';
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
+            version: 1,
+            skills: [
+              {
+                commit: FETCHED_COMMIT,
+                files: hashFileSet(REMOTE_SKILL_FILES),
+                importedAt: SAMPLE_IMPORTED_AT,
+                name: MANAGED_SKILL_NAME,
+                path: MANAGED_SKILL_PATH,
+                repo: normalizedRepo,
+                updatedAt: SAMPLE_IMPORTED_AT,
+              },
+            ],
+          }),
+        });
+
+        const environment = createTestEnv({ mockFileSystem });
+        const skillsSourceRoot = path.join(
+          environment.defaultConfigRoot,
+          'skills',
+        );
+
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            'anthropics/skills',
+            '--skill',
+            MANAGED_SKILL_NAME,
+            SECOND_SKILL_NAME,
+          ],
+          ...environment.cliOptions,
+        });
+
+        expect(environment.stdoutMessages).toEqual([
+          `Imported ${SECOND_SKILL_NAME} repo=${normalizedRepo} path=${SECOND_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+        ]);
+        expect(environment.stderrMessages).toEqual([
+          `Skipped already-imported skills: ${MANAGED_SKILL_NAME}\n`,
+        ]);
+
+        expect(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(
+              skillsSourceRoot,
+              SECOND_SKILL_NAME,
+              'SKILL.md',
+            ),
+          }),
+        ).toBe(SECOND_SKILL_FILES['SKILL.md']);
+      });
+
+      it('warns about all skipped skills when every requested skill is already imported and logs "No skills were imported."', async () => {
+        mockFileSystem = createMockFileSystemState();
+        configureMockFileSystem({
+          handle: mockFileSystem,
+          lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+        });
+        configureRemoteWithTwoSkills();
+
+        const normalizedRepo = 'https://github.com/anthropics/skills.git';
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
+            version: 1,
+            skills: [
+              {
+                commit: FETCHED_COMMIT,
+                files: hashFileSet(REMOTE_SKILL_FILES),
+                importedAt: SAMPLE_IMPORTED_AT,
+                name: MANAGED_SKILL_NAME,
+                path: MANAGED_SKILL_PATH,
+                repo: normalizedRepo,
+                updatedAt: SAMPLE_IMPORTED_AT,
+              },
+              {
+                commit: FETCHED_COMMIT,
+                files: hashFileSet(SECOND_SKILL_FILES),
+                importedAt: SAMPLE_IMPORTED_AT,
+                name: SECOND_SKILL_NAME,
+                path: SECOND_SKILL_PATH,
+                repo: normalizedRepo,
+                updatedAt: SAMPLE_IMPORTED_AT,
+              },
+            ],
+          }),
+        });
+
+        const environment = createTestEnv({ mockFileSystem });
+
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            'anthropics/skills',
+            '--skill',
+            MANAGED_SKILL_NAME,
+            SECOND_SKILL_NAME,
+          ],
+          ...environment.cliOptions,
+        });
+
+        expect(environment.stdoutMessages).toEqual([
+          'No skills were imported.\n',
+        ]);
+        expect(environment.stderrMessages).toEqual([
+          `Skipped already-imported skills: ${MANAGED_SKILL_NAME}, ${SECOND_SKILL_NAME}\n`,
+        ]);
+      });
     });
 
     describe('config and output roots', () => {
@@ -445,16 +631,43 @@ describe('dry-ai skills add', () => {
       'rejects "dry-ai skills add" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
     );
 
-    // priority: med
-    it.todo('throws when --skill is omitted');
+    it('throws when --skill is omitted', async () => {
+      const environment = createTestEnv({ mockFileSystem });
+      await expect(
+        runCLI({
+          argv: ['skills', 'add', 'anthropics/skills'],
+          ...environment.cliOptions,
+        }),
+      ).rejects.toThrow(
+        'At least one skill name must be provided with --skill',
+      );
+    });
 
     // priority: low
     it.todo(
       'throws when --skill is provided without any value (empty list after normalization)',
     );
 
-    // priority: med
-    it.todo('throws when --as is combined with more than one --skill');
+    it('throws when --as is combined with more than one --skill', async () => {
+      const environment = createTestEnv({ mockFileSystem });
+      await expect(
+        runCLI({
+          argv: [
+            'skills',
+            'add',
+            'anthropics/skills',
+            '--skill',
+            MANAGED_SKILL_NAME,
+            'note-taker',
+            '--as',
+            'alias',
+          ],
+          ...environment.cliOptions,
+        }),
+      ).rejects.toThrow(
+        '--as may only be used when importing exactly one skill',
+      );
+    });
 
     // priority: low
     it.todo.each([['.'], ['..'], ['with/slash'], ['with\\backslash']])(
@@ -462,10 +675,32 @@ describe('dry-ai skills add', () => {
       async () => {},
     );
 
-    // priority: low
-    it.todo(
-      'throws when the target skill directory already exists on disk but is absent from the lockfile',
-    );
+    it('throws when the target skill directory already exists on disk but is absent from the lockfile', async () => {
+      const environment = createTestEnv({ mockFileSystem });
+      const skillDir = path.join(
+        environment.defaultConfigRoot,
+        'skills',
+        MANAGED_SKILL_NAME,
+      );
+      storeMockTextFile({
+        handle: mockFileSystem,
+        filePath: path.join(skillDir, 'SKILL.md'),
+        content: REMOTE_SKILL_FILES['SKILL.md'],
+      });
+
+      await expect(
+        runCLI({
+          argv: [
+            'skills',
+            'add',
+            'anthropics/skills',
+            '--skill',
+            MANAGED_SKILL_NAME,
+          ],
+          ...environment.cliOptions,
+        }),
+      ).rejects.toThrow(`A local skill directory already exists: ${skillDir}`);
+    });
 
     // priority: low
     it.todo(
