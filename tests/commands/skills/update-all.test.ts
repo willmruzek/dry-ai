@@ -323,10 +323,9 @@ describe('dry-ai skills update-all', () => {
           ].join('\n'),
         ]);
 
-        // Assert: the lockfile was saved exactly once (update-all
-        // accumulates per-skill updates in memory and persists them in a
-        // single write at the end of the run).
-        expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+        // Assert: the lockfile is saved after each successful skill update
+        // so partial runs stay consistent with disk.
+        expect(mockFileSystem.lockfileWrites).toHaveLength(2);
 
         const savedLockfile = JSON.parse(
           readMockTextFile({
@@ -541,8 +540,7 @@ describe('dry-ai skills update-all', () => {
           ...environment.cliOptions,
         });
 
-        // Assert: per-skill updates accumulate in memory and persist in a
-        // single write at the end of the run.
+        // Assert: only the skill that was updated triggers a lockfile write.
         expect(mockFileSystem.lockfileWrites).toHaveLength(1);
 
         // Assert: the saved lockfile preserves `FIRST_SKILL`'s entry
@@ -602,7 +600,7 @@ describe('dry-ai skills update-all', () => {
           ].join('\n'),
         ]);
 
-        expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
         const savedLockfile = JSON.parse(
           readMockTextFile({
             handle: mockFileSystem,

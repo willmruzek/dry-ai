@@ -22,8 +22,9 @@ type SkillsUpdateAllInput = {
 
 /**
  * Effect program: load lockfile, update every managed skill (or skip on local
- * edits unless forced), save once, log summaries. Composes with
- * `Effect.runPromise` or `Effect.provide` in tests without involving Commander.
+ * edits unless forced), persist the lockfile after each successful skill update,
+ * log summaries. Composes with `Effect.runPromise` or `Effect.provide` in tests
+ * without involving Commander.
  */
 export function skillsUpdateAllEffect(options: {
   env: CommandEnv;
@@ -90,13 +91,12 @@ export function skillsUpdateAllEffect(options: {
 
           lockfile = upsertManagedSkill(lockfile, { updatedSkill });
           updatedLines.push(`- ${formatManagedSkillSummary(updatedSkill)}`);
+          await saveSkillsLockfile(env, { lockfile });
         } finally {
           await cleanupRemoteSkillSnapshot(snapshot);
         }
       });
     }
-
-    yield* Effect.promise(() => saveSkillsLockfile(env, { lockfile }));
 
     if (updatedLines.length > 0) {
       yield* Effect.sync(() => {
@@ -123,7 +123,7 @@ export function skillsUpdateAllEffect(options: {
 /**
  * Update all managed skills from their tracked remote sources and persist the refreshed skills lockfile.
  *
- * For each managed skill this replaces the local managed directory with the remote snapshot (unless local edits are present and `input.force` is false), recomputes installed file hashes, updates the lockfile record with the new commit and hashes, saves the lockfile, and logs which skills were updated or skipped.
+ * For each managed skill this replaces the local managed directory with the remote snapshot (unless local edits are present and `input.force` is false), recomputes installed file hashes, updates the lockfile record with the new commit and hashes, saves the lockfile after each successful replace, and logs which skills were updated or skipped.
  *
  * @param input.force - When `true`, overwrite local edits; when `false`, skip skills with local modifications
  */
