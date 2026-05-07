@@ -8,7 +8,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_CONFIG_ROOT,
   DEFAULT_SKILLS_LOCKFILE_PATH,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   type TestEnv,
   VIRTUAL_HOME_DIR,
@@ -71,7 +71,7 @@ function createTestEnv({
 }: {
   defaultConfigRoot?: string;
   defaultOutputRoot?: string;
-  mockFileSystem?: MockFileSystemState;
+  mockFileSystem?: MockFileSystemHandle;
 } = {}): TestEnv {
   return createBaseTestEnv({
     defaultConfigRoot,
@@ -81,7 +81,7 @@ function createTestEnv({
 }
 
 describe('dry-ai skills add', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();

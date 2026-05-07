@@ -8,7 +8,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   SAMPLE_NORMALIZED_REPO,
   VIRTUAL_HOME_DIR,
@@ -53,7 +53,7 @@ vi.mock('node:os', () => ({
 const mockedOs = vi.mocked(os);
 
 describe('dry-ai skills remove', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();

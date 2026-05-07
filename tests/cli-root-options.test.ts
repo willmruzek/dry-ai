@@ -9,7 +9,7 @@ import { runCLI } from '../src/cli.js';
 import {
   DEFAULT_CONFIG_ROOT,
   DEFAULT_SKILLS_LOCKFILE_PATH,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   VIRTUAL_HOME_DIR,
   configureMockFileSystem,
   configureMockOs,
@@ -45,7 +45,7 @@ const mockedGlob = vi.mocked(glob);
 // requiring git or sync machinery.
 
 describe('dry-ai root options', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();

@@ -8,7 +8,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   SAMPLE_NORMALIZED_REPO,
   VIRTUAL_HOME_DIR,
@@ -85,7 +85,7 @@ const mockedGit = createMockedGit();
  * `checkoutImplementation` hook uniform across the two clones performed per run.
  */
 function seedAllRemoteSkills(options: {
-  handle: MockFileSystemState;
+  handle: MockFileSystemHandle;
   checkoutDir: string;
 }): void {
   const { handle, checkoutDir } = options;
@@ -100,7 +100,7 @@ function seedAllRemoteSkills(options: {
 }
 
 describe('dry-ai skills update-all', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   /**
    * Arranges the "one-skipped, one-updated" scenario used by the

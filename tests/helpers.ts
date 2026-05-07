@@ -131,9 +131,6 @@ export class MockFileSystemHandle {
   }
 }
 
-/** @deprecated Prefer {@link MockFileSystemHandle}; kept for existing test imports. */
-export type MockFileSystemState = MockFileSystemHandle;
-
 export type MockedGitObject = MockedObject<
   Pick<
     ReturnType<typeof simpleGit>,
@@ -149,7 +146,7 @@ export type TestEnv = {
   defaultConfigRoot: string;
   defaultOutputRoot: string;
   cliOptions: CLIOptions;
-  mockFileSystem: MockFileSystemState;
+  mockFileSystem: MockFileSystemHandle;
   stderrMessages: string[];
   stdoutMessages: string[];
 };
@@ -574,8 +571,8 @@ export function mockFileSystemLayer(
  *
  * @param defaultConfigRoot - Optional override for the default configuration root used by the TestEnv.
  * @param defaultOutputRoot - Optional override for the default output root used by the TestEnv.
- * @param mockFileSystem - Optional existing MockFileSystemState to use; when omitted a fresh mock filesystem state is created.
- * @returns A TestEnv containing the configured roots, the mock filesystem state, test CLI options (including a fileSystemLayer), and arrays capturing stdout/stderr messages.
+ * @param mockFileSystem - Optional existing MockFileSystemHandle to use; when omitted a fresh mock filesystem handle is created.
+ * @returns A TestEnv containing the configured roots, the mock filesystem handle, test CLI options (including a fileSystemLayer), and arrays capturing stdout/stderr messages.
  */
 export function createTestEnv({
   defaultConfigRoot = '',
@@ -584,7 +581,7 @@ export function createTestEnv({
 }: {
   defaultConfigRoot?: string;
   defaultOutputRoot?: string;
-  mockFileSystem?: MockFileSystemState;
+  mockFileSystem?: MockFileSystemHandle;
 } = {}): TestEnv {
   const stdioWriters = createTestStdioWriters();
   const mockFileSystem = mockFileSystemInput ?? createMockFileSystemState();
@@ -620,9 +617,9 @@ export function normalizeMockPath(filePath: string): string {
 }
 
 /**
- * Creates one isolated in-memory filesystem state for the current test.
+ * Creates one isolated in-memory filesystem handle for the current test.
  */
-export function createMockFileSystemState(): MockFileSystemState {
+export function createMockFileSystemState(): MockFileSystemHandle {
   return MockFileSystemHandle.createEmpty();
 }
 

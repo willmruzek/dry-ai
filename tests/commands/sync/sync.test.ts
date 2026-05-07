@@ -11,7 +11,7 @@ import { runCLI, type CLIOptions } from '../../../src/cli.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   VIRTUAL_HOME_DIR,
   clearMockFileSystemFailures,
   configureMockFileSystem,
@@ -66,7 +66,7 @@ vi.mock('glob', () => ({
 const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
 
-let mockFileSystem: MockFileSystemState;
+let mockFileSystem: MockFileSystemHandle;
 
 function installSyncTestGlobMock(): void {
   mockedGlob.mockImplementation(
@@ -313,7 +313,7 @@ function compareManifestEntryTuples(
 }
 
 function assertMockSyncManifestMatchesExpectedRows(
-  state: MockFileSystemState,
+  state: MockFileSystemHandle,
   configRoot: string,
   expectedRows: ManifestTrioRow[],
 ): void {
@@ -337,7 +337,7 @@ function assertMockSyncManifestMatchesExpectedRows(
 }
 
 function assertMockSyncManifestMatchesTrio(
-  state: MockFileSystemState,
+  state: MockFileSystemHandle,
   configRoot: string,
   outputRoot: string,
 ): void {

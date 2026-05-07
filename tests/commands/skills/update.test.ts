@@ -8,7 +8,7 @@ import { runCLI } from '../../../src/cli.js';
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
   DEFAULT_SKILLS_SOURCE_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   SAMPLE_NORMALIZED_REPO,
   VIRTUAL_HOME_DIR,
@@ -69,7 +69,7 @@ const mockedOs = vi.mocked(os);
 const mockedGit = createMockedGit();
 
 describe('dry-ai skills update', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   /**
    * Arranges the happy-path preconditions shared by every test under

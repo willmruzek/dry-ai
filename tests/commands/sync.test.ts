@@ -10,7 +10,7 @@ import type { SyncAgent } from '../../src/lib/agents.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
-  type MockFileSystemState,
+  type MockFileSystemHandle,
   VIRTUAL_HOME_DIR,
   configureMockFileSystem,
   configureMockOs,
@@ -216,7 +216,7 @@ function compareManifestEntryTuples(
 }
 
 function assertMockSyncManifestMatchesExpectedRows(
-  state: MockFileSystemState,
+  state: MockFileSystemHandle,
   configRoot: string,
   expectedRows: ManifestTrioRow[],
 ): void {
@@ -240,7 +240,7 @@ function assertMockSyncManifestMatchesExpectedRows(
 }
 
 function assertMockSyncManifestMatchesTrio(
-  state: MockFileSystemState,
+  state: MockFileSystemHandle,
   configRoot: string,
   outputRoot: string,
 ): void {
@@ -252,7 +252,7 @@ function assertMockSyncManifestMatchesTrio(
 }
 
 describe('dry-ai sync', () => {
-  let mockFileSystem: MockFileSystemState;
+  let mockFileSystem: MockFileSystemHandle;
 
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
