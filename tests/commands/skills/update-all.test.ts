@@ -20,6 +20,7 @@ import {
   createTestEnv,
   hashFileSet,
   isAgentsSkillCloneCheckoutDir,
+  mockFailRemove,
   readMockTextFile,
   seedLocalSkillDirectory,
   seedRemoteSkillCheckout,
@@ -398,6 +399,129 @@ describe('dry-ai skills update-all', () => {
             ),
           ),
         ).toBe(false);
+      });
+
+      it('persists lockfile after the first skill when the second replace fails mid-filesystem swap', async () => {
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: FIRST_SKILL.name,
+          files: FIRST_SKILL.localFiles,
+        });
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: SECOND_SKILL.name,
+          files: SECOND_SKILL.localFiles,
+        });
+
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
+            version: 1,
+            skills: [
+              {
+                commit: FIRST_SKILL.originalCommit,
+                files: hashFileSet(FIRST_SKILL.localFiles),
+                importedAt: SAMPLE_IMPORTED_AT,
+                name: FIRST_SKILL.name,
+                path: FIRST_SKILL.path,
+                repo: SAMPLE_NORMALIZED_REPO,
+                updatedAt: SAMPLE_IMPORTED_AT,
+              },
+              {
+                commit: SECOND_SKILL.originalCommit,
+                files: hashFileSet(SECOND_SKILL.localFiles),
+                importedAt: SAMPLE_IMPORTED_AT,
+                name: SECOND_SKILL.name,
+                path: SECOND_SKILL.path,
+                repo: SAMPLE_NORMALIZED_REPO,
+                updatedAt: SAMPLE_IMPORTED_AT,
+              },
+            ],
+          }),
+        });
+
+        mockFailRemove({
+          handle: mockFileSystem,
+          absolutePath: path.join(
+            DEFAULT_SKILLS_SOURCE_ROOT,
+            SECOND_SKILL.name,
+          ),
+          message: 'simulated second-skill replace failure',
+        });
+
+        const environment = createTestEnv({ mockFileSystem });
+
+        await expect(
+          runCLI({
+            argv: ['skills', 'update-all'],
+            ...environment.cliOptions,
+          }),
+        ).rejects.toThrow('simulated second-skill replace failure');
+
+        expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+        const persistedPayload = mockFileSystem.lockfileWrites[0];
+        expect(persistedPayload).toBeDefined();
+
+        expect(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          }),
+        ).toBe(persistedPayload);
+
+        const persisted = JSON.parse(persistedPayload) as {
+          version: number;
+          skills: {
+            name: string;
+            commit: string;
+            files: Record<string, string>;
+            updatedAt: string;
+          }[];
+        };
+
+        expect(persisted.skills).toHaveLength(2);
+        expect(persisted.skills[0]).toEqual({
+          commit: FETCHED_COMMIT,
+          files: hashFileSet(FIRST_SKILL.remoteFiles),
+          importedAt: SAMPLE_IMPORTED_AT,
+          name: FIRST_SKILL.name,
+          path: FIRST_SKILL.path,
+          repo: SAMPLE_NORMALIZED_REPO,
+          updatedAt: UPDATED_AT,
+        });
+        expect(persisted.skills[1]).toEqual({
+          commit: SECOND_SKILL.originalCommit,
+          files: hashFileSet(SECOND_SKILL.localFiles),
+          importedAt: SAMPLE_IMPORTED_AT,
+          name: SECOND_SKILL.name,
+          path: SECOND_SKILL.path,
+          repo: SAMPLE_NORMALIZED_REPO,
+          updatedAt: SAMPLE_IMPORTED_AT,
+        });
+
+        expect(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(
+              DEFAULT_SKILLS_SOURCE_ROOT,
+              FIRST_SKILL.name,
+              'SKILL.md',
+            ),
+          }),
+        ).toBe(FIRST_SKILL.remoteFiles['SKILL.md']);
+        expect(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(
+              DEFAULT_SKILLS_SOURCE_ROOT,
+              SECOND_SKILL.name,
+              'SKILL.md',
+            ),
+          }),
+        ).toBe(SECOND_SKILL.localFiles['SKILL.md']);
       });
 
       it('prints "No managed skills to update." and exits cleanly when the lockfile has no entries', async () => {
