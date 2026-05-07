@@ -685,24 +685,32 @@ export function fetchRemoteSkillSnapshot(input: {
       repo: normalizedRepo,
     });
 
-    const sourceDir = yield* Effect.try({
-      try: () =>
-        resolveRemoteSkillDirectory({
-          checkoutDir: checkout.checkoutDir,
-          skillPath: input.skillPath,
-        }),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error(String(cause)),
-    });
+    const sourceDir = yield* Effect.gen(function* () {
+      const sd = yield* Effect.try({
+        try: () =>
+          resolveRemoteSkillDirectory({
+            checkoutDir: checkout.checkoutDir,
+            skillPath: input.skillPath,
+          }),
+        catch: (cause) =>
+          cause instanceof Error ? cause : new Error(String(cause)),
+      });
 
-    yield* validateRemoteSkillDirectoryEffect({
-      repo: normalizedRepo,
-      skillPath: input.skillPath,
-      sourceDir,
+      yield* validateRemoteSkillDirectoryEffect({
+        repo: normalizedRepo,
+        skillPath: input.skillPath,
+        sourceDir: sd,
+      }).pipe(
+        Effect.catchTag('RemoteSkillDirectoryInvalid', (e) =>
+          Effect.fail(new Error(e.message)),
+        ),
+      );
+
+      return sd;
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
-          yield* checkout.cleanup();
+          yield* checkout.cleanup().pipe(Effect.catchAll(() => Effect.void));
           return yield* Effect.fail(
             toError({
               prefix: `Failed to fetch skill from ${normalizedRepo}`,

@@ -8,6 +8,7 @@ import {
   formatManagedSkillSummary,
   loadSkillsLockfile,
   managedSkillNotFoundMessage,
+  ManagedSkillNotFoundError,
   removeManagedSkill,
   removeManagedSkillDirectory,
   saveSkillsLockfile,
@@ -25,7 +26,11 @@ type SkillsRemoveInput = {
 export function skillsRemoveEffect(options: {
   env: CommandEnv;
   input: SkillsRemoveInput;
-}): Effect.Effect<void, LoadSkillsLockfileError, FileSystem> {
+}): Effect.Effect<
+  void,
+  LoadSkillsLockfileError | ManagedSkillNotFoundError,
+  FileSystem
+> {
   const { env, input } = options;
   const { runtime } = env;
   const { skillName } = input;
@@ -34,8 +39,10 @@ export function skillsRemoveEffect(options: {
     const lockfile = yield* loadSkillsLockfile(env);
     const managedSkill = findManagedSkill(lockfile, { name: skillName });
 
-    if (managedSkill === undefined) {
-      throw new Error(managedSkillNotFoundMessage(skillName));
+    if (!managedSkill) {
+      return yield* new ManagedSkillNotFoundError({
+        message: managedSkillNotFoundMessage(skillName),
+      });
     }
 
     yield* removeManagedSkillDirectory(env, { skillName });

@@ -108,13 +108,17 @@ export function skillsAddEffect(options: {
     const normalizedBasePath = normalizeImportedSkillPath(input.repoPath);
 
     if (input.skillNames.length === 0) {
-      throw new Error('At least one skill name must be provided with --skill');
+      return yield* Effect.fail(
+        new Error('At least one skill name must be provided with --skill'),
+      );
     }
 
     const requestedSkillNames = normalizeRequestedSkillNames(input.skillNames);
 
     if (input.asName && requestedSkillNames.length !== 1) {
-      throw new Error('--as may only be used when importing exactly one skill');
+      return yield* Effect.fail(
+        new Error('--as may only be used when importing exactly one skill'),
+      );
     }
 
     yield* ensureSkillsRoot(env);
@@ -151,8 +155,8 @@ export function skillsAddEffect(options: {
         const targetDir = getManagedSkillDirectory(context, { skillName });
 
         if (yield* pathExistsInFileSystem(targetDir)) {
-          throw new Error(
-            `A local skill directory already exists: ${targetDir}`,
+          return yield* Effect.fail(
+            new Error(`A local skill directory already exists: ${targetDir}`),
           );
         }
 
@@ -162,12 +166,7 @@ export function skillsAddEffect(options: {
           skillPath: importedSkillPath,
         });
 
-        yield* replaceManagedSkillDirectory({
-          targetDir,
-          sourceDir,
-        });
-
-        const installedFiles = yield* computeDirectoryHashes(targetDir);
+        const installedFiles = yield* computeDirectoryHashes(sourceDir);
 
         const importedSkill = createImportedSkillRecord({
           commit: checkout.commit,
@@ -183,6 +182,12 @@ export function skillsAddEffect(options: {
           updatedSkill: importedSkill,
         });
         yield* saveSkillsLockfile(env, { lockfile });
+
+        yield* replaceManagedSkillDirectory({
+          targetDir,
+          sourceDir,
+        });
+
         importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
       }
     }).pipe(

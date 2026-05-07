@@ -34,7 +34,9 @@ export function syncEffect(options: {
       rootOptions.configRoot !== undefined &&
       !(yield* pathExistsInFileSystem(context.inputRoot))
     ) {
-      throw new Error(`Config root does not exist: ${context.inputRoot}`);
+      return yield* Effect.fail(
+        new Error(`Config root does not exist: ${context.inputRoot}`),
+      );
     }
 
     yield* ensureTargetDirectories(targetRoots);
