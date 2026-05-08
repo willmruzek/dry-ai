@@ -668,7 +668,7 @@ function serializeDirectoryHashesStable(
   fileHashes: Record<string, string>,
 ): string {
   const sortedEntries = Object.entries(fileHashes).sort(([left], [right]) =>
-    left.localeCompare(right),
+    left < right ? -1 : left > right ? 1 : 0,
   );
 
   return Either.getOrThrow(

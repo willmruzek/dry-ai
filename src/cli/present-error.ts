@@ -28,6 +28,7 @@ import {
   RemoteSkillValidationFsError,
   SkillContentHashReadError,
   SkillDirectoryWalkError,
+  SkillsLockfileEncodeError,
   SkillsLockfileExistsCheckError,
   SkillsLockfileReadContentsError,
   SkillsLockfileWriteError,
@@ -95,6 +96,9 @@ export function formatCliUserMessage(error: unknown): string {
   }
   if (error instanceof SkillsLockfileReadContentsError) {
     return `Could not read the skills lockfile: ${error.lockfilePath}`;
+  }
+  if (error instanceof SkillsLockfileEncodeError) {
+    return `Could not serialize the skills lockfile: ${error.lockfilePath}`;
   }
   if (error instanceof SkillsLockfileWriteError) {
     return `Could not write the skills lockfile: ${error.lockfilePath}`;
