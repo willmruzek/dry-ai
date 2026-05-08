@@ -1,7 +1,9 @@
 import type { FileSystem } from '@effect/platform/FileSystem';
 import { Command } from 'commander';
+import { Effect } from 'effect';
 import type { Layer } from 'effect/Layer';
 
+import { createCliLoggerLayer } from './cli/run-effect.js';
 import { addSkillsCommand } from './commands/skills/index.js';
 import { runSyncCommand } from './commands/sync.js';
 import { describeSupportedAgents } from './lib/agents.js';
@@ -26,7 +28,7 @@ export type { RootOptions } from './lib/command-options.js';
 /**
  * Raw stdout/stderr write functions, without newline conventions. These are
  * the CLI-layer primitive used by Commander for help and version output; they
- * also back the higher-level {@link CLIRuntime}.
+ * also feed {@link createCliLoggerLayer} so Effect logs share the same sinks.
  */
 export type StdioWriters = {
   writeOut: (output: string) => void;
@@ -90,25 +92,6 @@ export function resolveActiveContext(rootOptions: RootOptions): AgentsContext {
 }
 
 /**
- * Creates logging functions that write messages with a trailing newline to the provided stdio writers.
- *
- * @param stdioWriters - Writers used for standard output (`writeOut`) and error (`writeErr`)
- * @returns An object with `logInfo(message)` and `logWarn(message)` that write to `writeOut` and `writeErr`, respectively
- */
-function wrapStdioWriters(
-  stdioWriters: StdioWriters,
-): Pick<CLIRuntime, 'logInfo' | 'logWarn'> {
-  return {
-    logInfo(message) {
-      stdioWriters.writeOut(`${message}\n`);
-    },
-    logWarn(message) {
-      stdioWriters.writeErr(`${message}\n`);
-    },
-  };
-}
-
-/**
  * Creates the production stdio writers backed by the real process streams.
  */
 export function createProductionStdioWriters(): StdioWriters {
@@ -154,8 +137,8 @@ export function createCLI(options: CLIOptions): Command {
   const executableName = resolvedOptions.executableName;
   const stdioWriters = resolvedOptions.stdioWriters;
   const runtime: CLIRuntime = {
-    ...wrapStdioWriters(stdioWriters),
     fileSystemLayer: resolvedOptions.fileSystemLayer,
+    loggerLayer: createCliLoggerLayer(stdioWriters),
   };
 
   const resolveEnv = (): CommandEnv => {
@@ -223,8 +206,10 @@ export function createCLI(options: CLIOptions): Command {
       await runSyncCommand(env);
 
       if (wasRequestedOutputRootUsed(rootOptions)) {
-        runtime.logInfo(
-          `Generated output written to ${env.context.outputRoot}`,
+        await Effect.runPromise(
+          Effect.logInfo(
+            `Generated output written to ${env.context.outputRoot}`,
+          ).pipe(Effect.provide(runtime.loggerLayer)),
         );
       }
     });

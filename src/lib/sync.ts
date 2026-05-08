@@ -2,10 +2,13 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import type { PlatformError } from '@effect/platform/Error';
-import { SystemError } from '@effect/platform/Error';
 import { FileSystem } from '@effect/platform/FileSystem';
 import { Chalk } from 'chalk';
 import { Effect } from 'effect';
+import { Data } from 'effect';
+import * as Either from 'effect/Either';
+import * as ParseResult from 'effect/ParseResult';
+import * as Schema from 'effect/Schema';
 import { glob } from 'glob';
 import { z } from 'zod';
 
@@ -34,72 +37,284 @@ import {
   ruleFrontmatterSchema,
   validateFrontmatter,
 } from './frontmatter.js';
+import {
+  copyDirectoryContents,
+  ensureDirectory,
+  readFileUtf8,
+  ReadDirectoryError,
+  removePath,
+  writeTextFile,
+  EmptyDirError,
+  EnsureDirError,
+  PathExistsCheckError,
+  ReadFileError,
+  WriteFileError,
+  RemovePathError,
+  type CopyDirectoryContentsError,
+  type CopyDirectoryEntryError,
+} from './fs.js';
 import { computeDirectoryHashes, pathExistsInFileSystem } from './skills.js';
+
+function platformErrorLine(error: PlatformError): string {
+  if (error._tag === 'SystemError' || error._tag === 'BadArgument') {
+    return error.message;
+  }
+  return String(error);
+}
+
+/** Skills: ensure `~/.config/.../skills` (or configured skills root) exists. */
+export class EnsureSkillsSourceRootError extends Data.TaggedError(
+  'EnsureSkillsSourceRootError',
+)<{
+  readonly skillsRoot: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Ensuring skills source root ${this.skillsRoot}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: `fs.exists` failed while probing the lockfile path. */
+export class SkillsLockfileExistsCheckError extends Data.TaggedError(
+  'SkillsLockfileExistsCheckError',
+)<{
+  readonly lockfilePath: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Checking skills lockfile exists ${this.lockfilePath}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: read raw lockfile bytes before schema decode. */
+export class SkillsLockfileReadContentsError extends Data.TaggedError(
+  'SkillsLockfileReadContentsError',
+)<{
+  readonly lockfilePath: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Reading skills lockfile ${this.lockfilePath}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: persist sorted JSON lockfile. */
+export class SkillsLockfileWriteError extends Data.TaggedError(
+  'SkillsLockfileWriteError',
+)<{
+  readonly lockfilePath: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Writing skills lockfile ${this.lockfilePath}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: schema encode failed while serializing the lockfile (unexpected if data is valid). */
+export class SkillsLockfileEncodeError extends Data.TaggedError(
+  'SkillsLockfileEncodeError',
+)<{
+  readonly lockfilePath: string;
+  readonly cause: ParseResult.ParseError;
+}> {
+  override get message(): string {
+    return `Encoding skills lockfile ${this.lockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(this.cause)}`;
+  }
+}
+
+/** Skills: list subdirectory names under the skills source root. */
+export class ListSkillSubdirectoriesError extends Data.TaggedError(
+  'ListSkillSubdirectoriesError',
+)<{
+  readonly skillsRoot: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Listing skill directories under ${this.skillsRoot}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: temp dir for `git clone` / fetch checkout. */
+export class GitCheckoutTempDirectoryError extends Data.TaggedError(
+  'GitCheckoutTempDirectoryError',
+)<{
+  /** Prefix passed to {@link FileSystem.makeTempDirectory} (includes tmp root + template). */
+  readonly tempPrefix: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Creating temporary directory for git checkout (prefix ${this.tempPrefix}): ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: atomic replace of installed skill output (staging + swap). */
+export class ReplaceManagedSkillOutputError extends Data.TaggedError(
+  'ReplaceManagedSkillOutputError',
+)<{
+  readonly targetDir: string;
+  readonly sourceDir: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Replacing managed skill output at ${this.targetDir} (from ${this.sourceDir}): ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: remove imported skill folder under the skills source root. */
+export class RemoveManagedSkillDirectoryError extends Data.TaggedError(
+  'RemoveManagedSkillDirectoryError',
+)<{
+  readonly directoryPath: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Removing managed skill directory ${this.directoryPath}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: recursive walk for hashing / listing skill files. */
+export class SkillDirectoryWalkError extends Data.TaggedError(
+  'SkillDirectoryWalkError',
+)<{
+  readonly directoryPath: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Listing files under skill directory ${this.directoryPath}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: reading a file while computing SHA-256 hashes under a skill directory. */
+export class SkillContentHashReadError extends Data.TaggedError(
+  'SkillContentHashReadError',
+)<{
+  readonly directoryPath: string;
+  readonly relativePath: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Reading skill file for hashing ${path.join(this.directoryPath, this.relativePath)}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Skills: filesystem failures while validating remote skill layout (vs domain rule failures). */
+export class RemoteSkillValidationFsError extends Data.TaggedError(
+  'RemoteSkillValidationFsError',
+)<{
+  readonly sourceDir: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Validating remote skill at ${this.sourceDir}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Sync: stat on a path while scanning the skills tree. */
+export class SyncStatPathError extends Data.TaggedError('SyncStatPathError')<{
+  readonly path: string;
+  readonly cause: PlatformError;
+}> {
+  override get message(): string {
+    return `Inspecting path ${this.path}: ${platformErrorLine(this.cause)}`;
+  }
+}
+
+/** Globbing `*.md` under a command or rule source directory failed. */
+export class GlobMarkdownFilesError extends Data.TaggedError(
+  'GlobMarkdownFilesError',
+)<{
+  readonly rootDir: string;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    return `Glob markdown files under ${this.rootDir}: ${String(this.cause)}`;
+  }
+}
+
+/** `--config-root` was set but that directory does not exist. */
+export class ConfigRootMissingError extends Data.TaggedError(
+  'ConfigRootMissingError',
+)<{
+  readonly inputRoot: string;
+}> {
+  override get message(): string {
+    return `Config root does not exist: ${this.inputRoot}`;
+  }
+}
+
+/** `sync-manifest.json` references an agent name not present in the built-in registry. */
+export class SyncManifestUnregisteredAgentError extends Data.TaggedError(
+  'SyncManifestUnregisteredAgentError',
+)<{
+  readonly agentName: string;
+}> {
+  override get message(): string {
+    return `sync-manifest.json references unregistered agent "${this.agentName}". Remove entries for "${this.agentName}" from sync-manifest.json, or delete sync-manifest.json to rebuild it on the next sync.`;
+  }
+}
+
+/** Union of sync-local tagged filesystem errors (under `lib/sync` helpers). */
+export type SyncFilesystemTaggedError =
+  | EnsureDirError
+  | ReadFileError
+  | WriteFileError
+  | EmptyDirError
+  | RemovePathError
+  | ReadDirectoryError
+  | SyncStatPathError
+  | GlobMarkdownFilesError
+  | CopyDirectoryEntryError;
+
+/** Union of skills-local tagged filesystem errors. */
+export type SkillsFilesystemTaggedError =
+  | EnsureSkillsSourceRootError
+  | SkillsLockfileExistsCheckError
+  | SkillsLockfileReadContentsError
+  | SkillsLockfileWriteError
+  | SkillsLockfileEncodeError
+  | PathExistsCheckError
+  | ListSkillSubdirectoriesError
+  | GitCheckoutTempDirectoryError
+  | ReplaceManagedSkillOutputError
+  | RemoveManagedSkillDirectoryError
+  | SkillDirectoryWalkError
+  | SkillContentHashReadError
+  | RemoteSkillValidationFsError;
+
+/** Any structured filesystem failure emitted by dry-ai I/O helpers. */
+export type FilesystemTaggedError =
+  | SyncFilesystemTaggedError
+  | SkillsFilesystemTaggedError;
 
 /** Written to `sync-manifest.json`; bump when the manifest shape changes. */
 export const SYNC_MANIFEST_VERSION = 2 as const;
+
+/**
+ * Full failure set for `runSyncCommand` / `syncEffect` (config check, spec build, apply, manifest write).
+ * Intentionally sync-only: does not include skills lockfile or other CLI errors.
+ */
+export type { CopyDirectoryContentsError } from './fs.js';
+
+export type SyncEffectError =
+  | PathExistsCheckError
+  | GlobMarkdownFilesError
+  | ConfigRootMissingError
+  | SyncManifestUnregisteredAgentError
+  | EnsureDirError
+  | ReadFileError
+  | WriteFileError
+  | ReadDirectoryError
+  | SyncStatPathError
+  | RemovePathError
+  | SkillDirectoryWalkError
+  | SkillContentHashReadError
+  | EmptyDirError
+  | CopyDirectoryEntryError;
 
 type SyncAppliedChangeType = 'installed' | 'updated' | 'unchanged';
 type SyncChangeType = SyncAppliedChangeType | 'removed';
 
 const chalk = new Chalk({ level: 3 });
-
-function ensureDirectory(
-  directoryPath: string,
-): Effect.Effect<void, PlatformError, FileSystem> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    yield* fs.makeDirectory(directoryPath, { recursive: true });
-  });
-}
-
-function readFileUtf8(
-  filePath: string,
-): Effect.Effect<string, PlatformError, FileSystem> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    return yield* fs.readFileString(filePath);
-  });
-}
-
-function writeTextFile(
-  filePath: string,
-  content: string,
-): Effect.Effect<void, PlatformError, FileSystem> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    yield* fs.makeDirectory(path.dirname(filePath), { recursive: true });
-    yield* fs.writeFile(filePath, new TextEncoder().encode(content));
-  });
-}
-
-function removePath(
-  targetPath: string,
-): Effect.Effect<void, PlatformError, FileSystem> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    yield* fs.remove(targetPath, { recursive: true, force: true });
-  });
-}
-
-/**
- * Clears a directory’s contents and ensures the directory exists (like `fs-extra.emptyDir`).
- */
-function emptyDirectory(
-  directoryPath: string,
-): Effect.Effect<void, PlatformError, FileSystem> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem;
-    yield* fs.remove(directoryPath, { recursive: true, force: true }).pipe(
-      Effect.catchIf(
-        (error): error is SystemError =>
-          error instanceof SystemError && error.reason === 'NotFound',
-        () => Effect.void,
-      ),
-    );
-    yield* fs.makeDirectory(directoryPath, { recursive: true });
-  });
-}
 
 const syncAgentSchema = z.custom<SyncAgent>(
   (value) => typeof value === 'string' && isSyncAgent(value),
@@ -189,6 +404,35 @@ type SyncApplyResult = {
 type SyncManifestEntry = z.output<typeof syncManifestEntrySchema>;
 type SyncManifest = z.output<typeof syncManifestSchema>;
 
+/** Encodes manifest for `sync-manifest.json` (2-space indent; Effect Schema JSON path, not raw `JSON.stringify`). */
+const SYNC_MANIFEST_FOR_FILE = Schema.parseJson(
+  Schema.Struct({
+    version: Schema.Literal(SYNC_MANIFEST_VERSION),
+    outputs: Schema.Array(
+      Schema.Struct({
+        agent: Schema.String,
+        kind: Schema.Union(
+          Schema.Literal('command'),
+          Schema.Literal('rule'),
+          Schema.Literal('skill'),
+        ),
+        name: Schema.String,
+        outputPath: Schema.String,
+      }),
+    ),
+  }),
+  { space: 2 },
+);
+
+function encodeSyncManifestJsonLines(manifest: SyncManifest): string {
+  return `${Either.getOrThrow(
+    Schema.encodeEither(SYNC_MANIFEST_FOR_FILE)(manifest),
+  )}\n`;
+}
+
+/** Parses JSON text to `unknown`; malformed JSON is reported as `Left` (no raw `JSON.parse`). */
+const decodeJsonUnknown = Schema.decodeUnknownEither(Schema.parseJson());
+
 /**
  * Validates and returns the agent name from an artifact spec, throwing if it is unrecognized.
  */
@@ -267,7 +511,7 @@ function findUnregisteredManifestAgent(
  */
 export function ensureTargetDirectories(
   targetRoots: TargetRoots,
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<void, EnsureDirError, FileSystem> {
   const paths = listTargetRootPaths(targetRoots);
 
   return Effect.all(
@@ -290,9 +534,12 @@ export function ensureTargetDirectories(
  * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
 export function loadSyncManifest(
-  env: CommandEnv,
   manifestPath: string,
-): Effect.Effect<SyncManifest, Error | PlatformError, FileSystem> {
+): Effect.Effect<
+  SyncManifest,
+  SyncManifestUnregisteredAgentError | PathExistsCheckError | ReadFileError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     if (!(yield* pathExistsInFileSystem(manifestPath))) {
       return createSyncManifest([]);
@@ -301,11 +548,9 @@ export function loadSyncManifest(
     const rawManifest = yield* readFileUtf8(manifestPath).pipe(
       Effect.catchAll(() =>
         Effect.gen(function* () {
-          yield* Effect.sync(() => {
-            env.runtime.logWarn(
-              `Could not read sync-manifest.json. Removed commands, rules, or skills may leave untracked files behind that require manual cleanup.`,
-            );
-          });
+          yield* Effect.logWarning(
+            `Could not read sync-manifest.json. Removed commands, rules, or skills may leave untracked files behind that require manual cleanup.`,
+          );
           return undefined;
         }),
       ),
@@ -315,17 +560,15 @@ export function loadSyncManifest(
       return createSyncManifest([]);
     }
 
-    let parsedManifest: unknown;
-    try {
-      parsedManifest = JSON.parse(rawManifest);
-    } catch {
-      yield* Effect.sync(() => {
-        env.runtime.logWarn(
-          `sync-manifest.json is damaged or incomplete. Removed config entries may leave untracked files behind that require manual cleanup.`,
-        );
-      });
+    const parsedEither = decodeJsonUnknown(rawManifest);
+    if (Either.isLeft(parsedEither)) {
+      yield* Effect.logWarning(
+        `sync-manifest.json is damaged or incomplete. Removed config entries may leave untracked files behind that require manual cleanup.`,
+      );
       return createSyncManifest([]);
     }
+
+    const parsedManifest: unknown = parsedEither.right;
 
     const strictResult = syncManifestSchema.safeParse(parsedManifest);
 
@@ -335,18 +578,14 @@ export function loadSyncManifest(
 
     const unregisteredAgent = findUnregisteredManifestAgent(parsedManifest);
     if (unregisteredAgent !== undefined) {
-      return yield* Effect.fail(
-        new Error(
-          `sync-manifest.json references unregistered agent "${unregisteredAgent}". Remove entries for "${unregisteredAgent}" from sync-manifest.json, or delete sync-manifest.json to rebuild it on the next sync.`,
-        ),
-      );
+      return yield* new SyncManifestUnregisteredAgentError({
+        agentName: unregisteredAgent,
+      });
     }
 
-    yield* Effect.sync(() => {
-      env.runtime.logWarn(
-        `sync-manifest.json did not match the expected layout. Removed config entries may leave untracked files behind that require manual cleanup.`,
-      );
-    });
+    yield* Effect.logWarning(
+      `sync-manifest.json did not match the expected layout. Removed config entries may leave untracked files behind that require manual cleanup.`,
+    );
     return createSyncManifest([]);
   });
 }
@@ -359,13 +598,10 @@ export function loadSyncManifest(
 export function saveSyncManifest(
   manifestPath: string,
   manifest: SyncManifest,
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<void, EnsureDirError | WriteFileError, FileSystem> {
   return Effect.gen(function* () {
     yield* ensureDirectory(path.dirname(manifestPath));
-    yield* writeTextFile(
-      manifestPath,
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    );
+    yield* writeTextFile(manifestPath, encodeSyncManifestJsonLines(manifest));
   });
 }
 
@@ -392,13 +628,16 @@ export function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
  */
 function getMarkdownFilePaths(
   rootDir: string,
-): Effect.Effect<string[], Error | PlatformError, FileSystem> {
+): Effect.Effect<
+  string[],
+  GlobMarkdownFilesError | EnsureDirError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     yield* ensureDirectory(rootDir);
     const matches = yield* Effect.tryPromise({
       try: () => glob([path.join(rootDir, '*.md')]),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error(String(cause)),
+      catch: (cause) => new GlobMarkdownFilesError({ rootDir, cause }),
     });
     return [...matches].sort();
   });
@@ -413,8 +652,28 @@ function writeMarkdownFile<Metadata extends Record<string, unknown>>(
   filePath: string,
   metadata: Metadata,
   body: string,
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<void, WriteFileError, FileSystem> {
   return writeTextFile(filePath, renderMarkdown({ metadata, body }));
+}
+
+/** JSON array of `[relativePath, hexDigest]` pairs (sorted by path) for directory artifact hashing. */
+const DIRECTORY_HASH_ENTRIES_JSON = Schema.parseJson(
+  Schema.Array(Schema.Tuple(Schema.String, Schema.String)),
+);
+
+/**
+ * Stable JSON text for hashing directory contents — uses Schema `parseJson` encoding instead of raw `JSON.stringify`.
+ */
+function serializeDirectoryHashesStable(
+  fileHashes: Record<string, string>,
+): string {
+  const sortedEntries = Object.entries(fileHashes).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+
+  return Either.getOrThrow(
+    Schema.encodeEither(DIRECTORY_HASH_ENTRIES_JSON)(sortedEntries),
+  );
 }
 
 /**
@@ -430,7 +689,11 @@ function writeMarkdownFile<Metadata extends Record<string, unknown>>(
  */
 function computeArtifactSpecContentHash(
   artifactSpec: ArtifactSpec,
-): Effect.Effect<string, PlatformError, FileSystem> {
+): Effect.Effect<
+  string,
+  SkillDirectoryWalkError | SkillContentHashReadError,
+  FileSystem
+> {
   if (artifactSpec.artifactType === 'markdown') {
     const content = renderMarkdown({
       metadata: artifactSpec.metadata,
@@ -441,11 +704,7 @@ function computeArtifactSpecContentHash(
 
   return Effect.gen(function* () {
     const fileHashes = yield* computeDirectoryHashes(artifactSpec.sourceDir);
-    const serialized = JSON.stringify(
-      Object.entries(fileHashes).sort(([left], [right]) =>
-        left.localeCompare(right),
-      ),
-    );
+    const serialized = serializeDirectoryHashesStable(fileHashes);
     return createHash('sha256').update(serialized).digest('hex');
   });
 }
@@ -477,13 +736,9 @@ function computeOnDiskArtifactContentHash(
     const fileHashes = yield* computeDirectoryHashes(
       artifactSpec.managedArtifactPath,
     );
-    const serialized = JSON.stringify(
-      Object.entries(fileHashes).sort(([left], [right]) =>
-        left.localeCompare(right),
-      ),
-    );
+    const serialized = serializeDirectoryHashesStable(fileHashes);
     return createHash('sha256').update(serialized).digest('hex');
-  }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+  }).pipe(Effect.catchAll(() => Effect.sync(() => undefined)));
 }
 
 /**
@@ -513,7 +768,7 @@ function getArtifactSpecMaterializedPath(artifactSpec: ArtifactSpec): string {
 function detectAppliedChangeType(input: {
   artifactSpec: ArtifactSpec;
   desiredContentHash: string;
-}): Effect.Effect<SyncAppliedChangeType, PlatformError, FileSystem> {
+}): Effect.Effect<SyncAppliedChangeType, PathExistsCheckError, FileSystem> {
   return Effect.gen(function* () {
     const artifactExists = yield* pathExistsInFileSystem(
       getArtifactSpecMaterializedPath(input.artifactSpec),
@@ -541,7 +796,15 @@ function detectAppliedChangeType(input: {
  */
 function applyDesiredSyncSpec(
   desiredSpec: DesiredSyncSpec,
-): Effect.Effect<AppliedSyncResult, PlatformError, FileSystem> {
+): Effect.Effect<
+  AppliedSyncResult,
+  | SkillDirectoryWalkError
+  | SkillContentHashReadError
+  | PathExistsCheckError
+  | WriteFileError
+  | CopyDirectoryContentsError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     const directoryHashCache = new Map<string, string>();
 
@@ -594,7 +857,11 @@ function applyDesiredSyncSpec(
  */
 function writeArtifactSpec(
   artifactSpec: ArtifactSpec,
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<
+  void,
+  WriteFileError | CopyDirectoryContentsError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     if (artifactSpec.artifactType === 'markdown') {
       yield* writeMarkdownFile(
@@ -614,7 +881,15 @@ function writeArtifactSpec(
 
 export function buildDesiredSyncSpecs(
   env: CommandEnv,
-): Effect.Effect<DesiredSyncSpec[], Error | PlatformError, FileSystem> {
+): Effect.Effect<
+  DesiredSyncSpec[],
+  | GlobMarkdownFilesError
+  | EnsureDirError
+  | ReadFileError
+  | ReadDirectoryError
+  | SyncStatPathError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     const commandSpecs = yield* buildCommandSyncSpecs(env);
     const ruleSpecs = yield* buildRuleSyncSpecs(env);
@@ -630,8 +905,12 @@ export function buildDesiredSyncSpecs(
  */
 function buildCommandSyncSpecs(
   env: CommandEnv,
-): Effect.Effect<DesiredSyncSpec[], Error | PlatformError, FileSystem> {
-  const { context, runtime } = env;
+): Effect.Effect<
+  DesiredSyncSpec[],
+  GlobMarkdownFilesError | EnsureDirError | ReadFileError,
+  FileSystem
+> {
+  const { context } = env;
   const { targetRoots } = context;
 
   return Effect.gen(function* () {
@@ -646,7 +925,7 @@ function buildCommandSyncSpecs(
 
       const { metadata, body } = parseMdWithFrontmatter(rawContent);
 
-      const commandMetadata = validateFrontmatter(runtime, {
+      const commandMetadata = yield* validateFrontmatter({
         filePath,
         metadata,
         schema: commandFrontmatterSchema,
@@ -657,7 +936,7 @@ function buildCommandSyncSpecs(
       }
 
       const commandName = commandMetadata.name;
-      const artifactSpecs = buildCommandArtifactSpecsByAgent(runtime, {
+      const artifactSpecs = yield* buildCommandArtifactSpecsByAgent({
         filePath,
         body,
         frontmatter: commandMetadata,
@@ -687,8 +966,12 @@ function buildCommandSyncSpecs(
  */
 function buildRuleSyncSpecs(
   env: CommandEnv,
-): Effect.Effect<DesiredSyncSpec[], Error | PlatformError, FileSystem> {
-  const { context, runtime } = env;
+): Effect.Effect<
+  DesiredSyncSpec[],
+  GlobMarkdownFilesError | EnsureDirError | ReadFileError,
+  FileSystem
+> {
+  const { context } = env;
   const { targetRoots } = context;
 
   return Effect.gen(function* () {
@@ -700,7 +983,7 @@ function buildRuleSyncSpecs(
       const fileName = path.basename(filePath, '.md');
       const rawContent = yield* readFileUtf8(filePath);
       const { metadata, body } = parseMdWithFrontmatter(rawContent);
-      const ruleMetadata = validateFrontmatter(runtime, {
+      const ruleMetadata = yield* validateFrontmatter({
         filePath,
         metadata,
         schema: ruleFrontmatterSchema,
@@ -710,7 +993,7 @@ function buildRuleSyncSpecs(
         continue;
       }
 
-      const artifactSpecs = buildRuleArtifactSpecsByAgent(runtime, {
+      const artifactSpecs = yield* buildRuleArtifactSpecsByAgent({
         filePath,
         body,
         frontmatter: ruleMetadata,
@@ -740,7 +1023,11 @@ function buildRuleSyncSpecs(
  */
 function buildSkillSyncSpecs(
   env: CommandEnv,
-): Effect.Effect<DesiredSyncSpec[], PlatformError, FileSystem> {
+): Effect.Effect<
+  DesiredSyncSpec[],
+  EnsureDirError | ReadDirectoryError | SyncStatPathError,
+  FileSystem
+> {
   const { context } = env;
   const { targetRoots } = context;
 
@@ -748,13 +1035,27 @@ function buildSkillSyncSpecs(
     yield* ensureDirectory(context.sourceRoots.skills);
 
     const fs = yield* FileSystem;
-    const entryNames = yield* fs.readDirectory(context.sourceRoots.skills);
+    const entryNames = yield* fs.readDirectory(context.sourceRoots.skills).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ReadDirectoryError({
+            directoryPath: context.sourceRoots.skills,
+            cause,
+          }),
+      ),
+    );
 
     const desiredSpecs: DesiredSyncSpec[] = [];
 
     for (const entryName of entryNames) {
       const entryPath = path.join(context.sourceRoots.skills, entryName);
-      const info = yield* fs.stat(entryPath);
+      const info = yield* fs
+        .stat(entryPath)
+        .pipe(
+          Effect.mapError(
+            (cause) => new SyncStatPathError({ path: entryPath, cause }),
+          ),
+        );
 
       if (info.type !== 'Directory') {
         continue;
@@ -779,30 +1080,6 @@ function buildSkillSyncSpecs(
     }
 
     return desiredSpecs;
-  });
-}
-
-/**
- * Clears targetDir and copies all direct entries from sourceDir into it.
- *
- * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
- */
-function copyDirectoryContents(
-  sourceDir: string,
-  targetDir: string,
-): Effect.Effect<void, PlatformError, FileSystem> {
-  return Effect.gen(function* () {
-    yield* emptyDirectory(targetDir);
-
-    const fs = yield* FileSystem;
-    const entryNames = yield* fs.readDirectory(sourceDir);
-
-    for (const entryName of entryNames) {
-      yield* fs.copy(
-        path.join(sourceDir, entryName),
-        path.join(targetDir, entryName),
-      );
-    }
   });
 }
 
@@ -838,7 +1115,16 @@ export function prepareSyncChanges(input: {
 
 export function applySyncChanges(
   changes: SyncChanges,
-): Effect.Effect<SyncApplyResult, PlatformError, FileSystem> {
+): Effect.Effect<
+  SyncApplyResult,
+  | RemovePathError
+  | SkillDirectoryWalkError
+  | SkillContentHashReadError
+  | PathExistsCheckError
+  | WriteFileError
+  | CopyDirectoryContentsError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     yield* removeStaleOutputs(changes.removedEntries);
 
@@ -1009,7 +1295,7 @@ function partitionManifestEntries(
  */
 function removeStaleOutputs(
   removedEntries: SyncManifestEntry[],
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<void, RemovePathError, FileSystem> {
   return Effect.forEach(
     removedEntries,
     (entry) => removePath(entry.outputPath),

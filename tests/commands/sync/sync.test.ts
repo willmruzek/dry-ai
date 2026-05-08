@@ -29,7 +29,7 @@ import {
   readMockTextFile,
   removeMockPath,
   storeMockTextFile,
-} from '../../helpers.js';
+} from '../../helpers.ts';
 
 vi.mock('node:os', () => ({
   default: {
@@ -6723,7 +6723,7 @@ describe('dry-ai sync', () => {
           describe('Then the CLI throws a clear error and does not write a manifest', () => {
             it('passes', async () => {
               const missingConfigRoot = '/virtual/missing-config-root';
-              const { cliOptions, stderrMessages } = createTestEnv({
+              const { cliOptions } = createTestEnv({
                 mockFileSystem,
               });
 
@@ -6736,7 +6736,6 @@ describe('dry-ai sync', () => {
                 `Config root does not exist: ${missingConfigRoot}`,
               );
 
-              expect(stderrMessages).toEqual([]);
               expect(
                 mockFileSystem.files.has(
                   path.join(missingConfigRoot, 'sync-manifest.json'),
@@ -6782,7 +6781,7 @@ describe('dry-ai sync', () => {
                 }),
               });
 
-              const { cliOptions, stderrMessages } = createTestEnv({
+              const { cliOptions } = createTestEnv({
                 mockFileSystem,
               });
 
@@ -6796,7 +6795,6 @@ describe('dry-ai sync', () => {
               );
 
               expect(mockFileSystem.files.has(staleOutputPath)).toBe(true);
-              expect(stderrMessages).toEqual([]);
             });
           });
         });
@@ -6914,7 +6912,7 @@ describe('dry-ai sync', () => {
                   argv: ['sync'],
                   ...cliOptions,
                 }),
-              ).rejects.toThrow('read failed');
+              ).rejects.toThrow(/Could not read file:/);
             });
           });
         });
@@ -6961,7 +6959,7 @@ describe('dry-ai sync', () => {
                   argv: ['sync'],
                   ...cliOptions,
                 }),
-              ).rejects.toThrow('write target failed');
+              ).rejects.toThrow(/Could not write file:/);
 
               expect(mockFileSystem.files.has(failingOutputPath)).toBe(false);
               expect(
@@ -7071,7 +7069,7 @@ describe('dry-ai sync', () => {
                   argv: ['sync'],
                   ...cliOptions,
                 }),
-              ).rejects.toThrow('rule write failed');
+              ).rejects.toThrow(/Could not write file:/);
               expect(mockFileSystem.files.has(failingRulePath)).toBe(false);
               expect(
                 mockFileSystem.files.has(
@@ -7185,7 +7183,7 @@ describe('dry-ai sync', () => {
                   argv: ['sync'],
                   ...cliOptions,
                 }),
-              ).rejects.toThrow('ensureDir failed');
+              ).rejects.toThrow(/Could not write file:/);
               expect(
                 mockFileSystem.files.has(
                   path.join(failingParentDir, 'SKILL.md'),

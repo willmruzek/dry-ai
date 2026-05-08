@@ -5,6 +5,7 @@ import { Cause, Chunk, Runtime } from 'effect';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
+import { CliHandledFiberFailure } from '../../../src/cli/run-effect.js';
 import { InvalidSkillsLockfile } from '../../../src/lib/skills.js';
 
 import {
@@ -20,11 +21,14 @@ import {
   createTestEnv,
   seedLocalSkillDirectory,
   storeMockTextFile,
-} from '../../helpers.js';
+} from '../../helpers.ts';
 
 function findInvalidSkillsLockfileInCause(
   err: unknown,
 ): InvalidSkillsLockfile | undefined {
+  if (err instanceof CliHandledFiberFailure) {
+    return findInvalidSkillsLockfileInCause(err.fiberFailure);
+  }
   if (err instanceof InvalidSkillsLockfile) {
     return err;
   }
@@ -236,12 +240,11 @@ describe('dry-ai skills remove', () => {
           ...environment.cliOptions,
         }),
       ).rejects.toThrow(
-        `Managed skill not found: ${REMOVED_SKILL.name}. Run \`skills list\` to see managed skill names, or \`skills add <repo> --skill <name>\` to import one.`,
+        `No managed skill named "${REMOVED_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.`,
       );
 
       // Assert
       expect(mockFileSystem.lockfileWrites).toHaveLength(0);
-      expect(environment.stderrMessages).toEqual([]);
       expect(environment.stdoutMessages).toEqual([]);
     });
 
@@ -256,12 +259,11 @@ describe('dry-ai skills remove', () => {
           ...environment.cliOptions,
         }),
       ).rejects.toThrow(
-        `Managed skill not found: ${REMOVED_SKILL.name}. Run \`skills list\` to see managed skill names, or \`skills add <repo> --skill <name>\` to import one.`,
+        `No managed skill named "${REMOVED_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.`,
       );
 
       // Assert
       expect(mockFileSystem.lockfileWrites).toHaveLength(0);
-      expect(environment.stderrMessages).toEqual([]);
       expect(environment.stdoutMessages).toEqual([]);
     });
 
@@ -325,7 +327,6 @@ describe('dry-ai skills remove', () => {
 
         // Assert
         expect(mockFileSystem.lockfileWrites).toHaveLength(0);
-        expect(environment.stderrMessages).toEqual([]);
         expect(environment.stdoutMessages).toEqual([]);
       },
     );

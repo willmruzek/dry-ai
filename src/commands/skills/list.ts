@@ -1,6 +1,7 @@
 import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
+import { runCliEffect } from '../../cli/run-effect.js';
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
   ensureSkillsRoot,
@@ -10,6 +11,10 @@ import {
   listLocalSkillDirectories,
   loadSkillsLockfile,
 } from '../../lib/skills.js';
+import type {
+  EnsureSkillsSourceRootError,
+  ListSkillSubdirectoriesError,
+} from '../../lib/sync.js';
 
 /**
  * Effect program: ensure skills root, load lockfile and local directories, log
@@ -18,9 +23,14 @@ import {
  */
 export function skillsListEffect(options: {
   env: CommandEnv;
-}): Effect.Effect<void, LoadSkillsLockfileError, FileSystem> {
+}): Effect.Effect<
+  void,
+  | LoadSkillsLockfileError
+  | EnsureSkillsSourceRootError
+  | ListSkillSubdirectoriesError,
+  FileSystem
+> {
   const { env } = options;
-  const { runtime } = env;
 
   return Effect.gen(function* () {
     yield* ensureSkillsRoot(env);
@@ -49,15 +59,11 @@ export function skillsListEffect(options: {
     const outputLines = [...localSkillLines, ...missingManagedLines];
 
     if (outputLines.length === 0) {
-      yield* Effect.sync(() => {
-        runtime.logInfo('No local skills found.');
-      });
+      yield* Effect.logInfo('No local skills found.');
       return;
     }
 
-    yield* Effect.sync(() => {
-      runtime.logInfo(outputLines.join('\n'));
-    });
+    yield* Effect.logInfo(outputLines.join('\n'));
   });
 }
 
@@ -65,7 +71,8 @@ export function skillsListEffect(options: {
  * Lists local skills and annotates which ones are managed by the lockfile.
  */
 export function runSkillsListCommand(env: CommandEnv): Promise<void> {
-  return Effect.runPromise(
+  return runCliEffect(
+    env,
     skillsListEffect({ env }).pipe(Effect.provide(env.runtime.fileSystemLayer)),
   );
 }

@@ -1,5 +1,6 @@
 import { Effect } from 'effect';
 
+import { runCliEffect } from '../../cli/run-effect.js';
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
   cleanupRemoteSkillSnapshot,
@@ -31,16 +32,14 @@ export function skillsUpdateAllEffect(options: {
   input: SkillsUpdateAllInput;
 }) {
   const { env, input } = options;
-  const { context, runtime } = env;
+  const { context } = env;
   const { force } = input;
 
   return Effect.gen(function* () {
     let lockfile = yield* loadSkillsLockfile(env);
 
     if (lockfile.skills.length === 0) {
-      yield* Effect.sync(() => {
-        runtime.logInfo('No managed skills to update.');
-      });
+      yield* Effect.logInfo('No managed skills to update.');
       return;
     }
 
@@ -97,23 +96,17 @@ export function skillsUpdateAllEffect(options: {
     }
 
     if (updatedLines.length > 0) {
-      yield* Effect.sync(() => {
-        runtime.logInfo(
-          `Updated ${updatedLines.length} managed skills:\n${updatedLines.join('\n')}`,
-        );
-      });
+      yield* Effect.logInfo(
+        `Updated ${updatedLines.length} managed skills:\n${updatedLines.join('\n')}`,
+      );
     } else {
-      yield* Effect.sync(() => {
-        runtime.logInfo('No managed skills were updated.');
-      });
+      yield* Effect.logInfo('No managed skills were updated.');
     }
 
     if (skippedLines.length > 0) {
-      yield* Effect.sync(() => {
-        runtime.logWarn(
-          `Skipped ${skippedLines.length} managed skills due to local edits. Re-run with --force to overwrite local changes:\n${skippedLines.join('\n')}`,
-        );
-      });
+      yield* Effect.logWarning(
+        `Skipped ${skippedLines.length} managed skills due to local edits. Re-run with --force to overwrite local changes:\n${skippedLines.join('\n')}`,
+      );
     }
   });
 }
@@ -129,7 +122,8 @@ export function runSkillsUpdateAllCommand(
   env: CommandEnv,
   input: SkillsUpdateAllInput,
 ): Promise<void> {
-  return Effect.runPromise(
+  return runCliEffect(
+    env,
     skillsUpdateAllEffect({ env, input }).pipe(
       Effect.provide(env.runtime.fileSystemLayer),
     ),

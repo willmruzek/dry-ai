@@ -31,4 +31,16 @@ export default [
       '@typescript-eslint/no-empty-function': 'off',
     },
   },
+  // {
+  //   files: ['src/lib/sync.ts'],
+  //   rules: {
+  //     // sync.ts wraps Effect.FileSystem failures in Data.TaggedError subclasses from tagged-fs-errors.ts.
+  //     // Imports use `./tagged-fs-errors.js` because Node ESM requires explicit `.js` specifiers on relative
+  //     // imports (including when authoring `.ts` sources that compile to `.js`). ESLint’s type-aware
+  //     // checks sometimes flag those constructors and Effect failure widening as “unsafe” even when `tsc`
+  //     // is satisfied, so these rules are disabled only for this file.
+  //     '@typescript-eslint/no-unsafe-call': 'off',
+  //     '@typescript-eslint/no-unsafe-return': 'off',
+  //   },
+  // },
 ];

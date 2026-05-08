@@ -341,7 +341,13 @@ export function mockFileSystemLayer(
         const failures = yield* Ref.get(handle.failuresRef);
         const failMsg = failures.makeDirectory.get(normalizedDirectoryPath);
         if (failMsg !== undefined) {
-          return yield* Effect.die(new Error(failMsg));
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'makeDirectory',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: directoryPath,
+          });
         }
 
         yield* Ref.update(handle.snapshotRef, (s) =>
@@ -377,7 +383,13 @@ export function mockFileSystemLayer(
         const failures = yield* Ref.get(handle.failuresRef);
         const failMsg = failures.copyDest.get(normalizedTo);
         if (failMsg !== undefined) {
-          return yield* Effect.die(new Error(failMsg));
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'copy',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: toPath,
+          });
         }
 
         yield* Effect.sync(() =>
@@ -401,14 +413,34 @@ export function mockFileSystemLayer(
 
     remove: (
       targetPath: string,
-      _options?: { force?: boolean; recursive?: boolean },
+      options?: { force?: boolean; recursive?: boolean },
     ) =>
       Effect.gen(function* () {
         const norm = normalizeMockPath(targetPath);
         const failures = yield* Ref.get(handle.failuresRef);
         const failMsg = failures.remove.get(norm);
         if (failMsg !== undefined) {
-          return yield* Effect.die(new Error(failMsg));
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'remove',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: targetPath,
+          });
+        }
+
+        const snap = yield* Ref.get(handle.snapshotRef);
+        if (!mockPathExistsSnapshot(snap, targetPath)) {
+          if (options?.force === true) {
+            return;
+          }
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'remove',
+            reason: 'NotFound',
+            description: 'No such file or directory',
+            pathOrDescriptor: targetPath,
+          });
         }
 
         yield* Effect.sync(() => removeMockPath({ handle, targetPath }));
@@ -482,7 +514,13 @@ export function mockFileSystemLayer(
         const failures = yield* Ref.get(handle.failuresRef);
         const failMsg = failures.readFileString.get(norm);
         if (failMsg !== undefined) {
-          return yield* Effect.die(new Error(failMsg));
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'readFileString',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: filePath,
+          });
         }
 
         const snap = yield* Ref.get(handle.snapshotRef);
@@ -532,7 +570,13 @@ export function mockFileSystemLayer(
         const failures = yield* Ref.get(handle.failuresRef);
         const failMsg = failures.writeFile.get(normalizedFilePath);
         if (failMsg !== undefined) {
-          return yield* Effect.die(new Error(failMsg));
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'writeFile',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: filePath,
+          });
         }
 
         const parentDirectoryPath = path.dirname(normalizedFilePath);

@@ -11,6 +11,21 @@ import { simpleGit } from 'simple-git';
 
 import type { CommandEnv } from './command-env.js';
 import type { AgentsContext } from './context.js';
+import { PathExistsCheckError } from './fs.js';
+import {
+  EnsureSkillsSourceRootError,
+  GitCheckoutTempDirectoryError,
+  ListSkillSubdirectoriesError,
+  RemoteSkillValidationFsError,
+  RemoveManagedSkillDirectoryError,
+  ReplaceManagedSkillOutputError,
+  SkillContentHashReadError,
+  SkillDirectoryWalkError,
+  SkillsLockfileExistsCheckError,
+  SkillsLockfileEncodeError,
+  SkillsLockfileReadContentsError,
+  SkillsLockfileWriteError,
+} from './sync.js';
 
 /** Subset of {@link CommandEnv} used to load the skills lockfile via Effect `FileSystem`. */
 export type SkillsLockfileEnv = Pick<CommandEnv, 'context' | 'runtime'>;
@@ -50,28 +65,134 @@ const SkillsLockfile = Schema.Struct({
   }),
 );
 
+const SkillsLockfileJson = Schema.parseJson(SkillsLockfile, { space: 2 });
+
+/**
+ * Explains that a name is missing from the skills lockfile and suggests next steps.
+ */
+export function managedSkillNotFoundMessage(skillName: string): string {
+  return (
+    `Managed skill not found: ${skillName}. ` +
+    'Run `skills list` to see managed skill names, or `skills add <repo> --skill <name>` to import one.'
+  );
+}
+
 export class InvalidSkillsLockfile extends Data.TaggedError(
   'InvalidSkillsLockfile',
 )<{
-  readonly message: string;
   readonly lockfilePath: string;
   readonly cause: ParseResult.ParseError;
-}> {}
+}> {
+  override get message(): string {
+    return `Invalid skills lockfile at ${this.lockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(this.cause)}`;
+  }
+}
 
 export class ManagedSkillNotFoundError extends Data.TaggedError(
   'ManagedSkillNotFoundError',
 )<{
-  readonly message: string;
-}> {}
+  readonly skillName: string;
+}> {
+  override get message(): string {
+    return managedSkillNotFoundMessage(this.skillName);
+  }
+}
 
-class RemoteSkillDirectoryInvalid extends Data.TaggedError(
+/** Why {@link validateRemoteSkillDirectoryEffect} rejected the skill directory. */
+export type RemoteSkillDirectoryInvalidReason =
+  | 'path_missing'
+  | 'not_directory'
+  | 'missing_skill_md';
+
+export class RemoteSkillDirectoryInvalid extends Data.TaggedError(
   'RemoteSkillDirectoryInvalid',
 )<{
-  readonly message: string;
-}> {}
+  readonly repo: string;
+  readonly skillPath: string;
+  readonly reason: RemoteSkillDirectoryInvalidReason;
+}> {
+  override get message(): string {
+    switch (this.reason) {
+      case 'path_missing':
+        return `Skill path does not exist in ${this.repo}: ${this.skillPath}`;
+      case 'not_directory':
+        return `Skill path is not a directory in ${this.repo}: ${this.skillPath}`;
+      case 'missing_skill_md':
+        return `Missing SKILL.md in imported skill directory: ${this.skillPath}`;
+      default: {
+        const _exhaustive: never = this.reason;
+        return _exhaustive;
+      }
+    }
+  }
+}
+
+/** Explicit `--path` / import path normalized to nothing usable. */
+export class RemoteSkillImportPathInvalidError extends Data.TaggedError(
+  'RemoteSkillImportPathInvalidError',
+)<{
+  readonly reason: 'empty_path';
+}> {
+  override get message(): string {
+    return 'Skill path may not be empty';
+  }
+}
+
+/** Resolved skill directory leaves the cloned checkout (path traversal). */
+export class RemoteSkillCheckoutEscapeError extends Data.TaggedError(
+  'RemoteSkillCheckoutEscapeError',
+)<{
+  readonly skillPath: string;
+}> {
+  override get message(): string {
+    return `Skill path escapes the repository checkout: ${this.skillPath}`;
+  }
+}
+
+/** Failure resolving the on-disk directory under the checkout (sync exception from path join). */
+export class RemoteSkillDirectoryResolveError extends Data.TaggedError(
+  'RemoteSkillDirectoryResolveError',
+)<{
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    return `Could not resolve remote skill directory: ${String(this.cause)}`;
+  }
+}
+
+/** Checkout + validation failed while fetching a remote skill snapshot; outer cleanup runs before this fails. */
+export class FetchRemoteSkillError extends Data.TaggedError(
+  'FetchRemoteSkillError',
+)<{
+  readonly repo: string;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    const inner =
+      this.cause instanceof Error ? this.cause.message : String(this.cause);
+    return `Failed to fetch skill from ${this.repo}: ${inner}`;
+  }
+}
+
+/** `simple-git` clone/fetch/checkout failed under the temporary repo checkout. */
+export class GitRemoteOperationError extends Data.TaggedError(
+  'GitRemoteOperationError',
+)<{
+  readonly repo: string;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    const inner =
+      this.cause instanceof Error ? this.cause.message : String(this.cause);
+    return `Failed to fetch repository from ${this.repo}: ${inner}`;
+  }
+}
 
 /** Errors produced by {@link loadSkillsLockfile} (I/O or invalid JSON/schema). */
-export type LoadSkillsLockfileError = InvalidSkillsLockfile | PlatformError;
+export type LoadSkillsLockfileError =
+  | InvalidSkillsLockfile
+  | SkillsLockfileExistsCheckError
+  | SkillsLockfileReadContentsError;
 
 export type ManagedSkill = Schema.Schema.Type<typeof SkillLockEntry>;
 export type SkillsLockfile = Schema.Schema.Type<typeof SkillsLockfile>;
@@ -103,7 +224,7 @@ export function createEmptySkillsLockfile(): SkillsLockfile {
  */
 export function ensureSkillsRoot(
   env: SkillsLockfileEnv,
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<void, EnsureSkillsSourceRootError, FileSystem> {
   const { context } = env;
 
   return Effect.gen(function* () {
@@ -111,7 +232,15 @@ export function ensureSkillsRoot(
     yield* fs.makeDirectory(context.sourceRoots.skills, {
       recursive: true,
     });
-  });
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new EnsureSkillsSourceRootError({
+          skillsRoot: context.sourceRoots.skills,
+          cause,
+        }),
+    ),
+  );
 }
 
 /**
@@ -123,12 +252,28 @@ export function ensureSkillsRoot(
  */
 export function ensureSkillsLockfile(
   env: SkillsLockfileEnv,
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<
+  void,
+  | SkillsLockfileEncodeError
+  | SkillsLockfileExistsCheckError
+  | SkillsLockfileWriteError,
+  FileSystem
+> {
   const { context } = env;
 
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
-    if (yield* fs.exists(context.skillsLockfilePath)) {
+    if (
+      yield* fs.exists(context.skillsLockfilePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SkillsLockfileExistsCheckError({
+              lockfilePath: context.skillsLockfilePath,
+              cause,
+            }),
+        ),
+      )
+    ) {
       return;
     }
 
@@ -146,11 +291,13 @@ export function ensureSkillsLockfile(
  */
 export function pathExistsInFileSystem(
   filePath: string,
-): Effect.Effect<boolean, PlatformError, FileSystem> {
+): Effect.Effect<boolean, PathExistsCheckError, FileSystem> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
     return yield* fs.exists(filePath);
-  });
+  }).pipe(
+    Effect.mapError((cause) => new PathExistsCheckError({ filePath, cause })),
+  );
 }
 
 /**
@@ -159,7 +306,7 @@ export function pathExistsInFileSystem(
  * Requires an Effect {@link FileSystem} service (provide `env.runtime.fileSystemLayer` at the command root).
  *
  * @param env - Environment containing `context` with `skillsLockfilePath`.
- * @returns Effect that succeeds with the decoded and lexicographically sorted `SkillsLockfile`, or fails with {@link InvalidSkillsLockfile} when a lockfile exists but fails schema parsing/validation, or with a filesystem {@link PlatformError} when reading fails.
+ * @returns Effect that succeeds with the decoded and lexicographically sorted `SkillsLockfile`, or fails with {@link InvalidSkillsLockfile} when a lockfile exists but fails schema parsing/validation, or with a tagged filesystem error when probing or reading fails.
  */
 export function loadSkillsLockfile(
   env: SkillsLockfileEnv,
@@ -168,11 +315,29 @@ export function loadSkillsLockfile(
 
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
-    if (!(yield* fs.exists(context.skillsLockfilePath))) {
+    const lockfilePath = context.skillsLockfilePath;
+
+    if (
+      !(yield* fs
+        .exists(lockfilePath)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new SkillsLockfileExistsCheckError({ lockfilePath, cause }),
+          ),
+        ))
+    ) {
       return createEmptySkillsLockfile();
     }
 
-    const rawLockfile = yield* fs.readFileString(context.skillsLockfilePath);
+    const rawLockfile = yield* fs
+      .readFileString(lockfilePath)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new SkillsLockfileReadContentsError({ lockfilePath, cause }),
+        ),
+      );
 
     const decoded = yield* Schema.decodeUnknown(
       Schema.parseJson(SkillsLockfile),
@@ -180,8 +345,7 @@ export function loadSkillsLockfile(
       Effect.mapError(
         (parseError) =>
           new InvalidSkillsLockfile({
-            lockfilePath: context.skillsLockfilePath,
-            message: `Invalid skills lockfile at ${context.skillsLockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(parseError)}`,
+            lockfilePath,
             cause: parseError,
           }),
       ),
@@ -199,18 +363,41 @@ export function loadSkillsLockfile(
 export function saveSkillsLockfile(
   env: SkillsLockfileEnv,
   { lockfile }: { lockfile: SkillsLockfile },
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<
+  void,
+  SkillsLockfileEncodeError | SkillsLockfileWriteError,
+  FileSystem
+> {
   const { context } = env;
   const normalizedLockfile = sortSkillsLockfile(lockfile);
 
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
-    yield* fs.writeFile(
-      context.skillsLockfilePath,
-      new TextEncoder().encode(
-        `${JSON.stringify(normalizedLockfile, null, 2)}\n`,
+    const json = yield* Schema.encode(SkillsLockfileJson)(
+      normalizedLockfile,
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new SkillsLockfileEncodeError({
+            lockfilePath: context.skillsLockfilePath,
+            cause,
+          }),
       ),
     );
+    yield* fs
+      .writeFile(
+        context.skillsLockfilePath,
+        new TextEncoder().encode(`${json}\n`),
+      )
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new SkillsLockfileWriteError({
+              lockfilePath: context.skillsLockfilePath,
+              cause,
+            }),
+        ),
+      );
   });
 }
 
@@ -219,16 +406,6 @@ export function findManagedSkill(
   { name }: { name: string },
 ): ManagedSkill | undefined {
   return lockfile.skills.find((skill) => skill.name === name);
-}
-
-/**
- * Explains that a name is missing from the skills lockfile and suggests next steps.
- */
-export function managedSkillNotFoundMessage(skillName: string): string {
-  return (
-    `Managed skill not found: ${skillName}. ` +
-    'Run `skills list` to see managed skill names, or `skills add <repo> --skill <name>` to import one.'
-  );
 }
 
 export function upsertManagedSkill(
@@ -263,7 +440,7 @@ export function removeManagedSkill(
  */
 export function listLocalSkillDirectories(
   env: SkillsLockfileEnv,
-): Effect.Effect<string[], PlatformError, FileSystem> {
+): Effect.Effect<string[], ListSkillSubdirectoriesError, FileSystem> {
   const { context } = env;
   const skillsRoot = context.sourceRoots.skills;
 
@@ -285,7 +462,11 @@ export function listLocalSkillDirectories(
     return [
       ...directories.filter((name): name is string => name !== null),
     ].sort((a, b) => a.localeCompare(b));
-  });
+  }).pipe(
+    Effect.mapError(
+      (cause) => new ListSkillSubdirectoriesError({ skillsRoot, cause }),
+    ),
+  );
 }
 
 export function getManagedSkillDirectory(
@@ -446,7 +627,11 @@ export function createUpdatedSkillRecord(input: {
  */
 export function computeDirectoryHashes(
   directoryPath: string,
-): Effect.Effect<ManagedSkillFiles, PlatformError, FileSystem> {
+): Effect.Effect<
+  ManagedSkillFiles,
+  SkillDirectoryWalkError | SkillContentHashReadError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
     const relativeFilePaths = yield* listRelativeFilePaths(directoryPath);
@@ -454,7 +639,16 @@ export function computeDirectoryHashes(
 
     for (const relativeFilePath of relativeFilePaths) {
       const fullPath = path.join(directoryPath, relativeFilePath);
-      const fileBytes = yield* fs.readFile(fullPath);
+      const fileBytes = yield* fs.readFile(fullPath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SkillContentHashReadError({
+              directoryPath,
+              relativePath: relativeFilePath,
+              cause,
+            }),
+        ),
+      );
       const digest = createHash('sha256').update(fileBytes).digest('hex');
 
       hashEntries.push([toPortableRelativePath(relativeFilePath), digest]);
@@ -474,7 +668,7 @@ export function detectLocalSkillEdits(input: {
   storedFiles: ManagedSkillFiles | undefined;
 }): Effect.Effect<
   { changedFiles: string[]; modified: boolean },
-  PlatformError,
+  PathExistsCheckError | SkillDirectoryWalkError | SkillContentHashReadError,
   FileSystem
 > {
   return Effect.gen(function* () {
@@ -524,14 +718,25 @@ export function detectLocalSkillEdits(input: {
 export function cloneRemoteRepo(input: {
   ref: string | undefined;
   repo: string;
-}): Effect.Effect<RemoteRepoCheckout, Error, FileSystem> {
+}): Effect.Effect<
+  RemoteRepoCheckout,
+  GitRemoteOperationError | GitCheckoutTempDirectoryError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     const normalizedRepo = normalizeRemoteRepo(input.repo);
 
     const fs = yield* FileSystem;
-    const checkoutDir = yield* fs.makeTempDirectory({
-      prefix: path.join(os.tmpdir(), 'agents-skill.'),
-    });
+    const tempPrefix = path.join(os.tmpdir(), 'agents-skill.');
+    const checkoutDir = yield* fs
+      .makeTempDirectory({
+        prefix: tempPrefix,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) => new GitCheckoutTempDirectoryError({ tempPrefix, cause }),
+        ),
+      );
 
     const git = simpleGit(checkoutDir);
 
@@ -547,10 +752,10 @@ export function cloneRemoteRepo(input: {
         await git.checkout(['--quiet', 'FETCH_HEAD']);
         return await git.revparse(['HEAD']);
       },
-      catch: (error) =>
-        toError({
-          prefix: `Failed to fetch repository from ${normalizedRepo}`,
-          error,
+      catch: (cause) =>
+        new GitRemoteOperationError({
+          repo: normalizedRepo,
+          cause,
         }),
     }).pipe(
       Effect.catchAll((error) =>
@@ -558,7 +763,7 @@ export function cloneRemoteRepo(input: {
           yield* fs
             .remove(checkoutDir, { recursive: true, force: true })
             .pipe(Effect.ignoreLogged);
-          return yield* Effect.fail(error);
+          return yield* error;
         }),
       ),
     );
@@ -596,7 +801,14 @@ export function resolveSkillSourceDir(input: {
   checkoutDir: string;
   repo: string;
   skillName: string;
-}): Effect.Effect<string, Error | PlatformError, FileSystem> {
+}): Effect.Effect<
+  string,
+  | RemoteSkillDirectoryResolveError
+  | RemoteSkillCheckoutEscapeError
+  | RemoteSkillDirectoryInvalid
+  | RemoteSkillValidationFsError,
+  FileSystem
+> {
   const skillPath = resolveManagedSkillImportPath({
     skillName: input.skillName,
   });
@@ -608,19 +820,14 @@ export function resolveSkillSourceDir(input: {
           checkoutDir: input.checkoutDir,
           skillPath,
         }),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error(String(cause)),
+      catch: mapResolveRemoteSkillTryCause,
     });
 
     yield* validateRemoteSkillDirectoryEffect({
       repo: normalizeRemoteRepo(input.repo),
       skillPath,
       sourceDir,
-    }).pipe(
-      Effect.catchTag('RemoteSkillDirectoryInvalid', (e) =>
-        Effect.fail(new Error(e.message)),
-      ),
-    );
+    });
 
     return sourceDir;
   });
@@ -635,12 +842,22 @@ export function resolveSkillSourceDirByPath(input: {
   checkoutDir: string;
   repo: string;
   skillPath: string;
-}): Effect.Effect<string, Error | PlatformError, FileSystem> {
+}): Effect.Effect<
+  string,
+  | RemoteSkillImportPathInvalidError
+  | RemoteSkillDirectoryResolveError
+  | RemoteSkillCheckoutEscapeError
+  | RemoteSkillDirectoryInvalid
+  | RemoteSkillValidationFsError,
+  FileSystem
+> {
   return Effect.gen(function* () {
     const normalizedSkillPath = normalizeImportedSkillPath(input.skillPath);
 
     if (normalizedSkillPath === undefined) {
-      return yield* Effect.fail(new Error('Skill path may not be empty'));
+      return yield* new RemoteSkillImportPathInvalidError({
+        reason: 'empty_path',
+      });
     }
 
     const sourceDir = yield* Effect.try({
@@ -649,19 +866,14 @@ export function resolveSkillSourceDirByPath(input: {
           checkoutDir: input.checkoutDir,
           skillPath: normalizedSkillPath,
         }),
-      catch: (cause) =>
-        cause instanceof Error ? cause : new Error(String(cause)),
+      catch: mapResolveRemoteSkillTryCause,
     });
 
     yield* validateRemoteSkillDirectoryEffect({
       repo: normalizeRemoteRepo(input.repo),
       skillPath: normalizedSkillPath,
       sourceDir,
-    }).pipe(
-      Effect.catchTag('RemoteSkillDirectoryInvalid', (e) =>
-        Effect.fail(new Error(e.message)),
-      ),
-    );
+    });
 
     return sourceDir;
   });
@@ -676,7 +888,17 @@ export function fetchRemoteSkillSnapshot(input: {
   ref: string | undefined;
   repo: string;
   skillPath: string;
-}): Effect.Effect<RemoteSkillSnapshot, Error | PlatformError, FileSystem> {
+}): Effect.Effect<
+  RemoteSkillSnapshot,
+  | GitCheckoutTempDirectoryError
+  | GitRemoteOperationError
+  | FetchRemoteSkillError
+  | RemoteSkillDirectoryResolveError
+  | RemoteSkillCheckoutEscapeError
+  | RemoteSkillDirectoryInvalid
+  | RemoteSkillValidationFsError,
+  FileSystem
+> {
   const normalizedRepo = normalizeRemoteRepo(input.repo);
 
   return Effect.gen(function* () {
@@ -692,31 +914,24 @@ export function fetchRemoteSkillSnapshot(input: {
             checkoutDir: checkout.checkoutDir,
             skillPath: input.skillPath,
           }),
-        catch: (cause) =>
-          cause instanceof Error ? cause : new Error(String(cause)),
+        catch: mapResolveRemoteSkillTryCause,
       });
 
       yield* validateRemoteSkillDirectoryEffect({
         repo: normalizedRepo,
         skillPath: input.skillPath,
         sourceDir: sd,
-      }).pipe(
-        Effect.catchTag('RemoteSkillDirectoryInvalid', (e) =>
-          Effect.fail(new Error(e.message)),
-        ),
-      );
+      });
 
       return sd;
     }).pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
           yield* checkout.cleanup().pipe(Effect.catchAll(() => Effect.void));
-          return yield* Effect.fail(
-            toError({
-              prefix: `Failed to fetch skill from ${normalizedRepo}`,
-              error,
-            }),
-          );
+          return yield* new FetchRemoteSkillError({
+            repo: normalizedRepo,
+            cause: error,
+          });
         }),
       ),
     );
@@ -744,7 +959,7 @@ export function replaceManagedSkillDirectory({
 }: {
   sourceDir: string;
   targetDir: string;
-}): Effect.Effect<void, PlatformError, FileSystem> {
+}): Effect.Effect<void, ReplaceManagedSkillOutputError, FileSystem> {
   const targetParent = path.dirname(targetDir);
   const targetBase = path.basename(targetDir);
 
@@ -770,7 +985,12 @@ export function replaceManagedSkillDirectory({
           .pipe(Effect.catchAll(() => Effect.void)),
       ),
     );
-  });
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ReplaceManagedSkillOutputError({ targetDir, sourceDir, cause }),
+    ),
+  );
 }
 
 /**
@@ -781,14 +1001,18 @@ export function replaceManagedSkillDirectory({
 export function removeManagedSkillDirectory(
   env: SkillsLockfileEnv,
   { skillName }: { skillName: string },
-): Effect.Effect<void, PlatformError, FileSystem> {
+): Effect.Effect<void, RemoveManagedSkillDirectoryError, FileSystem> {
   const { context } = env;
   const directoryPath = getManagedSkillDirectory(context, { skillName });
 
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
     yield* fs.remove(directoryPath, { recursive: true, force: true });
-  });
+  }).pipe(
+    Effect.mapError(
+      (cause) => new RemoveManagedSkillDirectoryError({ directoryPath, cause }),
+    ),
+  );
 }
 
 export function formatManagedSkillSummary(skill: ManagedSkill): string {
@@ -809,7 +1033,7 @@ export function timestampNow(): string {
  */
 function listRelativeFilePaths(
   directoryPath: string,
-): Effect.Effect<string[], PlatformError, FileSystem> {
+): Effect.Effect<string[], SkillDirectoryWalkError, FileSystem> {
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
     const names = yield* fs.readDirectory(directoryPath);
@@ -837,7 +1061,14 @@ function listRelativeFilePaths(
     return [...relativeFilePaths].sort((left, right) =>
       left.localeCompare(right),
     );
-  });
+  }).pipe(
+    Effect.mapError((cause): SkillDirectoryWalkError => {
+      if (cause._tag === 'SkillDirectoryWalkError') {
+        return cause;
+      }
+      return new SkillDirectoryWalkError({ directoryPath, cause });
+    }),
+  );
 }
 
 /**
@@ -891,6 +1122,12 @@ function inferDefaultSkillName({
 const githubRepoShorthandPattern =
   /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/u;
 
+function mapResolveRemoteSkillTryCause(cause: unknown) {
+  return cause instanceof RemoteSkillCheckoutEscapeError
+    ? cause
+    : new RemoteSkillDirectoryResolveError({ cause });
+}
+
 function resolveRemoteSkillDirectory({
   checkoutDir,
   skillPath,
@@ -906,7 +1143,7 @@ function resolveRemoteSkillDirectory({
     relativeCandidatePath.startsWith(`..${path.sep}`) ||
     path.isAbsolute(relativeCandidatePath)
   ) {
-    throw new Error(`Skill path escapes the repository checkout: ${skillPath}`);
+    throw new RemoteSkillCheckoutEscapeError({ skillPath });
   }
 
   return candidateDir;
@@ -918,7 +1155,7 @@ function validateRemoteSkillDirectoryEffect(input: {
   sourceDir: string;
 }): Effect.Effect<
   void,
-  RemoteSkillDirectoryInvalid | PlatformError,
+  RemoteSkillDirectoryInvalid | RemoteSkillValidationFsError,
   FileSystem
 > {
   return Effect.gen(function* () {
@@ -926,7 +1163,9 @@ function validateRemoteSkillDirectoryEffect(input: {
 
     if (!(yield* fs.exists(input.sourceDir))) {
       return yield* new RemoteSkillDirectoryInvalid({
-        message: `Skill path does not exist in ${input.repo}: ${input.skillPath}`,
+        repo: input.repo,
+        skillPath: input.skillPath,
+        reason: 'path_missing',
       });
     }
 
@@ -934,7 +1173,9 @@ function validateRemoteSkillDirectoryEffect(input: {
 
     if (info.type !== 'Directory') {
       return yield* new RemoteSkillDirectoryInvalid({
-        message: `Skill path is not a directory in ${input.repo}: ${input.skillPath}`,
+        repo: input.repo,
+        skillPath: input.skillPath,
+        reason: 'not_directory',
       });
     }
 
@@ -942,16 +1183,24 @@ function validateRemoteSkillDirectoryEffect(input: {
 
     if (!(yield* fs.exists(skillMarkdownPath))) {
       return yield* new RemoteSkillDirectoryInvalid({
-        message: `Missing SKILL.md in imported skill directory: ${input.skillPath}`,
+        repo: input.repo,
+        skillPath: input.skillPath,
+        reason: 'missing_skill_md',
       });
     }
-  });
-}
-
-function toError({ prefix, error }: { prefix: string; error: unknown }): Error {
-  if (error instanceof Error) {
-    return new Error(`${prefix}: ${error.message}`);
-  }
-
-  return new Error(`${prefix}: ${String(error)}`);
+  }).pipe(
+    Effect.mapError(
+      (
+        error: RemoteSkillDirectoryInvalid | PlatformError,
+      ): RemoteSkillDirectoryInvalid | RemoteSkillValidationFsError => {
+        if (error._tag === 'RemoteSkillDirectoryInvalid') {
+          return error;
+        }
+        return new RemoteSkillValidationFsError({
+          sourceDir: input.sourceDir,
+          cause: error,
+        });
+      },
+    ),
+  );
 }

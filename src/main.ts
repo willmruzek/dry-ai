@@ -9,6 +9,7 @@ import { Effect, Schema } from 'effect';
 import { packageDirectory } from 'package-directory';
 
 import { runCLI } from './cli.js';
+import { CliHandledFiberFailure } from './cli/run-effect.js';
 
 const EXECUTABLE_NAME = 'dry-ai';
 
@@ -61,7 +62,11 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.log(message);
-  process.exitCode = 1;
+  if (error instanceof CliHandledFiberFailure) {
+    process.exitCode = 1;
+  } else {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exitCode = 1;
+  }
 }
