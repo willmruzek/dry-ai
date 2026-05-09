@@ -552,6 +552,9 @@ export function normalizeImportedSkillPath(
   if (skillPath === undefined) {
     return undefined;
   }
+  if (skillPath.trim() === '') {
+    return undefined;
+  }
 
   return path.normalize(skillPath);
 }
