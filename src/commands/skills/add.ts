@@ -1,7 +1,9 @@
 import type { FileSystem } from '@effect/platform/FileSystem';
-import { Effect } from 'effect';
+import { Data, Effect } from 'effect';
 
+import { runCliEffect } from '../../cli/run-effect.js';
 import type { CommandEnv } from '../../lib/command-env.js';
+import type { PathExistsCheckError } from '../../lib/fs.js';
 import {
   cleanupRemoteRepoCheckout,
   cloneRemoteRepo,
@@ -13,6 +15,7 @@ import {
   findManagedSkill,
   formatManagedSkillSummary,
   getManagedSkillDirectory,
+  type GitRemoteOperationError,
   type LoadSkillsLockfileError,
   loadSkillsLockfile,
   normalizeImportedSkillPath,
@@ -25,7 +28,79 @@ import {
   saveSkillsLockfile,
   timestampNow,
   upsertManagedSkill,
+  removeManagedSkillDirectory,
+  type RemoteSkillCheckoutEscapeError,
+  type RemoteSkillDirectoryInvalid,
+  type RemoteSkillDirectoryResolveError,
+  type RemoteSkillImportPathInvalidError,
 } from '../../lib/skills.js';
+import type {
+  EnsureSkillsSourceRootError,
+  GitCheckoutTempDirectoryError,
+  RemoteSkillValidationFsError,
+  ReplaceManagedSkillOutputError,
+  SkillContentHashReadError,
+  SkillDirectoryWalkError,
+  SkillsLockfileEncodeError,
+  SkillsLockfileExistsCheckError,
+  SkillsLockfileWriteError,
+} from '../../lib/sync.js';
+
+/** CLI validation failures for `skills add` (missing flags, conflicting options, blocked paths). */
+export class SkillsAddValidationError extends Data.TaggedError(
+  'SkillsAddValidationError',
+)<{
+  readonly reason:
+    | 'no_skills'
+    | 'as_requires_single_skill'
+    | 'target_skill_directory_exists';
+  readonly targetDir?: string;
+}> {
+  override get message(): string {
+    switch (this.reason) {
+      case 'no_skills':
+        return 'At least one skill name must be provided with --skill';
+      case 'as_requires_single_skill':
+        return '--as may only be used when importing exactly one skill';
+      case 'target_skill_directory_exists':
+        return `A local skill directory already exists: ${this.targetDir ?? ''}`;
+    }
+  }
+}
+
+/** Lockfile save failed after files were installed to disk. {@link cause} is that save/encode failure — not a rollback/removal failure (removal is best-effort). */
+export class SkillsAddLockfilePersistAfterInstallError extends Data.TaggedError(
+  'SkillsAddLockfilePersistAfterInstallError',
+)<{
+  readonly targetDir: string;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    const inner =
+      this.cause instanceof Error ? this.cause.message : String(this.cause);
+    return `Failed to persist skills lockfile after installing to ${this.targetDir}; attempted to remove installed files. ${inner}`;
+  }
+}
+
+export type SkillsAddEffectError =
+  | EnsureSkillsSourceRootError
+  | GitCheckoutTempDirectoryError
+  | GitRemoteOperationError
+  | LoadSkillsLockfileError
+  | PathExistsCheckError
+  | RemoteSkillCheckoutEscapeError
+  | RemoteSkillDirectoryInvalid
+  | RemoteSkillDirectoryResolveError
+  | RemoteSkillImportPathInvalidError
+  | RemoteSkillValidationFsError
+  | ReplaceManagedSkillOutputError
+  | SkillContentHashReadError
+  | SkillDirectoryWalkError
+  | SkillsAddValidationError
+  | SkillsAddLockfilePersistAfterInstallError
+  | SkillsLockfileEncodeError
+  | SkillsLockfileExistsCheckError
+  | SkillsLockfileWriteError;
 
 /**
  * Normalizes and de-duplicates requested skill names while preserving their input order.
@@ -99,26 +174,24 @@ type SkillsAddInput = {
 export function skillsAddEffect(options: {
   env: CommandEnv;
   input: SkillsAddInput;
-}): Effect.Effect<void, LoadSkillsLockfileError | Error, FileSystem> {
+}): Effect.Effect<void, SkillsAddEffectError, FileSystem> {
   const { env, input } = options;
-  const { context, runtime } = env;
+  const { context } = env;
 
   return Effect.gen(function* () {
     const repo = normalizeRemoteRepo(input.repo);
     const normalizedBasePath = normalizeImportedSkillPath(input.repoPath);
 
     if (input.skillNames.length === 0) {
-      return yield* Effect.fail(
-        new Error('At least one skill name must be provided with --skill'),
-      );
+      return yield* new SkillsAddValidationError({ reason: 'no_skills' });
     }
 
     const requestedSkillNames = normalizeRequestedSkillNames(input.skillNames);
 
     if (input.asName && requestedSkillNames.length !== 1) {
-      return yield* Effect.fail(
-        new Error('--as may only be used when importing exactly one skill'),
-      );
+      return yield* new SkillsAddValidationError({
+        reason: 'as_requires_single_skill',
+      });
     }
 
     yield* ensureSkillsRoot(env);
@@ -155,9 +228,10 @@ export function skillsAddEffect(options: {
         const targetDir = getManagedSkillDirectory(context, { skillName });
 
         if (yield* pathExistsInFileSystem(targetDir)) {
-          return yield* Effect.fail(
-            new Error(`A local skill directory already exists: ${targetDir}`),
-          );
+          return yield* new SkillsAddValidationError({
+            reason: 'target_skill_directory_exists',
+            targetDir,
+          });
         }
 
         const sourceDir = yield* resolveSkillSourceDirByPath({
@@ -178,15 +252,30 @@ export function skillsAddEffect(options: {
           repo,
         });
 
-        lockfile = upsertManagedSkill(lockfile, {
-          updatedSkill: importedSkill,
-        });
-        yield* saveSkillsLockfile(env, { lockfile });
-
         yield* replaceManagedSkillDirectory({
           targetDir,
           sourceDir,
         });
+
+        const lockfileWithNewSkill = upsertManagedSkill(lockfile, {
+          updatedSkill: importedSkill,
+        });
+
+        yield* saveSkillsLockfile(env, { lockfile: lockfileWithNewSkill }).pipe(
+          Effect.catchAll((saveFailure) =>
+            Effect.gen(function* () {
+              yield* removeManagedSkillDirectory(env, { skillName }).pipe(
+                Effect.catchAll(() => Effect.void),
+              );
+              return yield* new SkillsAddLockfilePersistAfterInstallError({
+                targetDir,
+                cause: saveFailure,
+              });
+            }),
+          ),
+        );
+
+        lockfile = lockfileWithNewSkill;
 
         importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
       }
@@ -199,24 +288,19 @@ export function skillsAddEffect(options: {
     );
 
     for (const importedSkillSummary of importedSkillSummaries) {
-      yield* Effect.sync(() => {
-        runtime.logInfo(`Imported ${importedSkillSummary}`);
-      });
+      yield* Effect.logInfo(`Imported ${importedSkillSummary}`);
     }
 
     if (skippedSkillNames.length > 0) {
-      yield* Effect.sync(() => {
-        runtime.logWarn(
-          `Skipped already-imported skills: ${skippedSkillNames.join(', ')}`,
-        );
-      });
+      yield* Effect.logWarning(
+        `Skipped already-imported skills: ${skippedSkillNames.join(', ')}`,
+      );
     }
 
     if (importedSkillSummaries.length === 0) {
-      yield* Effect.sync(() => {
-        runtime.logInfo('No skills were imported.');
-      });
+      yield* Effect.logInfo('No skills were imported.');
     }
+    return;
   });
 }
 
@@ -231,15 +315,16 @@ export function skillsAddEffect(options: {
  * @param pin - If true, record the imported skill at the specific commit; otherwise record the provided ref
  * @param ref - Optional branch, tag, or commit-ish to check out from the remote repository
  *
- * @throws Error - If `--skill` is omitted or `--skill` produces no names after CLI parsing
- * @throws Error - If `--as` is provided while importing more than one skill
- * @throws Error - If a target local skill directory already exists for an import
+ * @throws SkillsAddValidationError - If `--skill` is omitted or `--skill` produces no names after CLI parsing
+ * @throws SkillsAddValidationError - If `--as` is provided while importing more than one skill
+ * @throws SkillsAddValidationError - If a target local skill directory already exists for an import
  */
 export function runSkillsAddCommand(
   env: CommandEnv,
   input: SkillsAddInput,
 ): Promise<void> {
-  return Effect.runPromise(
+  return runCliEffect(
+    env,
     skillsAddEffect({ env, input }).pipe(
       Effect.provide(env.runtime.fileSystemLayer),
     ),

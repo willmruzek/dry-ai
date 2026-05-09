@@ -510,7 +510,7 @@ describe('dry-ai skills update', () => {
           ...environment.cliOptions,
         }),
       ).rejects.toThrow(
-        `Managed skill not found: ${TARGET_SKILL.name}. Run \`skills list\` to see managed skill names, or \`skills add <repo> --skill <name>\` to import one.`,
+        `No managed skill named "${TARGET_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.`,
       );
 
       expect(mockFileSystem.lockfileWrites).toEqual([]);

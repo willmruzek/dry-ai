@@ -1,5 +1,6 @@
 import { Effect } from 'effect';
 
+import { runCliEffect } from '../../cli/run-effect.js';
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
   cleanupRemoteSkillSnapshot,
@@ -11,7 +12,6 @@ import {
   formatManagedSkillSummary,
   getManagedSkillDirectory,
   loadSkillsLockfile,
-  managedSkillNotFoundMessage,
   ManagedSkillNotFoundError,
   replaceManagedSkillDirectory,
   saveSkillsLockfile,
@@ -35,7 +35,7 @@ export function skillsUpdateEffect(options: {
   input: SkillsUpdateInput;
 }) {
   const { env, input } = options;
-  const { context, runtime } = env;
+  const { context } = env;
   const { force, skillName } = input;
 
   return Effect.gen(function* () {
@@ -43,9 +43,7 @@ export function skillsUpdateEffect(options: {
     const managedSkill = findManagedSkill(lockfile, { name: skillName });
 
     if (!managedSkill) {
-      return yield* new ManagedSkillNotFoundError({
-        message: managedSkillNotFoundMessage(skillName),
-      });
+      return yield* new ManagedSkillNotFoundError({ skillName });
     }
 
     const targetDir = getManagedSkillDirectory(context, { skillName });
@@ -55,11 +53,9 @@ export function skillsUpdateEffect(options: {
     });
 
     if (localEditState.modified && !force) {
-      yield* Effect.sync(() => {
-        runtime.logWarn(
-          `Skipped ${skillName} because local edits were detected in: ${localEditState.changedFiles.join(', ')}. Re-run with --force to overwrite local changes.`,
-        );
-      });
+      yield* Effect.logWarning(
+        `Skipped ${skillName} because local edits were detected in: ${localEditState.changedFiles.join(', ')}. Re-run with --force to overwrite local changes.`,
+      );
       return;
     }
 
@@ -88,9 +84,9 @@ export function skillsUpdateEffect(options: {
         lockfile: upsertManagedSkill(lockfile, { updatedSkill }),
       });
 
-      yield* Effect.sync(() => {
-        runtime.logInfo(`Updated ${formatManagedSkillSummary(updatedSkill)}`);
-      });
+      yield* Effect.logInfo(
+        `Updated ${formatManagedSkillSummary(updatedSkill)}`,
+      );
     }).pipe(
       Effect.ensuring(
         cleanupRemoteSkillSnapshot(snapshot).pipe(
@@ -108,7 +104,8 @@ export function runSkillsUpdateCommand(
   env: CommandEnv,
   input: SkillsUpdateInput,
 ): Promise<void> {
-  return Effect.runPromise(
+  return runCliEffect(
+    env,
     skillsUpdateEffect({ env, input }).pipe(
       Effect.provide(env.runtime.fileSystemLayer),
     ),

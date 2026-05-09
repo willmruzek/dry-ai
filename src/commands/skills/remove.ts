@@ -1,18 +1,23 @@
 import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
+import { runCliEffect } from '../../cli/run-effect.js';
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
   type LoadSkillsLockfileError,
   findManagedSkill,
   formatManagedSkillSummary,
   loadSkillsLockfile,
-  managedSkillNotFoundMessage,
   ManagedSkillNotFoundError,
   removeManagedSkill,
   removeManagedSkillDirectory,
   saveSkillsLockfile,
 } from '../../lib/skills.js';
+import type {
+  RemoveManagedSkillDirectoryError,
+  SkillsLockfileEncodeError,
+  SkillsLockfileWriteError,
+} from '../../lib/sync.js';
 
 type SkillsRemoveInput = {
   skillName: string;
@@ -30,11 +35,14 @@ export function skillsRemoveEffect(options: {
   input: SkillsRemoveInput;
 }): Effect.Effect<
   void,
-  LoadSkillsLockfileError | ManagedSkillNotFoundError,
+  | LoadSkillsLockfileError
+  | ManagedSkillNotFoundError
+  | SkillsLockfileEncodeError
+  | SkillsLockfileWriteError
+  | RemoveManagedSkillDirectoryError,
   FileSystem
 > {
   const { env, input } = options;
-  const { runtime } = env;
   const { skillName } = input;
 
   return Effect.gen(function* () {
@@ -42,9 +50,7 @@ export function skillsRemoveEffect(options: {
     const managedSkill = findManagedSkill(lockfile, { name: skillName });
 
     if (!managedSkill) {
-      return yield* new ManagedSkillNotFoundError({
-        message: managedSkillNotFoundMessage(skillName),
-      });
+      return yield* new ManagedSkillNotFoundError({ skillName });
     }
 
     const updatedLockfile = removeManagedSkill(lockfile, { name: skillName });
@@ -53,9 +59,7 @@ export function skillsRemoveEffect(options: {
 
     yield* removeManagedSkillDirectory(env, { skillName });
 
-    yield* Effect.sync(() => {
-      runtime.logInfo(`Removed ${formatManagedSkillSummary(managedSkill)}`);
-    });
+    yield* Effect.logInfo(`Removed ${formatManagedSkillSummary(managedSkill)}`);
   });
 }
 
@@ -66,7 +70,8 @@ export function runSkillsRemoveCommand(
   env: CommandEnv,
   input: SkillsRemoveInput,
 ): Promise<void> {
-  return Effect.runPromise(
+  return runCliEffect(
+    env,
     skillsRemoveEffect({ env, input }).pipe(
       Effect.provide(env.runtime.fileSystemLayer),
     ),

@@ -5,21 +5,19 @@ import type { RootOptions } from './command-options.js';
 import type { AgentsContext } from './context.js';
 
 /**
- * Runtime services for command actions: line-oriented CLI output and Effect
- * {@link FileSystem} provisioning.
+ * Runtime services for command actions: Effect {@link FileSystem} provisioning
+ * and routing for {@link Effect.logInfo} / {@link Effect.logWarning} / {@link Effect.logError}.
  */
 export type CLIRuntime = {
-  /** Writes an informational message to stdout, with an appended newline. */
-  logInfo: (message: string) => void;
-  /** Writes a warning message to stderr, with an appended newline. */
-  logWarn: (message: string) => void;
   /** Layer providing `@effect/platform` {@link FileSystem} for lockfile and related I/O. */
   fileSystemLayer: Layer<FileSystem>;
+  /** Routes Effect Logger output (info → stdout, warning/error → stderr) for CLI runs. */
+  loggerLayer: Layer<never>;
 };
 
 /**
  * The shared environment passed into every command action: the resolved domain
- * context plus the runtime used for CLI output and Effect FS.
+ * context plus Effect runtime layers (filesystem and CLI logger routing).
  */
 export type CommandEnv = {
   context: AgentsContext;

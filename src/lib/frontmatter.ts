@@ -1,7 +1,6 @@
+import { Effect } from 'effect';
 import matter from 'gray-matter';
 import { z } from 'zod';
-
-import type { CLIRuntime } from './command-env.js';
 
 export { compactObject } from './object-helpers.js';
 
@@ -60,35 +59,36 @@ export function parseMdWithFrontmatter(fileContent: string): {
 /**
  * Validates parsed frontmatter against a schema and logs a skip message when validation fails.
  */
-export function validateFrontmatter<T>(
-  runtime: CLIRuntime,
-  {
-    filePath,
-    metadata,
-    schema,
-  }: {
-    filePath: string;
-    metadata: Record<string, unknown>;
-    schema: z.ZodType<T>;
-  },
-): T | null {
-  const result = schema.safeParse(metadata);
+export function validateFrontmatter<T>({
+  filePath,
+  metadata,
+  schema,
+}: {
+  filePath: string;
+  metadata: Record<string, unknown>;
+  schema: z.ZodType<T>;
+}): Effect.Effect<T | null, never, never> {
+  return Effect.gen(function* () {
+    const result = schema.safeParse(metadata);
 
-  if (result.success) {
-    return result.data;
-  }
+    if (result.success) {
+      return result.data;
+    }
 
-  const issues = result.error.issues
-    .map((issue) => {
-      const fieldPath =
-        issue.path.length > 0 ? issue.path.join('.') : 'frontmatter';
-      return `${fieldPath}: ${issue.message}`;
-    })
-    .join('; ');
+    const issues = result.error.issues
+      .map((issue) => {
+        const fieldPath =
+          issue.path.length > 0 ? issue.path.join('.') : 'frontmatter';
+        return `${fieldPath}: ${issue.message}`;
+      })
+      .join('; ');
 
-  runtime.logInfo(`Skipping invalid frontmatter in ${filePath}: ${issues}`);
+    yield* Effect.logInfo(
+      `Skipping invalid frontmatter in ${filePath}: ${issues}`,
+    );
 
-  return null;
+    return null;
+  });
 }
 
 /**

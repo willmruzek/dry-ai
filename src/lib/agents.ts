@@ -1,12 +1,13 @@
 import path from 'node:path';
 
+import { Effect } from 'effect';
+
 import { AGENT_DEFINITIONS } from './agent-definitions.js';
 import {
   type OwnershipKeyInput,
   type AgentRuleSource,
   type SyncItemKind,
 } from './agent-types.js';
-import type { CLIRuntime } from './command-env.js';
 import type { CommandFrontmatter, RuleFrontmatter } from './frontmatter.js';
 
 export { AGENT_DEFINITIONS } from './agent-definitions.js';
@@ -240,173 +241,172 @@ function formatValidationIssues(input: {
 /**
  * Reads the per-agent blocks from parsed frontmatter and returns a map of agent → raw section value.
  */
-function getAgentSpecificValues<K extends 'command' | 'rule'>(
-  runtime: CLIRuntime,
-  input: {
-    filePath: string;
-    kind: K;
-    sections: K extends 'command'
-      ? CommandFrontmatter['agents']
-      : RuleFrontmatter['agents'];
-  },
-): Map<SyncAgent, unknown> | null {
-  const sectionValues = new Map<SyncAgent, unknown>();
+function getAgentSpecificValues<K extends 'command' | 'rule'>(input: {
+  filePath: string;
+  kind: K;
+  sections: K extends 'command'
+    ? CommandFrontmatter['agents']
+    : RuleFrontmatter['agents'];
+}): Effect.Effect<Map<SyncAgent, unknown> | null, never, never> {
+  return Effect.gen(function* () {
+    const sectionValues = new Map<SyncAgent, unknown>();
 
-  if (!input.sections) {
-    return sectionValues;
-  }
-
-  const unknownAgents: string[] = [];
-
-  for (const [agent, value] of Object.entries(input.sections)) {
-    if (isSyncAgent(agent)) {
-      sectionValues.set(agent, value);
-      continue;
+    if (!input.sections) {
+      return sectionValues;
     }
 
-    unknownAgents.push(agent);
-  }
+    const unknownAgents: string[] = [];
 
-  if (unknownAgents.length > 0) {
-    runtime.logInfo(
-      `Skipping invalid ${input.kind} frontmatter in ${input.filePath}: ${unknownAgents
-        .map((agent) => `agents.${agent}: Unsupported agent`)
-        .join('; ')}`,
-    );
-    return null;
-  }
+    for (const [agent, value] of Object.entries(input.sections)) {
+      if (isSyncAgent(agent)) {
+        sectionValues.set(agent, value);
+        continue;
+      }
 
-  return sectionValues;
+      unknownAgents.push(agent);
+    }
+
+    if (unknownAgents.length > 0) {
+      yield* Effect.logInfo(
+        `Skipping invalid ${input.kind} frontmatter in ${input.filePath}: ${unknownAgents
+          .map((agent) => `agents.${agent}: Unsupported agent`)
+          .join('; ')}`,
+      );
+      return null;
+    }
+
+    return sectionValues;
+  });
 }
 
 /**
  * Builds one command artifact spec per agent. Skips an agent when
  * `agents.<agent>` is present but not a YAML object (records a warning).
  */
-export function buildCommandArtifactSpecsByAgent(
-  runtime: CLIRuntime,
-  input: {
-    filePath: string;
-    body: string;
-    frontmatter: CommandFrontmatter;
-    targetRoots: TargetRoots;
-  },
-): readonly ArtifactSpec[] | null {
-  const agentSpecificValues = getAgentSpecificValues(runtime, {
-    filePath: input.filePath,
-    kind: 'command',
-    sections: input.frontmatter.agents,
-  });
+export function buildCommandArtifactSpecsByAgent(input: {
+  filePath: string;
+  body: string;
+  frontmatter: CommandFrontmatter;
+  targetRoots: TargetRoots;
+}): Effect.Effect<readonly ArtifactSpec[] | null, never, never> {
+  return Effect.gen(function* () {
+    const agentSpecificValues = yield* getAgentSpecificValues({
+      filePath: input.filePath,
+      kind: 'command',
+      sections: input.frontmatter.agents,
+    });
 
-  if (!agentSpecificValues) {
-    return null;
-  }
-
-  const artifactSpecs: ArtifactSpec[] = [];
-
-  for (const agent of SYNC_AGENTS) {
-    const { frontmatterSectionSchema } = AGENT_DEFINITIONS[agent].command;
-
-    const result = frontmatterSectionSchema.safeParse(
-      agentSpecificValues.get(agent),
-    );
-
-    if (!result.success) {
-      runtime.logWarn(
-        `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
-          {
-            issues: result.error.issues,
-            pathPrefix: `agents.${agent}`,
-          },
-        )}`,
-      );
-      continue;
+    if (!agentSpecificValues) {
+      return null;
     }
 
-    artifactSpecs.push(
-      AGENT_DEFINITIONS[agent].command.buildArtifactSpec({
-        input: {
-          name: input.frontmatter.name,
-          description: input.frontmatter.description,
-          sourceFileStem: path.basename(input.filePath, '.md'),
-          body: input.body,
-          ...(result.data ?? {}),
-        },
-        targetRoots: input.targetRoots,
-      }),
-    );
-  }
+    const artifactSpecs: ArtifactSpec[] = [];
 
-  if (artifactSpecs.length === 0) {
-    return null;
-  }
+    for (const agent of SYNC_AGENTS) {
+      const { frontmatterSectionSchema } = AGENT_DEFINITIONS[agent].command;
 
-  return artifactSpecs;
+      const result = frontmatterSectionSchema.safeParse(
+        agentSpecificValues.get(agent),
+      );
+
+      if (!result.success) {
+        yield* Effect.logWarning(
+          `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
+            {
+              issues: result.error.issues,
+              pathPrefix: `agents.${agent}`,
+            },
+          )}`,
+        );
+        continue;
+      }
+
+      artifactSpecs.push(
+        AGENT_DEFINITIONS[agent].command.buildArtifactSpec({
+          input: {
+            name: input.frontmatter.name,
+            description: input.frontmatter.description,
+            sourceFileStem: path.basename(input.filePath, '.md'),
+            body: input.body,
+            ...(result.data ?? {}),
+          },
+          targetRoots: input.targetRoots,
+        }),
+      );
+    }
+
+    if (artifactSpecs.length === 0) {
+      return null;
+    }
+
+    return artifactSpecs;
+  });
 }
 
 /**
  * Builds one rule artifact spec per agent. Skips an agent when
  * `agents.<agent>` is present but not a YAML object (records a warning).
  */
-export function buildRuleArtifactSpecsByAgent(
-  runtime: CLIRuntime,
-  input: {
-    filePath: string;
-    body: string;
-    frontmatter: RuleFrontmatter;
-    targetRoots: TargetRoots;
-  },
-): readonly ArtifactSpec[] | null {
-  const sectionValues = getAgentSpecificValues(runtime, {
-    filePath: input.filePath,
-    kind: 'rule',
-    sections: input.frontmatter.agents,
-  });
+export function buildRuleArtifactSpecsByAgent(input: {
+  filePath: string;
+  body: string;
+  frontmatter: RuleFrontmatter;
+  targetRoots: TargetRoots;
+}): Effect.Effect<readonly ArtifactSpec[] | null, never, never> {
+  return Effect.gen(function* () {
+    const sectionValues = yield* getAgentSpecificValues({
+      filePath: input.filePath,
+      kind: 'rule',
+      sections: input.frontmatter.agents,
+    });
 
-  if (!sectionValues) {
-    return null;
-  }
-
-  const artifactSpecs: ArtifactSpec[] = [];
-  const baseSource: AgentRuleSource = {
-    name: path.basename(input.filePath, '.md'),
-    description: input.frontmatter.description,
-    sourceFileStem: path.basename(input.filePath, '.md'),
-    body: input.body,
-  };
-
-  for (const agent of SYNC_AGENTS) {
-    const { frontmatterSectionSchema, buildArtifactSpec } =
-      AGENT_DEFINITIONS[agent].rule;
-
-    const result = frontmatterSectionSchema.safeParse(sectionValues.get(agent));
-
-    if (!result.success) {
-      runtime.logWarn(
-        `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
-          {
-            issues: result.error.issues,
-            pathPrefix: `agents.${agent}`,
-          },
-        )}`,
-      );
-      continue;
+    if (!sectionValues) {
+      return null;
     }
 
-    artifactSpecs.push(
-      buildArtifactSpec({
-        input: {
-          ...baseSource,
-          ...(result.data ?? {}),
-        },
-        targetRoots: input.targetRoots,
-      }),
-    );
-  }
+    const artifactSpecs: ArtifactSpec[] = [];
+    const baseSource: AgentRuleSource = {
+      name: path.basename(input.filePath, '.md'),
+      description: input.frontmatter.description,
+      sourceFileStem: path.basename(input.filePath, '.md'),
+      body: input.body,
+    };
 
-  if (artifactSpecs.length === 0) {
-    return null;
-  }
+    for (const agent of SYNC_AGENTS) {
+      const { frontmatterSectionSchema, buildArtifactSpec } =
+        AGENT_DEFINITIONS[agent].rule;
 
-  return artifactSpecs;
+      const result = frontmatterSectionSchema.safeParse(
+        sectionValues.get(agent),
+      );
+
+      if (!result.success) {
+        yield* Effect.logWarning(
+          `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
+            {
+              issues: result.error.issues,
+              pathPrefix: `agents.${agent}`,
+            },
+          )}`,
+        );
+        continue;
+      }
+
+      artifactSpecs.push(
+        buildArtifactSpec({
+          input: {
+            ...baseSource,
+            ...(result.data ?? {}),
+          },
+          targetRoots: input.targetRoots,
+        }),
+      );
+    }
+
+    if (artifactSpecs.length === 0) {
+      return null;
+    }
+
+    return artifactSpecs;
+  });
 }
