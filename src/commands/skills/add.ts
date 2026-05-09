@@ -236,15 +236,15 @@ export function skillsAddEffect(options: {
           repo,
         });
 
-        lockfile = upsertManagedSkill(lockfile, {
-          updatedSkill: importedSkill,
-        });
-        yield* saveSkillsLockfile(env, { lockfile });
-
         yield* replaceManagedSkillDirectory({
           targetDir,
           sourceDir,
         });
+
+        lockfile = upsertManagedSkill(lockfile, {
+          updatedSkill: importedSkill,
+        });
+        yield* saveSkillsLockfile(env, { lockfile });
 
         importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
       }
