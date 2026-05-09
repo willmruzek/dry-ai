@@ -21,10 +21,6 @@ import {
   normalizeImportedSkillPath,
   normalizeRemoteRepo,
   pathExistsInFileSystem,
-  type RemoteSkillCheckoutEscapeError,
-  type RemoteSkillDirectoryInvalid,
-  type RemoteSkillDirectoryResolveError,
-  type RemoteSkillImportPathInvalidError,
   replaceManagedSkillDirectory,
   resolveManagedSkillImportPath,
   resolveManagedSkillImportPathFromBase,
@@ -32,6 +28,11 @@ import {
   saveSkillsLockfile,
   timestampNow,
   upsertManagedSkill,
+  removeManagedSkillDirectory,
+  type RemoteSkillCheckoutEscapeError,
+  type RemoteSkillDirectoryInvalid,
+  type RemoteSkillDirectoryResolveError,
+  type RemoteSkillImportPathInvalidError,
 } from '../../lib/skills.js';
 import type {
   EnsureSkillsSourceRootError,
@@ -67,6 +68,20 @@ export class SkillsAddValidationError extends Data.TaggedError(
   }
 }
 
+/** Lockfile save failed after files were installed to disk. {@link cause} is that save/encode failure — not a rollback/removal failure (removal is best-effort). */
+export class SkillsAddLockfilePersistAfterInstallError extends Data.TaggedError(
+  'SkillsAddLockfilePersistAfterInstallError',
+)<{
+  readonly targetDir: string;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    const inner =
+      this.cause instanceof Error ? this.cause.message : String(this.cause);
+    return `Failed to persist skills lockfile after installing to ${this.targetDir}; attempted to remove installed files. ${inner}`;
+  }
+}
+
 export type SkillsAddEffectError =
   | EnsureSkillsSourceRootError
   | GitCheckoutTempDirectoryError
@@ -82,6 +97,7 @@ export type SkillsAddEffectError =
   | SkillContentHashReadError
   | SkillDirectoryWalkError
   | SkillsAddValidationError
+  | SkillsAddLockfilePersistAfterInstallError
   | SkillsLockfileEncodeError
   | SkillsLockfileExistsCheckError
   | SkillsLockfileWriteError;
@@ -241,10 +257,25 @@ export function skillsAddEffect(options: {
           sourceDir,
         });
 
-        lockfile = upsertManagedSkill(lockfile, {
+        const lockfileWithNewSkill = upsertManagedSkill(lockfile, {
           updatedSkill: importedSkill,
         });
-        yield* saveSkillsLockfile(env, { lockfile });
+
+        yield* saveSkillsLockfile(env, { lockfile: lockfileWithNewSkill }).pipe(
+          Effect.catchAll((saveFailure) =>
+            Effect.gen(function* () {
+              yield* removeManagedSkillDirectory(env, { skillName }).pipe(
+                Effect.catchAll(() => Effect.void),
+              );
+              return yield* new SkillsAddLockfilePersistAfterInstallError({
+                targetDir,
+                cause: saveFailure,
+              });
+            }),
+          ),
+        );
+
+        lockfile = lockfileWithNewSkill;
 
         importedSkillSummaries.push(formatManagedSkillSummary(importedSkill));
       }
