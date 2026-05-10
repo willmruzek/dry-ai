@@ -68,13 +68,17 @@ const mockedOs = vi.mocked(os);
 const mockedGlob = vi.mocked(glob);
 
 /**
- * Exhaustive `Record<SyncAgent, …>`: `satisfies` requires a key for every registry
- * agent or TypeScript fails at compile time.
+ * Compile-time guard: every `SyncAgent` must be listed when the registry grows so
+ * output-tree e2e coverage stays in sync. Invoking this is a no-op at runtime.
  */
-const e2eOutputTreeTestCoverageByAgent = {
+function _typesOnlySyncAgentOutputTreeCoverage(
+  _: Record<SyncAgent, true>,
+): void {}
+
+_typesOnlySyncAgentOutputTreeCoverage({
   copilot: true,
   cursor: true,
-} satisfies Record<SyncAgent, true>;
+});
 
 let mockFileSystem: MockFileSystemHandle;
 
@@ -569,12 +573,6 @@ const RESOLVED_TEST_PREVIEW_OUTPUT_ROOT = path.resolve(
   process.cwd(),
   'output-test',
 );
-
-describe('dry-ai sync registry contracts', () => {
-  it('keeps e2e output-tree coverage exhaustive for every SyncAgent', () => {
-    expect(e2eOutputTreeTestCoverageByAgent).toBeDefined();
-  });
-});
 
 describe('dry-ai sync edge coverage', () => {
   beforeEach(() => {
