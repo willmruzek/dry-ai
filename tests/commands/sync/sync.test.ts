@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadFeature, describeFeature } from '@amiceli/vitest-cucumber';
+import { defineFeature } from '@amiceli/vitest-cucumber';
 import { CommanderError } from 'commander';
 import { glob } from 'glob';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -839,9 +839,7 @@ describe('dry-ai sync edge coverage', () => {
   });
 });
 
-const feature = await loadFeature('./sync.feature');
-
-describeFeature(feature, (f) => {
+defineFeature('dry-ai sync', (f) => {
   // Each Gherkin step runs as its own Vitest test. With `restoreMocks: true`,
   // implementations on `vi.fn()` mocks are cleared after every step, so we
   // must re-apply glob + OS wiring before each step while preserving the
@@ -3191,38 +3189,41 @@ describeFeature(feature, (f) => {
             });
           },
         );
-        When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
-            mockFileSystem,
-          });
+        When(
+          'I run `dry-ai --config-root /virtual/custom-config sync`',
+          async () => {
+            const { cliOptions, stderrMessages } = createTestEnv({
+              mockFileSystem,
+            });
 
-          await runCLI({
-            argv: ['--config-root', configRoot, 'sync'],
-            ...cliOptions,
-          });
+            await runCLI({
+              argv: ['--config-root', configRoot, 'sync'],
+              ...cliOptions,
+            });
 
-          expect(stderrMessages).toEqual([]);
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'custom-command.prompt.md',
+            expect(stderrMessages).toEqual([]);
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'prompts',
+                  'custom-command.prompt.md',
+                ),
               ),
-            ),
-          ).toBe(true);
-          expect(
-            mockFileSystem.files.has(
-              path.join(configRoot, 'sync-manifest.json'),
-            ),
-          ).toBe(true);
-          expect(
-            mockFileSystem.files.has(
-              path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
-            ),
-          ).toBe(false);
-        });
+            ).toBe(true);
+            expect(
+              mockFileSystem.files.has(
+                path.join(configRoot, 'sync-manifest.json'),
+              ),
+            ).toBe(true);
+            expect(
+              mockFileSystem.files.has(
+                path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+              ),
+            ).toBe(false);
+          },
+        );
         Then(
           'dry-ai still writes into the default home-relative layout when I pass an absolute `--config-root` without overriding outputs',
           () => {
@@ -3371,33 +3372,36 @@ describeFeature(feature, (f) => {
             });
           },
         );
-        When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
-            mockFileSystem,
-          });
+        When(
+          'I run `dry-ai --config-root /virtual/config-only-root sync`',
+          async () => {
+            const { cliOptions, stderrMessages } = createTestEnv({
+              mockFileSystem,
+            });
 
-          await runCLI({
-            argv: ['--config-root', configRoot, 'sync'],
-            ...cliOptions,
-          });
+            await runCLI({
+              argv: ['--config-root', configRoot, 'sync'],
+              ...cliOptions,
+            });
 
-          expect(stderrMessages).toEqual([]);
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'config-only-command.prompt.md',
+            expect(stderrMessages).toEqual([]);
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'prompts',
+                  'config-only-command.prompt.md',
+                ),
               ),
-            ),
-          ).toBe(true);
-          expect(
-            mockFileSystem.files.has(
-              path.join(configRoot, 'sync-manifest.json'),
-            ),
-          ).toBe(true);
-        });
+            ).toBe(true);
+            expect(
+              mockFileSystem.files.has(
+                path.join(configRoot, 'sync-manifest.json'),
+              ),
+            ).toBe(true);
+          },
+        );
         Then(
           'dry-ai does not silently redirect agent outputs when I pass only `--config-root`',
           () => {
