@@ -1,6 +1,6 @@
 {
   "name": "dry-ai",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "CLI for syncing shared AI commands, rules, and skills into supported agent targets.",
   "type": "module",
   "repository": {
