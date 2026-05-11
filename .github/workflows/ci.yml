@@ -54,7 +54,7 @@ jobs:
         run: pnpm exec commitlint --version
 
       - name: Validate current commit (last commit) with commitlint
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v')
         run: pnpm exec commitlint --last --verbose
 
       - name: Validate PR commits with commitlint
