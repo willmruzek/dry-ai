@@ -1,4 +1,4 @@
 export default {
   extends: ['@commitlint/config-conventional'],
-  ignores: [(message) => message.trim().startsWith('v')],
+  ignores: [(message) => /^v?\d+\.\d+\.\d+(?:\s|$)/.test(message.trim())],
 };
