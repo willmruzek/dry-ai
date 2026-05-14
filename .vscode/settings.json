@@ -3,5 +3,20 @@
   "js/ts.tsdk.promptToUseWorkspaceVersion": true,
   "chat.tools.terminal.autoApprove": {
     "pnpm vitest run": true
+  },
+
+  "typescript.preferences.autoImportFileExcludePatterns": ["repos/**"],
+  "javascript.preferences.autoImportFileExcludePatterns": ["repos/**"],
+
+  "files.exclude": {
+    "repos/**": true
+  },
+
+  "files.watcherExclude": {
+    "repos/**": true
+  },
+
+  "search.exclude": {
+    "repos/**": true
   }
 }
