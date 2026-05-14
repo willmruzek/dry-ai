@@ -1,6 +1,6 @@
 # Share AI config CLI
 
-Syncs command, rule, and skill sources from `~/.config/dry-ai` by default into supported agent targets.
+Syncs rules, commands, and skills from `~/.config/dry-ai` into supported agent targets (currently Copilot and Cursor).
 
 **Compared to [skills.sh](https://skills.sh):** with `dry-ai skills add`, you can **edit those files**, and the CLI will not override them on the next `sync` run. This allows you to use existing skills, tailor them to your needs, and keep track of their original sources.
 
@@ -20,7 +20,7 @@ Input config files live under the selected config root:
 - `rules`
 - `skills`
 
-The current built-in agent config writes live output to these default roots:
+`dry-ai` will output these sources into:
 
 - `~/.copilot/prompts`
 - `~/.copilot/instructions`
@@ -28,7 +28,7 @@ The current built-in agent config writes live output to these default roots:
 - `~/.cursor/rules`
 - `~/.cursor/skills`
 
-One config root can contain all three source types:
+A config root contains all three source types:
 
 ```text
 ~/.config/dry-ai/
@@ -41,32 +41,48 @@ One config root can contain all three source types:
         └── SKILL.md
 ```
 
-See VS Code editor setup note below.
-
 ## Commands
 
 ### `sync`
 
-- Purpose: Sync commands, rules, and skills from the selected config root into the configured agent target directories.
-- Input roots: Reads from `commands`, `rules`, and `skills` under the selected config root.
-- Output roots: Writes to the live output paths listed in Config Layout by default.
-- Pruning: Removes stale dry-ai-managed outputs that were written by earlier sync runs but are no longer present in the selected config root.
-- Safety: Only prunes outputs tracked in `sync-manifest.json`; unrelated user files in target roots are left alone.
+#### Name
+
+`dry-ai sync` — copy commands, rules, and skills from the config root into supported agent output trees.
+
+#### Description
+
+`sync` reads `commands`, `rules`, and `skills` under the active config root and updates Copilot and Cursor targets under the output root. It maintains `sync-manifest.json` next to the config root: a record of what dry-ai generated so a later run can remove obsolete outputs when you change or delete sources, summarize what changed, and leave alone anything dry-ai did not create.
 
 ### `skills add`
 
-- Purpose: Import one or more managed skills from a remote repository.
-- Repository argument: `<repo>` may be a full git remote URL or a GitHub `owner/repo` shorthand such as `anthropics/skills`.
-- Storage: Imported skills are copied into `config/skills/<name>/` and tracked in `skills.lock.json`.
-- Config root: Local skill directories and `skills.lock.json` are read from and written to the selected config root.
-- Required: `--skill <name>` is required at least once.
-- Default resolution: Each requested skill resolves from `<repo root>/skills/<name>`.
-- `--path <repoPath>`: Resolves each requested skill from a different base directory.
-- `--path .`: Resolves each requested skill from the repository root itself.
-- `--as <name>`: Stores the imported skill under a different local managed name when importing exactly one skill.
-- `--ref <gitRef>`: Fetches a specific branch, tag, or commit instead of the remote default branch.
-- `--pin`: Stores the resolved commit instead of tracking a moving ref.
-- Examples:
+#### Name
+
+`dry-ai skills add` — import one or more managed skills from a remote git repository into the active config root.
+
+#### Synopsis
+
+```text
+dry-ai [global options] skills add <repo> --skill <name> [<name> ...] [import options]
+```
+
+`<repo>` is either a full git remote URL or a GitHub `owner/repo` shorthand (for example, `anthropics/skills`).
+
+#### Description
+
+Copies each requested skill into `skills/<name>/` under the config root and records it in `skills.lock.json` (along with source repo, path, ref, resolved commit, and content hashes). Local skill trees and the lockfile always use the selected `--config-root` (default: `~/.config/dry-ai`).
+
+By default each skill name is resolved from `<repo root>/skills/<name>/`. Use `--path` to use another directory inside the repo, or `--path .` to use the repository root.
+
+#### Options
+
+- **`--skill <name> [<name> ...]`** — Required at least once. Put every skill to import after the first `--skill` token (variadic), or use `--skill` again for another group (for example `--skill a --skill b`). Duplicate names in one run are ignored.
+- **`--path <repoPath>`** — Base directory inside `<repo>` for resolving skills (instead of `skills/`).
+- **`--path .`** — Resolve each skill from the repository root.
+- **`--as <name>`** — Store the imported skill under a different local name (only when importing exactly one skill).
+- **`--ref <gitRef>`** — Fetch a specific branch, tag, or commit instead of the remote default.
+- **`--pin`** — Record the resolved commit so the lockfile does not follow a moving branch ref.
+
+#### Examples
 
 ```sh
 # Resolves from <repo root>/skills/skill-creator
@@ -81,6 +97,9 @@ dry-ai skills add anthropics/skills --path tools --skill review-helper
 # Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
 dry-ai skills add vercel-labs/agent-skills --skill pr-review commit
 
+# Same as above; repeated --skill is equivalent to one variadic --skill
+dry-ai skills add vercel-labs/agent-skills --skill pr-review --skill commit
+
 # Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
 dry-ai skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
 ```
@@ -89,41 +108,75 @@ By default, imports track the requested ref. With no `--ref`, that means the rem
 
 ### `skills update`
 
-- Purpose: Re-fetch one managed skill from its tracked source and replace the local copied directory.
-- `--force`: Overwrites local edits instead of skipping the update.
+#### Name
+
+`dry-ai skills update` — re-fetch one managed skill from its tracked source and replace the local directory under the config root.
+
+#### Synopsis
+
+```text
+dry-ai [global options] skills update <name> [--force]
+```
+
+#### Description
+
+Uses `skills.lock.json` to find the skill’s remote and ref, fetches the same layout as at import time, and replaces files when the working tree still matches the lockfile hashes. If local files were added, removed, or edited, the update is skipped unless **`--force`** is set (see **`skills` lockfile** below).
+
+#### Options
+
+- **`--force`** — Overwrite local edits with the fetched remote copy and refresh hashes in `skills.lock.json`.
 
 ### `skills update-all`
 
-- Purpose: Re-fetch all managed skills from their tracked sources and replace the local copied directories.
-- `--force`: Overwrites local edits instead of skipping the update.
+#### Name
+
+`dry-ai skills update-all` — re-fetch every managed skill and replace each local copy in turn.
+
+#### Synopsis
+
+```text
+dry-ai [global options] skills update-all [--force]
+```
+
+#### Description
+
+Runs the same hash-guarded update logic as **`skills update`**, once per lockfile entry. Skills with local drift are skipped unless **`--force`** is passed.
+
+#### Options
+
+- **`--force`** — Overwrite local edits for any skill where the remote copy would otherwise be skipped.
 
 ### `skills remove`
 
-- Purpose: Delete a managed skill's local copied directory and remove its lockfile entry.
+#### Name
+
+`dry-ai skills remove` — delete a managed skill’s local directory and drop its row from `skills.lock.json`.
+
+#### Synopsis
+
+```text
+dry-ai [global options] skills remove <name>
+```
+
+#### Description
+
+`<name>` is the managed skill name (the directory name under `skills/` in the config root).
 
 ### `skills list`
 
-- Purpose: Report local skill directories, annotate managed entries from the lockfile, and flag managed entries whose local directory is missing.
+#### Name
 
-### `skills` lockfile
+`dry-ai skills list` — show local skill directories and how they relate to the lockfile.
 
-The lockfile records:
+#### Synopsis
 
-- the local skill name
-- the source repository
-- the source path within that repository
-- the requested git ref, when one was provided
-- the resolved commit that was imported
-- the last installed content hash for each file in the managed skill directory
-
-Before replacing a managed skill, `dry-ai` compares the current local files against the hashes stored in `skills.lock.json`. If any file was added, removed, or edited locally, the update is skipped and a warning is printed so you do not lose your customizations by accident.
-
-Use `--force` on `skills update` or `skills update-all` to intentionally overwrite local edits with the remote copy (and record new file hashes in the lockfile).
-
-```sh
-dry-ai skills update review-helper --force
-dry-ai skills update-all --force
+```text
+dry-ai [global options] skills list
 ```
+
+#### Description
+
+Lists directories under `skills/` in the config root. Managed skills include a summary from the lockfile; unmanaged entries are labeled as such. Lockfile rows that no longer have a local directory are reported so you can spot a broken or removed tree.
 
 ## Example Configs
 
@@ -204,6 +257,8 @@ Focus on findings first.
 
 For development, use `pnpm dev` to rebuild into `dest/` on change and `pnpm dev:dry-ai <...>` to run the built CLI.
 
+To put this checkout’s CLI on your PATH as `dry-ai`, run **`pnpm link --global`** from the repo root after a build (or **`npm link`** with npm’s global link workflow). Use **`pnpm unlink --global`** / **`npm unlink -g dry-ai`** when you want to stop using the linked binary.
+
 Run `pnpm run setup:editor` after installing dependencies if you want the Effect language service workspace patch applied locally.
 
 ```sh
@@ -220,7 +275,7 @@ pnpm dev:dry-ai <...>
 
 ## VS Code Setup
 
-One current editor-specific note: VS Code does not automatically discover prompt files from the Copilot prompt target at `~/.copilot/prompts`.
+VS Code does not automatically discover prompt (command) files from the Copilot prompt target at `~/.copilot/prompts`.
 
 Add this to your VS Code user settings if you want prompt files installed by `dry-ai` into that target to be picked up:
 

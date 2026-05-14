@@ -158,6 +158,7 @@ describe('runCLI', () => {
           dry-ai skills add anthropics/skills --path . --skill review-helper
           dry-ai skills add anthropics/skills --path tools --skill review-helper
           dry-ai skills add vercel-labs/agent-skills --skill pr-review commit
+          dry-ai skills add vercel-labs/agent-skills --skill pr-review --skill commit
           dry-ai skills update skill-creator
         "
       `);
@@ -180,7 +181,8 @@ describe('runCLI', () => {
           Add managed skills from a remote repository
 
           Options:
-            --skill <names...>  Import one or more skills by directory name
+            --skill <names...>  Skill directory names: pass several after one --skill, or
+                                repeat --skill (duplicates ignored)
             --path <repoPath>   Resolve each --skill from a different repository
                                 subdirectory; use . for the repository root instead of the
                                 default skills/ directory

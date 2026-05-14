@@ -56,6 +56,7 @@ export function addSkillsCommand(input: {
           ${commandName} skills add anthropics/skills --path . --skill review-helper
           ${commandName} skills add anthropics/skills --path tools --skill review-helper
           ${commandName} skills add vercel-labs/agent-skills --skill pr-review commit
+          ${commandName} skills add vercel-labs/agent-skills --skill pr-review --skill commit
           ${commandName} skills update skill-creator
       `,
     )
@@ -73,7 +74,10 @@ export function addSkillsCommand(input: {
   skills
     .command('add <repo>')
     .description('Add managed skills from a remote repository')
-    .option('--skill <names...>', 'Import one or more skills by directory name')
+    .option(
+      '--skill <names...>',
+      'Skill directory names: pass several after one --skill, or repeat --skill (duplicates ignored)',
+    )
     .option(
       '--path <repoPath>',
       'Resolve each --skill from a different repository subdirectory; use . for the repository root instead of the default skills/ directory',
