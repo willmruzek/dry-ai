@@ -62,7 +62,7 @@ A config root contains all three source types:
 #### Synopsis
 
 ```text
-dry-ai [global options] skills add <repo> --skill <name> [--skill <name> ...] [import options]
+dry-ai [global options] skills add <repo> --skill <name> [<name> ...] [import options]
 ```
 
 `<repo>` is either a full git remote URL or a GitHub `owner/repo` shorthand (for example, `anthropics/skills`).
@@ -71,11 +71,11 @@ dry-ai [global options] skills add <repo> --skill <name> [--skill <name> ...] [i
 
 Copies each requested skill into `skills/<name>/` under the config root and records it in `skills.lock.json` (along with source repo, path, ref, resolved commit, and content hashes). Local skill trees and the lockfile always use the selected `--config-root` (default: `~/.config/dry-ai`).
 
-By default each `--skill` name is resolved from `<repo root>/skills/<name>/`. Use `--path` to use another directory inside the repo, or `--path .` to use the repository root.
+By default each skill name is resolved from `<repo root>/skills/<name>/`. Use `--path` to use another directory inside the repo, or `--path .` to use the repository root.
 
 #### Options
 
-- **`--skill <name>`** — Required at least once; may be repeated to import several skills in one run.
+- **`--skill <name> [<name> ...]`** — Required at least once. Put every skill to import after the first `--skill` token (variadic), or use `--skill` again for another group (for example `--skill a --skill b`). Duplicate names in one run are ignored.
 - **`--path <repoPath>`** — Base directory inside `<repo>` for resolving skills (instead of `skills/`).
 - **`--path .`** — Resolve each skill from the repository root.
 - **`--as <name>`** — Store the imported skill under a different local name (only when importing exactly one skill).
@@ -96,6 +96,9 @@ dry-ai skills add anthropics/skills --path tools --skill review-helper
 
 # Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
 dry-ai skills add vercel-labs/agent-skills --skill pr-review commit
+
+# Same as above; repeated --skill is equivalent to one variadic --skill
+dry-ai skills add vercel-labs/agent-skills --skill pr-review --skill commit
 
 # Resolves from <repo root>/skills/pr-review and <repo root>/skills/commit
 dry-ai skills add https://github.com/vercel-labs/agent-skills.git --skill pr-review commit
