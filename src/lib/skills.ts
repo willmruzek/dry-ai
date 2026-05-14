@@ -730,9 +730,11 @@ export function cloneRemoteRepo(input: {
     const normalizedRepo = normalizeRemoteRepo(input.repo);
 
     const fs = yield* FileSystem;
-    const tempPrefix = path.join(os.tmpdir(), 'agents-skill.');
+    const tempDirectory = os.tmpdir();
+    const tempPrefix = 'agents-skill.';
     const checkoutDir = yield* fs
       .makeTempDirectory({
+        directory: tempDirectory,
         prefix: tempPrefix,
       })
       .pipe(

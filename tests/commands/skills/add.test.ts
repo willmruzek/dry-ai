@@ -223,6 +223,9 @@ describe('dry-ai skills add', () => {
           throw new Error('Expected exactly two temporary directories.');
         }
 
+        expect(checkoutDirectory).toMatch(
+          /^\/virtual\/tmp\/agents-skill\.\d+$/,
+        );
         expect(
           mockPathExists({
             handle: mockFileSystem,

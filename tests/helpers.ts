@@ -679,7 +679,7 @@ function resolveMakeTempDirectoryPrefix(
   }
 
   if (options?.prefix !== undefined && options.prefix.length > 0) {
-    return options.prefix;
+    return path.join(os.tmpdir(), options.prefix);
   }
 
   return path.join(os.tmpdir(), 'tmp.');

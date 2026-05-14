@@ -138,7 +138,7 @@ export class ListSkillSubdirectoriesError extends Data.TaggedError(
 export class GitCheckoutTempDirectoryError extends Data.TaggedError(
   'GitCheckoutTempDirectoryError',
 )<{
-  /** Prefix passed to {@link FileSystem.makeTempDirectory} (includes tmp root + template). */
+  /** Prefix passed to {@link FileSystem.makeTempDirectory}. */
   readonly tempPrefix: string;
   readonly cause: PlatformError;
 }> {
