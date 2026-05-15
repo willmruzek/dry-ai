@@ -11,13 +11,16 @@ import type { AgentsContext } from './context.js';
 export type CLIRuntime = {
   /** Layer providing `@effect/platform` {@link FileSystem} for lockfile and related I/O. */
   fileSystemLayer: Layer<FileSystem>;
-  /** Routes Effect Logger output (info → stdout, warning/error → stderr) for CLI runs. */
-  loggerLayer: Layer<never>;
+  /**
+   * When set (tests), replaces the default Effect logger so `Effect.log*` is
+   * captured alongside Commander output. Omitted in production — default logger is used.
+   */
+  loggerLayer?: Layer<never>;
 };
 
 /**
  * The shared environment passed into every command action: the resolved domain
- * context plus Effect runtime layers (filesystem and CLI logger routing).
+ * context plus Effect runtime layers (filesystem and optional test logger capture).
  */
 export type CommandEnv = {
   context: AgentsContext;

@@ -303,19 +303,22 @@ describe('dry-ai skills update-all', () => {
           }),
         });
 
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update-all'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        // Assert: one stdout logInfo payload with the count + per-skill
+        // Assert: one Effect logInfo payload with the count + per-skill
         // summary lines (lockfile-iteration order, which is alphabetical
         // since the lockfile was seeded alphabetically).
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           [
             'Updated 2 managed skills:',
             `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
@@ -376,6 +379,7 @@ describe('dry-ai skills update-all', () => {
             }),
           ).toBe(content);
         }
+
         for (const [relativeFilePath, content] of Object.entries(
           SECOND_SKILL.remoteFiles,
         )) {
@@ -452,12 +456,12 @@ describe('dry-ai skills update-all', () => {
           message: 'simulated second-skill replace failure',
         });
 
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         await expect(
           runCLI({
             argv: ['skills', 'update-all'],
-            ...environment.cliOptions,
+            ...env.cliOptions,
           }),
         ).rejects.toThrow(
           /Could not install skill files into: .*review-helper/,
@@ -532,17 +536,21 @@ describe('dry-ai skills update-all', () => {
           filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
           content: JSON.stringify({ version: 1, skills: [] }),
         });
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         await runCLI({
           argv: ['skills', 'update-all'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           'No managed skills to update.\n',
         ]);
+
         expect(mockFileSystem.lockfileWrites).toEqual([]);
       });
 
@@ -579,12 +587,12 @@ describe('dry-ai skills update-all', () => {
         // Arrange: one skill with local edits (must be skipped) and one
         // clean skill (must be updated).
         const { skippedSkillOnDiskFiles } = arrangeOneSkippedOneUpdated();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update-all'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: `FIRST_SKILL`'s on-disk directory still holds the user's
@@ -623,17 +631,20 @@ describe('dry-ai skills update-all', () => {
         // Arrange: one skill with local edits (must be skipped) and one
         // clean skill (must be updated).
         arrangeOneSkippedOneUpdated();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update-all'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        // Assert: stdout has one `logInfo` payload naming only the updated
+        // Assert: Effect stdout has one `logInfo` payload naming only the updated
         // skill.
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           [
             'Updated 1 managed skills:',
             `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
@@ -641,11 +652,11 @@ describe('dry-ai skills update-all', () => {
           ].join('\n'),
         ]);
 
-        // Assert: stderr has one combined `logWarn` payload (single
+        // Assert: Effect stderr has one combined `logWarn` payload (single
         // "Skipped N…" preamble followed by one "- <name> local edits
         // detected in <files>" line per skipped skill) naming only the
         // skipped skill.
-        expect(environment.stderrMessages).toEqual([
+        expect(env.effectStderrMessages).toEqual([
           [
             'Skipped 1 managed skills due to local edits. Re-run with --force to overwrite local changes:',
             `- ${FIRST_SKILL.name} local edits detected in SKILL.md`,
@@ -658,12 +669,12 @@ describe('dry-ai skills update-all', () => {
         // Arrange: one skill with local edits (must be skipped) and one
         // clean skill (must be updated).
         arrangeOneSkippedOneUpdated();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update-all'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: only the skill that was updated triggers a lockfile write.
@@ -707,17 +718,20 @@ describe('dry-ai skills update-all', () => {
 
       it('prints "No managed skills were updated." on stdout when every skill was skipped due to local edits', async () => {
         arrangeBothSkillsSkippedDueToLocalEdits();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         await runCLI({
           argv: ['skills', 'update-all'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           'No managed skills were updated.\n',
         ]);
-        expect(environment.stderrMessages).toEqual([
+        expect(env.effectStderrMessages).toEqual([
           [
             'Skipped 2 managed skills due to local edits. Re-run with --force to overwrite local changes:',
             `- ${FIRST_SKILL.name} local edits detected in SKILL.md`,

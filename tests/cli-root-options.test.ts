@@ -109,26 +109,30 @@ describe('dry-ai root options', () => {
           content: JSON.stringify(seededLockfile),
         });
 
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv({
+        const env = createTestEnv({
           mockFileSystem,
         });
 
         // Act
         await runCLI({
           argv: ['skills', 'list'],
-          ...cliOptions,
+          ...env.cliOptions,
         });
 
-        // Assert: stdout reflects the seeded skill, proving the CLI read
+        // Assert: Effect logger output reflects the seeded skill, proving the CLI read
         // the lockfile from the home-derived default config root.
-        const stdout = stdoutMessages.join('');
+        const stdout = env.effectStdoutMessages.join('');
 
-        expect(stderrMessages).toEqual([]);
         expect(stdout).toContain('review-helper');
         expect(stdout).toContain(
           'repo=https://github.com/anthropics/skills.git',
         );
         expect(stdout).toContain('path=skills/review-helper');
+
+        expect(env.cmderStdoutMessages).toEqual([]);
+
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
       });
 
       it('writes generated output under the user home directory when neither --output-root nor --test is passed', async () => {
@@ -166,19 +170,20 @@ describe('dry-ai root options', () => {
           content: '# My Skill\n',
         });
 
-        const { cliOptions, stderrMessages } = createTestEnv({
+        const env = createTestEnv({
           mockFileSystem,
         });
 
         // Act
         await runCLI({
           argv: ['sync'],
-          ...cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: every rendered output file is on disk under the home
         // directory, proving the default output root === homeDir.
-        expect(stderrMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
 
         const expectedOutputFiles = [
           // Command → Copilot (markdown prompt file)

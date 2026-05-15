@@ -39,6 +39,7 @@ describe('ensureDirectory', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       expect(mockPathExists({ handle, targetPath: directoryPath })).toBe(true);
     }),
   );
@@ -69,8 +70,10 @@ describe('ensureDirectory', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(EnsureDirError);
         expect(error._tag).toBe('EnsureDirError');
+
         expect(error.directoryPath).toBe(directoryPath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('disk full');
       }
     }),
@@ -128,8 +131,10 @@ describe('readFileUtf8', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(ReadFileError);
         expect(error._tag).toBe('ReadFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('permission denied');
       }
     }),
@@ -155,8 +160,10 @@ describe('readFileUtf8', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(ReadFileError);
         expect(error._tag).toBe('ReadFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('missing.txt');
       }
     }),
@@ -178,6 +185,7 @@ describe('writeTextFile', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       expect(readMockTextFile({ handle, filePath })).toBe(content);
     }),
   );
@@ -210,8 +218,10 @@ describe('writeTextFile', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(WriteFileError);
         expect(error._tag).toBe('WriteFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('read-only filesystem');
       }
     }),
@@ -246,8 +256,10 @@ describe('writeTextFile', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(WriteFileError);
         expect(error._tag).toBe('WriteFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('quota exceeded');
       }
     }),

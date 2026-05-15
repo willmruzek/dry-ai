@@ -112,19 +112,22 @@ describe('dry-ai skills list', () => {
           }),
         });
 
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'list'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: stdout is one logInfo payload with one "- <summary>" line
         // per local skill. No "unmanaged" suffix (both are tracked) and no
         // "missing-local-directory" suffix (both have on-disk directories).
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           [
             `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FIRST_SKILL.commit.slice(0, 7)}`,
             `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${SECOND_SKILL.commit.slice(0, 7)}`,
@@ -146,12 +149,12 @@ describe('dry-ai skills list', () => {
           false,
         );
 
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'list'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: the skills root was created and is visible to the in-memory mock filesystem.
@@ -161,10 +164,11 @@ describe('dry-ai skills list', () => {
 
         // Assert: with no local skills and no lockfile, stdout is the
         // empty-state message and stderr is empty.
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
-          'No local skills found.\n',
-        ]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual(['No local skills found.\n']);
       });
 
       // priority: low
@@ -222,15 +226,18 @@ describe('dry-ai skills list', () => {
           }),
         });
 
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         await runCLI({
           argv: ['skills', 'list'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           [
             '- extra-local unmanaged',
             `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FIRST_SKILL.commit.slice(0, 7)}`,

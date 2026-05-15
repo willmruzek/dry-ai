@@ -49,6 +49,7 @@ describe('ensureDirectory', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       expect(mockPathExists({ handle, targetPath: directoryPath })).toBe(true);
     }),
   );
@@ -79,8 +80,10 @@ describe('ensureDirectory', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(EnsureDirError);
         expect(error._tag).toBe('EnsureDirError');
+
         expect(error.directoryPath).toBe(directoryPath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('disk full');
       }
     }),
@@ -106,6 +109,7 @@ describe('readFileUtf8', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       if (Exit.isSuccess(exit)) {
         expect(exit.value).toBe(body);
       }
@@ -138,8 +142,10 @@ describe('readFileUtf8', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(ReadFileError);
         expect(error._tag).toBe('ReadFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('permission denied');
       }
     }),
@@ -165,8 +171,10 @@ describe('readFileUtf8', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(ReadFileError);
         expect(error._tag).toBe('ReadFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('missing.txt');
       }
     }),
@@ -188,6 +196,7 @@ describe('writeTextFile', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       expect(readMockTextFile({ handle, filePath })).toBe(content);
     }),
   );
@@ -220,8 +229,10 @@ describe('writeTextFile', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(WriteFileError);
         expect(error._tag).toBe('WriteFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('read-only filesystem');
       }
     }),
@@ -256,8 +267,10 @@ describe('writeTextFile', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(WriteFileError);
         expect(error._tag).toBe('WriteFileError');
+
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
+
         expect(error.message).toContain('quota exceeded');
       }
     }),
@@ -277,6 +290,7 @@ describe('removePath', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       expect(mockPathExists({ handle, targetPath: filePath })).toBe(false);
     }),
   );
@@ -302,6 +316,7 @@ describe('removePath', () => {
         const error = result.left;
         expect(error).toBeInstanceOf(RemovePathError);
         expect(error._tag).toBe('RemovePathError');
+
         expect(error.targetPath).toBe(targetPath);
         expect(error.message).toContain('cannot delete');
       }
@@ -323,6 +338,7 @@ describe('emptyDirectory', () => {
         );
 
         expect(Exit.isSuccess(exit)).toBe(true);
+
         expect(mockPathExists({ handle, targetPath: dir })).toBe(true);
       }),
   );
@@ -344,6 +360,7 @@ describe('emptyDirectory', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       expect(mockPathExists({ handle, targetPath: dir })).toBe(true);
       expect(
         mockPathExists({
@@ -380,6 +397,7 @@ describe('emptyDirectory', () => {
       if (Option.isSome(failureOpt)) {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(EmptyDirError);
+
         expect(error.message).toContain('busy');
       }
     }),
@@ -410,6 +428,7 @@ describe('emptyDirectory', () => {
       if (Option.isSome(failureOpt)) {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(EmptyDirError);
+
         expect(error.message).toContain('no space');
       }
     }),
@@ -435,6 +454,7 @@ describe('copyDirectoryContents', () => {
       );
 
       expect(Exit.isSuccess(exit)).toBe(true);
+
       expect(
         readMockTextFile({ handle, filePath: path.join(dst, 'note.txt') }),
       ).toBe('copied');
@@ -461,6 +481,7 @@ describe('copyDirectoryContents', () => {
       if (Option.isSome(failureOpt)) {
         const err = failureOpt.value;
         expect(err).toBeInstanceOf(ReadDirectoryError);
+
         if (err instanceof ReadDirectoryError) {
           expect(err.directoryPath).toBe(src);
         }
@@ -501,6 +522,7 @@ describe('copyDirectoryContents', () => {
       if (Option.isSome(failureOpt)) {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(CopyDirectoryEntryError);
+
         expect(error.message).toContain('copy blocked');
       }
     }),
@@ -538,6 +560,7 @@ describe('copyDirectoryContents', () => {
       expect(Option.isSome(failureOpt)).toBe(true);
       if (Option.isSome(failureOpt)) {
         expect(failureOpt.value).toBeInstanceOf(EmptyDirError);
+
         expect(failureOpt.value.message).toContain('target locked');
       }
     }),

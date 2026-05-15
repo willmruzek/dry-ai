@@ -129,13 +129,13 @@ describe('dry-ai skills add', () => {
         ['https://github.com/anthropics/skills.git'],
       ])('imports one skill when repo is provided as %s', async (repo) => {
         // Arrange
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
         const defaultSkillsLockfilePath = path.join(
-          environment.defaultConfigRoot,
+          env.defaultConfigRoot,
           'skills.lock.json',
         );
         const defaultSkillsSourceRoot = path.join(
-          environment.defaultConfigRoot,
+          env.defaultConfigRoot,
           'skills',
         );
         const normalizedRepo = 'https://github.com/anthropics/skills.git';
@@ -148,12 +148,15 @@ describe('dry-ai skills add', () => {
         // Act
         await runCLI({
           argv: ['skills', 'add', repo, '--skill', 'review-helper'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        // Assert: success message written through the CLI runtime
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        // Assert: success message emitted via Effect Logger; Commander quiet.
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           `Imported ${MANAGED_SKILL_NAME} repo=${normalizedRepo} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
         ]);
 
@@ -244,9 +247,9 @@ describe('dry-ai skills add', () => {
 
     describe('flag variations', () => {
       it('stores the resolved commit as the lockfile ref when --pin is passed without --ref', async () => {
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
         const defaultSkillsLockfilePath = path.join(
-          environment.defaultConfigRoot,
+          env.defaultConfigRoot,
           'skills.lock.json',
         );
 
@@ -259,7 +262,7 @@ describe('dry-ai skills add', () => {
             MANAGED_SKILL_NAME,
             '--pin',
           ],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         const savedLockfile = JSON.parse(
@@ -341,11 +344,8 @@ describe('dry-ai skills add', () => {
           },
         });
 
-        const environment = createTestEnv({ mockFileSystem });
-        const skillsSourceRoot = path.join(
-          environment.defaultConfigRoot,
-          'skills',
-        );
+        const env = createTestEnv({ mockFileSystem });
+        const skillsSourceRoot = path.join(env.defaultConfigRoot, 'skills');
         const normalizedRepo = 'https://github.com/anthropics/skills.git';
 
         // Act
@@ -358,12 +358,15 @@ describe('dry-ai skills add', () => {
             MANAGED_SKILL_NAME,
             SECOND_SKILL_NAME,
           ],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: one "Imported ..." line per skill, emitted in input order.
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           `Imported ${MANAGED_SKILL_NAME} repo=${normalizedRepo} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
           `Imported ${SECOND_SKILL_NAME} repo=${normalizedRepo} path=${SECOND_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
         ]);
@@ -423,7 +426,7 @@ describe('dry-ai skills add', () => {
       });
 
       it('de-duplicates repeated --skill values, importing each skill only once', async () => {
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
         const normalizedRepo = 'https://github.com/anthropics/skills.git';
 
         await runCLI({
@@ -435,11 +438,14 @@ describe('dry-ai skills add', () => {
             MANAGED_SKILL_NAME,
             MANAGED_SKILL_NAME,
           ],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           `Imported ${MANAGED_SKILL_NAME} repo=${normalizedRepo} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
         ]);
       });
@@ -504,11 +510,8 @@ describe('dry-ai skills add', () => {
           }),
         });
 
-        const environment = createTestEnv({ mockFileSystem });
-        const skillsSourceRoot = path.join(
-          environment.defaultConfigRoot,
-          'skills',
-        );
+        const env = createTestEnv({ mockFileSystem });
+        const skillsSourceRoot = path.join(env.defaultConfigRoot, 'skills');
 
         await runCLI({
           argv: [
@@ -519,13 +522,16 @@ describe('dry-ai skills add', () => {
             MANAGED_SKILL_NAME,
             SECOND_SKILL_NAME,
           ],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           `Imported ${SECOND_SKILL_NAME} repo=${normalizedRepo} path=${SECOND_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
         ]);
-        expect(environment.stderrMessages).toEqual([
+        expect(env.effectStderrMessages).toEqual([
           `Skipped already-imported skills: ${MANAGED_SKILL_NAME}\n`,
         ]);
 
@@ -578,7 +584,7 @@ describe('dry-ai skills add', () => {
           }),
         });
 
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         await runCLI({
           argv: [
@@ -589,13 +595,16 @@ describe('dry-ai skills add', () => {
             MANAGED_SKILL_NAME,
             SECOND_SKILL_NAME,
           ],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           'No skills were imported.\n',
         ]);
-        expect(environment.stderrMessages).toEqual([
+        expect(env.effectStderrMessages).toEqual([
           `Skipped already-imported skills: ${MANAGED_SKILL_NAME}, ${SECOND_SKILL_NAME}\n`,
         ]);
       });
@@ -636,11 +645,11 @@ describe('dry-ai skills add', () => {
     );
 
     it('throws when --skill is omitted', async () => {
-      const environment = createTestEnv({ mockFileSystem });
+      const env = createTestEnv({ mockFileSystem });
       await expect(
         runCLI({
           argv: ['skills', 'add', 'anthropics/skills'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         }),
       ).rejects.toThrow(
         'At least one skill name must be provided with --skill',
@@ -653,7 +662,7 @@ describe('dry-ai skills add', () => {
     );
 
     it('throws when --as is combined with more than one --skill', async () => {
-      const environment = createTestEnv({ mockFileSystem });
+      const env = createTestEnv({ mockFileSystem });
       await expect(
         runCLI({
           argv: [
@@ -666,7 +675,7 @@ describe('dry-ai skills add', () => {
             '--as',
             'alias',
           ],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         }),
       ).rejects.toThrow(
         '--as may only be used when importing exactly one skill',
@@ -680,9 +689,9 @@ describe('dry-ai skills add', () => {
     );
 
     it('throws when the target skill directory already exists on disk but is absent from the lockfile', async () => {
-      const environment = createTestEnv({ mockFileSystem });
+      const env = createTestEnv({ mockFileSystem });
       const skillDir = path.join(
-        environment.defaultConfigRoot,
+        env.defaultConfigRoot,
         'skills',
         MANAGED_SKILL_NAME,
       );
@@ -701,7 +710,7 @@ describe('dry-ai skills add', () => {
             '--skill',
             MANAGED_SKILL_NAME,
           ],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         }),
       ).rejects.toThrow(`A local skill directory already exists: ${skillDir}`);
     });

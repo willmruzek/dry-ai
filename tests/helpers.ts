@@ -10,7 +10,7 @@ import {
   type FileSystem,
   type MakeTempDirectoryOptions,
 } from '@effect/platform/FileSystem';
-import { Effect } from 'effect';
+import { Effect, Logger } from 'effect';
 import type { Layer } from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Ref from 'effect/Ref';
@@ -147,8 +147,12 @@ export type TestEnv = {
   defaultOutputRoot: string;
   cliOptions: CLIOptions;
   mockFileSystem: MockFileSystemHandle;
-  stderrMessages: string[];
-  stdoutMessages: string[];
+  /** Commander `configureOutput` only (help, version, parse errors). */
+  cmderStderrMessages: string[];
+  cmderStdoutMessages: string[];
+  /** Effect `Logger` only — same level routing as before (info → out, warn/error → err). */
+  effectStderrMessages: string[];
+  effectStdoutMessages: string[];
 };
 
 // ---- CLI test helpers ----
@@ -159,28 +163,66 @@ export type TestEnv = {
  * the exact bytes the CLI emitted.
  */
 type TestStdioWriters = StdioWriters & {
-  stdoutMessages: string[];
-  stderrMessages: string[];
+  cmderStdoutMessages: string[];
+  cmderStderrMessages: string[];
 };
 
 /**
  * Creates stdio writers that push every write into the exposed
- * `stdoutMessages` / `stderrMessages` arrays for test assertions.
+ * `cmderStdoutMessages` / `cmderStderrMessages` arrays for test assertions.
  */
 export function createTestStdioWriters(): TestStdioWriters {
-  const stdoutMessages: string[] = [];
-  const stderrMessages: string[] = [];
+  const cmderStdoutMessages: string[] = [];
+  const cmderStderrMessages: string[] = [];
 
   return {
-    stdoutMessages,
-    stderrMessages,
+    cmderStdoutMessages,
+    cmderStderrMessages,
     writeOut(output) {
-      stdoutMessages.push(output);
+      cmderStdoutMessages.push(output);
     },
     writeErr(output) {
-      stderrMessages.push(output);
+      cmderStderrMessages.push(output);
     },
   };
+}
+
+function formatTestEffectLogMessage(message: unknown): string {
+  if (Array.isArray(message)) {
+    return message
+      .map((part) => (typeof part === 'string' ? part : String(part)))
+      .join(' ');
+  }
+
+  return typeof message === 'string' ? message : String(message);
+}
+
+/**
+ * Test-only Effect logger: plain message + newline; captured in dedicated
+ * buffers separate from Commander {@link StdioWriters}.
+ */
+export function createTestEffectLoggerLayer(options: {
+  effectStdoutMessages: string[];
+  effectStderrMessages: string[];
+}): Layer<never> {
+  const { effectStdoutMessages, effectStderrMessages } = options;
+
+  const logger = Logger.make<unknown, void>((opts) => {
+    const line = `${formatTestEffectLogMessage(opts.message)}\n`;
+
+    switch (opts.logLevel._tag) {
+      case 'Fatal':
+      case 'Error':
+      case 'Warning':
+        effectStderrMessages.push(line);
+        break;
+      default:
+        effectStdoutMessages.push(line);
+        break;
+    }
+  });
+
+  return Logger.replace(Logger.defaultLogger, logger);
 }
 
 function mockPathExistsSnapshot(
@@ -616,7 +658,8 @@ export function mockFileSystemLayer(
  * @param defaultConfigRoot - Optional override for the default configuration root used by the TestEnv.
  * @param defaultOutputRoot - Optional override for the default output root used by the TestEnv.
  * @param mockFileSystem - Optional existing MockFileSystemHandle to use; when omitted a fresh mock filesystem handle is created.
- * @returns A TestEnv containing the configured roots, the mock filesystem handle, test CLI options (including a fileSystemLayer), and arrays capturing stdout/stderr messages.
+ * @returns A TestEnv with Commander (`cmderStdoutMessages` / `cmderStderrMessages`) and
+ * Effect logger (`effectStdoutMessages` / `effectStderrMessages`) capture arrays.
  */
 export function createTestEnv({
   defaultConfigRoot = '',
@@ -628,6 +671,8 @@ export function createTestEnv({
   mockFileSystem?: MockFileSystemHandle;
 } = {}): TestEnv {
   const stdioWriters = createTestStdioWriters();
+  const effectStdoutMessages: string[] = [];
+  const effectStderrMessages: string[] = [];
   const mockFileSystem = mockFileSystemInput ?? createMockFileSystemState();
 
   return {
@@ -638,10 +683,16 @@ export function createTestEnv({
       executableName: 'dry-ai',
       version: '9.9.9-test',
       stdioWriters,
+      loggerLayer: createTestEffectLoggerLayer({
+        effectStdoutMessages,
+        effectStderrMessages,
+      }),
       fileSystemLayer: mockFileSystemLayer(mockFileSystem),
     },
-    stderrMessages: stdioWriters.stderrMessages,
-    stdoutMessages: stdioWriters.stdoutMessages,
+    cmderStderrMessages: stdioWriters.cmderStderrMessages,
+    cmderStdoutMessages: stdioWriters.cmderStdoutMessages,
+    effectStdoutMessages,
+    effectStderrMessages,
   };
 }
 

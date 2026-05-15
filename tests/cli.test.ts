@@ -61,15 +61,16 @@ describe('runCLI', () => {
       ['--help', ['--help']],
       ['-h', ['-h']],
     ])('prints `dry-ai` (root) help with %s', async (_label, argv) => {
-      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+      const env = createTestEnv();
 
       await runCLIHelp({
         argv,
-        ...cliOptions,
+        ...env.cliOptions,
       });
 
-      expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-      expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+      expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+      expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
         "Usage: dry-ai [options] <command> [args]
 
         Options:
@@ -92,30 +93,32 @@ describe('runCLI', () => {
     });
 
     it.each(['-v', '--version'])('prints the version with %s', async (flag) => {
-      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+      const env = createTestEnv();
 
       await runCLIHelp({
         argv: [flag],
-        ...cliOptions,
+        ...env.cliOptions,
       });
 
-      expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-      expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+      expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+      expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
           "9.9.9-test
           "
         `);
     });
 
     it.each(['--help', '-h'])('prints `sync` help with %s', async (flag) => {
-      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+      const env = createTestEnv();
 
       await runCLIHelp({
         argv: ['sync', flag],
-        ...cliOptions,
+        ...env.cliOptions,
       });
 
-      expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-      expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+      expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+      expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
         "Usage: dry-ai sync [options]
 
         Sync generated output into Copilot and Cursor targets
@@ -131,15 +134,16 @@ describe('runCLI', () => {
       ['--help', ['skills', '--help']],
       ['-h', ['skills', '-h']],
     ])('prints `skills` help with %s', async (_label, argv) => {
-      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+      const env = createTestEnv();
 
       await runCLIHelp({
         argv,
-        ...cliOptions,
+        ...env.cliOptions,
       });
 
-      expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-      expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+      expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+      expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
         "Usage: dry-ai skills <subcommand> [args]
 
         Manage imported skills
@@ -169,15 +173,16 @@ describe('runCLI', () => {
     it.each(['--help', '-h'])(
       'prints `skills add` help with %s',
       async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+        const env = createTestEnv();
 
         await runCLIHelp({
           argv: ['skills', 'add', flag],
-          ...cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+        expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+        expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
           "Usage: dry-ai skills add [options] <repo>
 
           Add managed skills from a remote repository
@@ -202,15 +207,16 @@ describe('runCLI', () => {
     it.each(['--help', '-h'])(
       'prints `skills update` help with %s',
       async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+        const env = createTestEnv();
 
         await runCLIHelp({
           argv: ['skills', 'update', flag],
-          ...cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+        expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+        expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
           "Usage: dry-ai skills update [options] <name>
 
           Update a managed skill from its tracked source
@@ -226,15 +232,16 @@ describe('runCLI', () => {
     it.each(['--help', '-h'])(
       'prints `skills update-all` help with %s',
       async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+        const env = createTestEnv();
 
         await runCLIHelp({
           argv: ['skills', 'update-all', flag],
-          ...cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+        expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+        expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
           "Usage: dry-ai skills update-all [options]
 
           Update all managed skills from their tracked sources
@@ -250,15 +257,16 @@ describe('runCLI', () => {
     it.each(['--help', '-h'])(
       'prints `skills list` help with %s',
       async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+        const env = createTestEnv();
 
         await runCLIHelp({
           argv: ['skills', 'list', flag],
-          ...cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+        expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+        expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
           "Usage: dry-ai skills list [options]
 
           List local skills
@@ -273,15 +281,16 @@ describe('runCLI', () => {
     it.each(['--help', '-h'])(
       'prints `skills remove` help with %s',
       async (flag) => {
-        const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+        const env = createTestEnv();
 
         await runCLIHelp({
           argv: ['skills', 'remove', flag],
-          ...cliOptions,
+          ...env.cliOptions,
         });
 
-        expect(stderrMessages.join('')).toMatchInlineSnapshot(`""`);
-        expect(stdoutMessages.join('')).toMatchInlineSnapshot(`
+        expect(env.cmderStderrMessages.join('')).toMatchInlineSnapshot(`""`);
+
+        expect(env.cmderStdoutMessages.join('')).toMatchInlineSnapshot(`
           "Usage: dry-ai skills remove [options] <name>
 
           Remove a managed skill
@@ -296,53 +305,56 @@ describe('runCLI', () => {
 
   describe('sad paths', () => {
     it('rejects an unknown top-level subcommand (e.g. "dry-ai bogus") with a commander error', async () => {
-      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+      const env = createTestEnv();
 
       const error = await runCLIExpectingError({
         argv: ['bogus'],
-        ...cliOptions,
+        ...env.cliOptions,
       });
 
       expect(error).toBeInstanceOf(CommanderError);
       expect(error.code).toBe('commander.excessArguments');
       expect(error.exitCode).toBe(1);
 
-      expect(stdoutMessages).toEqual([]);
-      expect(stderrMessages.join('')).toContain('too many arguments');
+      expect(env.cmderStdoutMessages).toEqual([]);
+      expect(env.cmderStderrMessages.join('')).toContain('too many arguments');
     });
 
     it('rejects an unknown subcommand under skills (e.g. "dry-ai skills bogus") with a commander error', async () => {
-      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+      const env = createTestEnv();
 
       const error = await runCLIExpectingError({
         argv: ['skills', 'bogus'],
-        ...cliOptions,
+        ...env.cliOptions,
       });
 
       expect(error).toBeInstanceOf(CommanderError);
       expect(error.code).toBe('commander.excessArguments');
       expect(error.exitCode).toBe(1);
 
-      expect(stdoutMessages).toEqual([]);
-      const stderr = stderrMessages.join('');
+      expect(env.cmderStdoutMessages).toEqual([]);
+
+      const stderr = env.cmderStderrMessages.join('');
       expect(stderr).toContain('too many arguments');
       expect(stderr).toContain("'skills'");
     });
 
     it('rejects an unknown root flag (e.g. "dry-ai --bogus sync") with a commander error', async () => {
-      const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv();
+      const env = createTestEnv();
 
       const error = await runCLIExpectingError({
         argv: ['--bogus', 'sync'],
-        ...cliOptions,
+        ...env.cliOptions,
       });
 
       expect(error).toBeInstanceOf(CommanderError);
       expect(error.code).toBe('commander.unknownOption');
       expect(error.exitCode).toBe(1);
 
-      expect(stdoutMessages).toEqual([]);
-      expect(stderrMessages.join('')).toContain("unknown option '--bogus'");
+      expect(env.cmderStdoutMessages).toEqual([]);
+      expect(env.cmderStderrMessages.join('')).toContain(
+        "unknown option '--bogus'",
+      );
     });
   });
 });

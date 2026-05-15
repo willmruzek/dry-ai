@@ -122,7 +122,7 @@ describe('dry-ai skills remove', () => {
           }),
         });
 
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
         const removedSkillDir = path.join(
           DEFAULT_SKILLS_SOURCE_ROOT,
           REMOVED_SKILL.name,
@@ -135,7 +135,7 @@ describe('dry-ai skills remove', () => {
         // Act
         await runCLI({
           argv: ['skills', 'remove', REMOVED_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: the removed skill's directory (and every file under it) is
@@ -163,9 +163,13 @@ describe('dry-ai skills remove', () => {
           skills: [keptSkillLockfileEntry],
         });
 
-        // Assert: stdout reports the removed skill's summary; stderr is empty.
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        // Assert: Effect logger reports the removed skill's summary; Commander
+        // streams stay clean.
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           `Removed ${REMOVED_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${REMOVED_SKILL.path} ref=HEAD commit=${REMOVED_SKILL.commit.slice(0, 7)}\n`,
         ]);
       });
@@ -201,40 +205,50 @@ describe('dry-ai skills remove', () => {
         }),
       });
 
-      const environment = createTestEnv({ mockFileSystem });
+      const env = createTestEnv({ mockFileSystem });
 
       // Act
       await expect(
         runCLI({
           argv: ['skills', 'remove', REMOVED_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         }),
       ).rejects.toThrow(
         `No managed skill named "${REMOVED_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.`,
       );
 
-      // Assert
+      // Assert: curated user line is emitted via Effect Logger; Commander quiet.
       expect(mockFileSystem.lockfileWrites).toHaveLength(0);
-      expect(environment.stdoutMessages).toEqual([]);
+      expect(env.cmderStdoutMessages).toEqual([]);
+      expect(env.cmderStderrMessages).toEqual([]);
+      expect(env.effectStdoutMessages).toEqual([]);
+      expect(env.effectStderrMessages).toEqual([
+        `No managed skill named "${REMOVED_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.\n`,
+      ]);
     });
 
     it('throws Managed skill not found when no lockfile exists on disk yet', async () => {
       // Arrange: `loadSkillsLockfile` treats a missing file as an empty lockfile.
-      const environment = createTestEnv({ mockFileSystem });
+      const env = createTestEnv({ mockFileSystem });
 
       // Act
       await expect(
         runCLI({
           argv: ['skills', 'remove', REMOVED_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         }),
       ).rejects.toThrow(
         `No managed skill named "${REMOVED_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.`,
       );
 
-      // Assert
+      // Assert: curated user line is emitted via Effect Logger; Commander quiet.
       expect(mockFileSystem.lockfileWrites).toHaveLength(0);
-      expect(environment.stdoutMessages).toEqual([]);
+      expect(env.cmderStdoutMessages).toEqual([]);
+      expect(env.cmderStderrMessages).toEqual([]);
+      expect(env.effectStdoutMessages).toEqual([]);
+      expect(env.effectStderrMessages).toEqual([
+        `No managed skill named "${REMOVED_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.\n`,
+      ]);
     });
 
     it.each([
@@ -279,13 +293,13 @@ describe('dry-ai skills remove', () => {
           filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
           content: lockfileText,
         });
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await expect(
           runCLI({
             argv: ['skills', 'remove', REMOVED_SKILL.name],
-            ...environment.cliOptions,
+            ...env.cliOptions,
           }),
         ).rejects.toThrow(
           `Could not parse the skills lockfile (${DEFAULT_SKILLS_LOCKFILE_PATH}). Fix JSON/schema errors in that file.`,
@@ -293,7 +307,12 @@ describe('dry-ai skills remove', () => {
 
         // Assert
         expect(mockFileSystem.lockfileWrites).toHaveLength(0);
-        expect(environment.stdoutMessages).toEqual([]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([
+          `Could not parse the skills lockfile (${DEFAULT_SKILLS_LOCKFILE_PATH}). Fix JSON/schema errors in that file.\n`,
+        ]);
       },
     );
 

@@ -19,6 +19,7 @@ import {
   configureMockOs,
   createMockFileSystemState,
   createTestEnv,
+  type TestEnv,
   deleteMockTextFile,
   mockFailCopyDest,
   mockFailMakeDirectory,
@@ -175,12 +176,19 @@ function arrangeBasicSources(): void {
 const stripAnsi = (text: string): string =>
   text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '');
 
-function clearCapturedOutput(output: {
-  stdoutMessages: string[];
-  stderrMessages: string[];
-}): void {
-  output.stdoutMessages.length = 0;
-  output.stderrMessages.length = 0;
+function clearCapturedOutput(
+  env: Pick<
+    TestEnv,
+    | 'cmderStdoutMessages'
+    | 'cmderStderrMessages'
+    | 'effectStdoutMessages'
+    | 'effectStderrMessages'
+  >,
+): void {
+  env.cmderStdoutMessages.length = 0;
+  env.cmderStderrMessages.length = 0;
+  env.effectStdoutMessages.length = 0;
+  env.effectStderrMessages.length = 0;
 }
 
 /**
@@ -617,10 +625,12 @@ describe('dry-ai sync edge coverage', () => {
       content: '# A skill\n',
     });
 
-    const { cliOptions, stderrMessages } = createTestEnv({ mockFileSystem });
-    await runCLI({ argv: ['sync'], ...cliOptions });
+    const env = createTestEnv({ mockFileSystem });
+    await runCLI({ argv: ['sync'], ...env.cliOptions });
 
-    expect(stderrMessages).toEqual([]);
+    expect(env.cmderStderrMessages).toEqual([]);
+    expect(env.effectStderrMessages).toEqual([]);
+
     const manifest = readSyncManifest();
     expect(manifest.outputs).toEqual(
       manifest.outputs.slice().sort(compareManifestEntryTuples),
@@ -673,10 +683,11 @@ describe('dry-ai sync edge coverage', () => {
       });
     }
 
-    const { cliOptions, stderrMessages } = createTestEnv({ mockFileSystem });
-    await runCLI({ argv: ['sync'], ...cliOptions });
+    const env = createTestEnv({ mockFileSystem });
+    await runCLI({ argv: ['sync'], ...env.cliOptions });
 
-    expect(stderrMessages).toEqual([]);
+    expect(env.cmderStderrMessages).toEqual([]);
+    expect(env.effectStderrMessages).toEqual([]);
     for (const fixture of fixtures) {
       const cursorRule = readMockTextFile({
         handle: mockFileSystem,
@@ -703,9 +714,12 @@ describe('dry-ai sync edge coverage', () => {
         kinds: ['command', 'rule', 'skill'],
         countPerKind: 2,
       });
-      const allKindsRun = createTestEnv({ mockFileSystem });
-      await runCLI({ argv: ['sync'], ...allKindsRun.cliOptions });
-      expect(allKindsRun.stderrMessages).toEqual([]);
+      const env = createTestEnv({ mockFileSystem });
+      await runCLI({ argv: ['sync'], ...env.cliOptions });
+
+      expect(env.cmderStderrMessages).toEqual([]);
+      expect(env.effectStderrMessages).toEqual([]);
+
       expect(collectAgentGeneratedFilePaths(agent)).toEqual(
         buildAgentOutputPaths({
           agent,
@@ -724,10 +738,12 @@ describe('dry-ai sync edge coverage', () => {
       ] as const) {
         resetDryAiSyncTestFixtures();
         arrangeSyncMatrixSources({ kinds, countPerKind: 1 });
-        const run = createTestEnv({ mockFileSystem });
-        await runCLI({ argv: ['sync'], ...run.cliOptions });
+        const env = createTestEnv({ mockFileSystem });
+        await runCLI({ argv: ['sync'], ...env.cliOptions });
 
-        expect(run.stderrMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
         expect(collectAgentGeneratedFilePaths(agent)).toEqual(
           buildAgentOutputPaths({ agent, kinds, countPerKind: 1 }),
         );
@@ -794,10 +810,12 @@ describe('dry-ai sync edge coverage', () => {
       content: '# Real skill\n',
     });
 
-    const { cliOptions, stderrMessages } = createTestEnv({ mockFileSystem });
-    await runCLI({ argv: ['sync'], ...cliOptions });
+    const env = createTestEnv({ mockFileSystem });
+    await runCLI({ argv: ['sync'], ...env.cliOptions });
 
-    expect(stderrMessages).toEqual([]);
+    expect(env.cmderStderrMessages).toEqual([]);
+    expect(env.effectStderrMessages).toEqual([]);
+
     expect(
       readSyncManifest()
         .outputs.map((entry) => entry.name)
@@ -875,7 +893,9 @@ defineFeature('dry-ai sync', (f) => {
           Then(
             'dry-ai outputs the expected command, rule, and skill for every supported agent',
             () => {
-              expect(env.stderrMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
+
               for (const filePath of basicWrittenFilePaths) {
                 expect(mockFileSystem.files.has(filePath)).toBe(true);
               }
@@ -919,7 +939,7 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           And('installs outputs by agent and kind in the report', () => {
-            const report = stripAnsi(env.stdoutMessages.join(''));
+            const report = stripAnsi(env.effectStdoutMessages.join(''));
             expect(report).toContain('my-cmd (installed)');
             expect(report).toContain('my-rule (installed)');
             expect(report).toContain('my-skill (installed)');
@@ -939,7 +959,8 @@ defineFeature('dry-ai sync', (f) => {
               arrangeBasicSources();
               env = createTestEnv({ mockFileSystem });
               await runCLI({ argv: ['sync'], ...env.cliOptions });
-              expect(env.stderrMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
             },
           );
 
@@ -994,7 +1015,9 @@ defineFeature('dry-ai sync', (f) => {
           Then(
             'dry-ai updates affected agent outputs from the changed sources',
             () => {
-              expect(env.stderrMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
+
               expect(
                 readMockTextFile({
                   handle: mockFileSystem,
@@ -1041,7 +1064,7 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           And('lists updated outputs in the report', () => {
-            const report = stripAnsi(env.stdoutMessages.join(''));
+            const report = stripAnsi(env.effectStdoutMessages.join(''));
             expect(report).toContain('my-cmd (updated)');
             expect(report).toContain('my-rule (updated)');
             expect(report).toContain('my-skill (updated)');
@@ -1061,7 +1084,8 @@ defineFeature('dry-ai sync', (f) => {
               arrangeBasicSources();
               env = createTestEnv({ mockFileSystem });
               await runCLI({ argv: ['sync'], ...env.cliOptions });
-              expect(env.stderrMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
             },
           );
 
@@ -1086,7 +1110,9 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           Then('dry-ai removes managed outputs for deleted sources', () => {
-            expect(env.stderrMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
             expect(
               mockFileSystem.files.has(getBasicCommandOutputPath('copilot')),
             ).toBe(false);
@@ -1128,7 +1154,7 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           And('lists removed outputs in the report', () => {
-            const report = stripAnsi(env.stdoutMessages.join(''));
+            const report = stripAnsi(env.effectStdoutMessages.join(''));
             expect(report).toContain('my-cmd (removed)');
             expect(report).toContain('my-skill (removed)');
           });
@@ -1147,7 +1173,8 @@ defineFeature('dry-ai sync', (f) => {
               arrangeBasicSources();
               env = createTestEnv({ mockFileSystem });
               await runCLI({ argv: ['sync'], ...env.cliOptions });
-              expect(env.stderrMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
             },
           );
 
@@ -1180,7 +1207,9 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           Then('dry-ai restores generated files from source', () => {
-            expect(env.stderrMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
             expect(
               readMockTextFile({
                 handle: mockFileSystem,
@@ -1214,7 +1243,7 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           And('lists repaired outputs in the report', () => {
-            const report = stripAnsi(env.stdoutMessages.join(''));
+            const report = stripAnsi(env.effectStdoutMessages.join(''));
             expect(report).toContain('my-cmd (updated)');
             expect(report).toContain('my-rule (updated)');
           });
@@ -1233,7 +1262,8 @@ defineFeature('dry-ai sync', (f) => {
               arrangeBasicSources();
               env = createTestEnv({ mockFileSystem });
               await runCLI({ argv: ['sync'], ...env.cliOptions });
-              expect(env.stderrMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
             },
           );
 
@@ -1258,7 +1288,9 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           Then('dry-ai restores that output from the unchanged source', () => {
-            expect(env.stderrMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
             expect(
               readMockTextFile({
                 handle: mockFileSystem,
@@ -1270,7 +1302,7 @@ defineFeature('dry-ai sync', (f) => {
                 ),
               }),
             ).toContain('Command body');
-            const report = stripAnsi(env.stdoutMessages.join(''));
+            const report = stripAnsi(env.effectStdoutMessages.join(''));
             expect(report).toContain('my-cmd (installed)');
           });
 
@@ -1383,11 +1415,13 @@ defineFeature('dry-ai sync', (f) => {
           );
 
           When('I run `dry-ai sync`', async () => {
-            const { cliOptions, stderrMessages } = createTestEnv({
+            const env = createTestEnv({
               mockFileSystem,
             });
-            await runCLI({ argv: ['sync'], ...cliOptions });
-            expect(stderrMessages).toEqual([]);
+            await runCLI({ argv: ['sync'], ...env.cliOptions });
+
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
           });
 
           Then(
@@ -1413,6 +1447,7 @@ defineFeature('dry-ai sync', (f) => {
                   ),
                 ),
               ).toBe(false);
+
               expect(
                 mockFileSystem.files.has(
                   path.join(
@@ -1518,7 +1553,7 @@ defineFeature('dry-ai sync', (f) => {
           });
 
           And('skips invalid outputs with warnings', () => {
-            expect(stripAnsi(env.stdoutMessages.join(''))).toMatch(
+            expect(stripAnsi(env.effectStdoutMessages.join(''))).toMatch(
               /Skipping invalid frontmatter in .*invalid-command\.md.*description/s,
             );
             expect(
@@ -1571,7 +1606,8 @@ defineFeature('dry-ai sync', (f) => {
           Then(
             'dry-ai writes agent outputs under the requested output root',
             () => {
-              expect(env.stderrMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
               for (const filePath of buildExpectedTrioProductFilePaths(
                 outputRoot,
               )) {
@@ -1592,7 +1628,7 @@ defineFeature('dry-ai sync', (f) => {
           );
 
           And('shows the resolved output root in the report', () => {
-            expect(stripAnsi(env.stdoutMessages.join(''))).toContain(
+            expect(stripAnsi(env.effectStdoutMessages.join(''))).toContain(
               outputRoot,
             );
           });
@@ -1605,6 +1641,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Omit unresolved optional frontmatter keys',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have command and rule sources with unresolved optional frontmatter',
           () => {
@@ -1652,48 +1690,44 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stderrMessages).toEqual([]);
-          const cursorCommand = readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              VIRTUAL_HOME_DIR,
-              '.cursor',
-              'skills',
-              'optional-command',
-              'SKILL.md',
-            ),
-          });
-          const cursorRule = readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              VIRTUAL_HOME_DIR,
-              '.cursor',
-              'rules',
-              'optional-rule.mdc',
-            ),
-          });
-
-          for (const output of [cursorCommand, cursorRule]) {
-            expect(output).not.toMatch(/\bnull\b/);
-            expect(output).not.toMatch(/\bundefined\b/);
-          }
-          expect(cursorCommand).not.toContain('disable-model-invocation:');
-          expect(cursorRule).not.toContain('globs:');
-          expect(cursorRule).toContain('alwaysApply: true');
         });
         Then(
           'dry-ai omits optional frontmatter keys with nothing to render from the written file',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            const cursorCommand = readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'skills',
+                'optional-command',
+                'SKILL.md',
+              ),
+            });
+            const cursorRule = readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'rules',
+                'optional-rule.mdc',
+              ),
+            });
+
+            expect(cursorCommand).not.toContain('disable-model-invocation:');
+            expect(cursorRule).not.toContain('globs:');
+            expect(cursorRule).toContain('alwaysApply: true');
           },
         );
       },
@@ -1701,6 +1735,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Keep body whitespace normalization consistent across output types',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have command and rule sources with padded body whitespace',
           () => {
@@ -1748,62 +1784,64 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stderrMessages).toEqual([]);
-          const expectedCommandBody =
-            'First command line.  \n  Second command line.';
-          const expectedRuleBody = 'First rule line.  \n  Second rule line.';
-          for (const outputPath of [
-            path.join(
-              VIRTUAL_HOME_DIR,
-              '.copilot',
-              'prompts',
-              'body-command.prompt.md',
-            ),
-            path.join(
-              VIRTUAL_HOME_DIR,
-              '.cursor',
-              'skills',
-              'body-command',
-              'SKILL.md',
-            ),
-          ]) {
-            expect(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: outputPath,
-              }),
-            ).toContain(expectedCommandBody);
-          }
-          for (const outputPath of [
-            path.join(
-              VIRTUAL_HOME_DIR,
-              '.copilot',
-              'instructions',
-              'body-rule.instructions.md',
-            ),
-            path.join(VIRTUAL_HOME_DIR, '.cursor', 'rules', 'body-rule.mdc'),
-          ]) {
-            expect(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: outputPath,
-              }),
-            ).toContain(expectedRuleBody);
-          }
         });
         Then(
           'dry-ai trims leading and trailing body whitespace the same way for commands, rules, and skills before writing',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            const expectedCommandBody =
+              'First command line.  \n  Second command line.';
+            const expectedRuleBody = 'First rule line.  \n  Second rule line.';
+
+            for (const outputPath of [
+              path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'prompts',
+                'body-command.prompt.md',
+              ),
+              path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'skills',
+                'body-command',
+                'SKILL.md',
+              ),
+            ]) {
+              expect(
+                readMockTextFile({
+                  handle: mockFileSystem,
+                  filePath: outputPath,
+                }),
+              ).toContain(expectedCommandBody);
+            }
+
+            for (const outputPath of [
+              path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'instructions',
+                'body-rule.instructions.md',
+              ),
+              path.join(VIRTUAL_HOME_DIR, '.cursor', 'rules', 'body-rule.mdc'),
+            ]) {
+              expect(
+                readMockTextFile({
+                  handle: mockFileSystem,
+                  filePath: outputPath,
+                }),
+              ).toContain(expectedRuleBody);
+            }
           },
         );
       },
@@ -1811,6 +1849,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Write command and rule outputs with only top-level metadata when agents is omitted',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given('I have command and rule sources without an `agents` map', () => {
           resetDryAiSyncTestFixtures();
           storeMockTextFile({
@@ -1848,71 +1888,75 @@ defineFeature('dry-ai sync', (f) => {
           });
         });
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stderrMessages).toEqual([]);
-          const copilotCommand = readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              VIRTUAL_HOME_DIR,
-              '.copilot',
-              'prompts',
-              'default-command.prompt.md',
-            ),
-          });
-          expect(copilotCommand).toContain('name: default-command');
-          expect(copilotCommand).toContain('description: Default command');
-          const cursorCommand = readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              VIRTUAL_HOME_DIR,
-              '.cursor',
-              'skills',
-              'default-command',
-              'SKILL.md',
-            ),
-          });
-          expect(cursorCommand).toContain('name: default-command');
-          expect(cursorCommand).toContain('description: Default command');
-          for (const commandOutput of [copilotCommand, cursorCommand]) {
-            expect(commandOutput).not.toContain('disable-model-invocation:');
-            expect(commandOutput).not.toContain('agents:');
-          }
-          const copilotRule = readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              VIRTUAL_HOME_DIR,
-              '.copilot',
-              'instructions',
-              'copilot-default-rule.instructions.md',
-            ),
-          });
-          expect(copilotRule).toContain('description: Copilot default rule');
-          expect(copilotRule).not.toContain('applyTo:');
-          const cursorRule = readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              VIRTUAL_HOME_DIR,
-              '.cursor',
-              'rules',
-              'copilot-default-rule.mdc',
-            ),
-          });
-          expect(cursorRule).toContain('description: Copilot default rule');
-          expect(cursorRule).not.toContain('alwaysApply:');
-          expect(cursorRule).not.toContain('globs:');
         });
         Then(
           'dry-ai renders commands and rules from shared top-level frontmatter',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            const copilotCommand = readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'prompts',
+                'default-command.prompt.md',
+              ),
+            });
+            expect(copilotCommand).toContain('name: default-command');
+            expect(copilotCommand).toContain('description: Default command');
+
+            const cursorCommand = readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'skills',
+                'default-command',
+                'SKILL.md',
+              ),
+            });
+            expect(cursorCommand).toContain('name: default-command');
+            expect(cursorCommand).toContain('description: Default command');
+
+            for (const commandOutput of [copilotCommand, cursorCommand]) {
+              expect(commandOutput).not.toContain('disable-model-invocation:');
+              expect(commandOutput).not.toContain('agents:');
+            }
+
+            const copilotRule = readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'instructions',
+                'copilot-default-rule.instructions.md',
+              ),
+            });
+            expect(copilotRule).toContain('description: Copilot default rule');
+            expect(copilotRule).not.toContain('applyTo:');
+
+            const cursorRule = readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'rules',
+                'copilot-default-rule.mdc',
+              ),
+            });
+            expect(cursorRule).toContain('description: Copilot default rule');
+            expect(cursorRule).not.toContain('alwaysApply:');
+            expect(cursorRule).not.toContain('globs:');
           },
         );
       },
@@ -1923,6 +1967,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Mirror the complete skill source tree into each agent target',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given('I have a skill source tree with nested files', () => {
           resetDryAiSyncTestFixtures();
           const skillName = 'tree-skill';
@@ -1944,55 +1990,54 @@ defineFeature('dry-ai sync', (f) => {
           });
         });
         When('I run `dry-ai sync`', async () => {
-          const skillName = 'tree-skill';
-
-          const { cliOptions, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-          expect(stderrMessages).toEqual([]);
-
-          const expectedRelPaths = [
-            'SKILL.md',
-            'extra.txt',
-            path.join('nested', 'deep.txt'),
-          ] as const;
-          for (const agentSkillsRoot of [
-            path.join(VIRTUAL_HOME_DIR, '.copilot', 'skills'),
-            path.join(VIRTUAL_HOME_DIR, '.cursor', 'skills'),
-          ]) {
-            const targetDir = path.join(agentSkillsRoot, skillName);
-            for (const rel of expectedRelPaths) {
-              const outPath = path.join(targetDir, rel);
-              expect(mockFileSystem.files.has(outPath)).toBe(true);
-            }
-            expect(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: path.join(targetDir, 'SKILL.md'),
-              }),
-            ).toBe('# Tree skill\n');
-            expect(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: path.join(targetDir, 'extra.txt'),
-              }),
-            ).toBe('Extra at root\n');
-            expect(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: path.join(targetDir, 'nested', 'deep.txt'),
-              }),
-            ).toBe('Nested file\n');
-          }
         });
         Then(
           'dry-ai copies nested folders and extra files inside each skill into both agent skill targets',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            const skillName = 'tree-skill';
+            const expectedRelPaths = [
+              'SKILL.md',
+              'extra.txt',
+              path.join('nested', 'deep.txt'),
+            ] as const;
+            for (const agentSkillsRoot of [
+              path.join(VIRTUAL_HOME_DIR, '.copilot', 'skills'),
+              path.join(VIRTUAL_HOME_DIR, '.cursor', 'skills'),
+            ]) {
+              const targetDir = path.join(agentSkillsRoot, skillName);
+              for (const rel of expectedRelPaths) {
+                const outPath = path.join(targetDir, rel);
+                expect(mockFileSystem.files.has(outPath)).toBe(true);
+              }
+              expect(
+                readMockTextFile({
+                  handle: mockFileSystem,
+                  filePath: path.join(targetDir, 'SKILL.md'),
+                }),
+              ).toBe('# Tree skill\n');
+              expect(
+                readMockTextFile({
+                  handle: mockFileSystem,
+                  filePath: path.join(targetDir, 'extra.txt'),
+                }),
+              ).toBe('Extra at root\n');
+              expect(
+                readMockTextFile({
+                  handle: mockFileSystem,
+                  filePath: path.join(targetDir, 'nested', 'deep.txt'),
+                }),
+              ).toBe('Nested file\n');
+            }
           },
         );
       },
@@ -2000,6 +2045,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Remove deleted source files from copied skill targets on the next sync',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have synced a skill source tree with a file that is later deleted',
           async () => {
@@ -2022,14 +2069,15 @@ defineFeature('dry-ai sync', (f) => {
               content: 'Remove me\n',
             });
 
-            const { cliOptions, stderrMessages } = createTestEnv({
+            const env = createTestEnv({
               mockFileSystem,
             });
             await runCLI({
               argv: ['sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             });
-            expect(stderrMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
 
             const copilotOrphan = path.join(
               VIRTUAL_HOME_DIR,
@@ -2058,60 +2106,60 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const skillName = 'prune-skill';
-          const copilotOrphan = path.join(
-            VIRTUAL_HOME_DIR,
-            '.copilot',
-            'skills',
-            skillName,
-            'orphan.txt',
-          );
-          const cursorOrphan = path.join(
-            VIRTUAL_HOME_DIR,
-            '.cursor',
-            'skills',
-            skillName,
-            'orphan.txt',
-          );
-          const { cliOptions, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-          expect(stderrMessages).toEqual([]);
-
-          for (const p of [copilotOrphan, cursorOrphan]) {
-            expect(mockFileSystem.files.has(p)).toBe(false);
-          }
-          for (const p of [
-            path.join(
-              VIRTUAL_HOME_DIR,
-              '.copilot',
-              'skills',
-              skillName,
-              'SKILL.md',
-            ),
-            path.join(
-              VIRTUAL_HOME_DIR,
-              '.cursor',
-              'skills',
-              skillName,
-              'SKILL.md',
-            ),
-          ]) {
-            expect(mockFileSystem.files.has(p)).toBe(true);
-            expect(
-              readMockTextFile({ handle: mockFileSystem, filePath: p }),
-            ).toBe('# Prune\n');
-          }
         });
         Then(
           'dry-ai removes vanished source skill files from both mirrored skill trees on the next sync',
           () => {
-            expect(true).toBe(true);
+            const skillName = 'prune-skill';
+            const copilotOrphan = path.join(
+              VIRTUAL_HOME_DIR,
+              '.copilot',
+              'skills',
+              skillName,
+              'orphan.txt',
+            );
+            const cursorOrphan = path.join(
+              VIRTUAL_HOME_DIR,
+              '.cursor',
+              'skills',
+              skillName,
+              'orphan.txt',
+            );
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            for (const p of [copilotOrphan, cursorOrphan]) {
+              expect(mockFileSystem.files.has(p)).toBe(false);
+            }
+            for (const p of [
+              path.join(
+                VIRTUAL_HOME_DIR,
+                '.copilot',
+                'skills',
+                skillName,
+                'SKILL.md',
+              ),
+              path.join(
+                VIRTUAL_HOME_DIR,
+                '.cursor',
+                'skills',
+                skillName,
+                'SKILL.md',
+              ),
+            ]) {
+              expect(mockFileSystem.files.has(p)).toBe(true);
+              expect(
+                readMockTextFile({ handle: mockFileSystem, filePath: p }),
+              ).toBe('# Prune\n');
+            }
           },
         );
       },
@@ -2121,42 +2169,43 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Write mixed config manifest rows without dropping or merging kinds',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given('I have mixed command, rule, and skill sources', () => {
           resetDryAiSyncTestFixtures();
           arrangeMixedConfigSources();
         });
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stderrMessages).toEqual([]);
-
-          const { outputs } = readSyncManifest();
-          expect(outputs).toHaveLength(12);
-          expect(outputs).toEqual(
-            outputs.slice().sort(compareManifestEntryTuples),
-          );
-
-          expect(
-            outputs.filter((entry) => entry.kind === 'command'),
-          ).toHaveLength(4);
-          expect(outputs.filter((entry) => entry.kind === 'rule')).toHaveLength(
-            4,
-          );
-          expect(
-            outputs.filter((entry) => entry.kind === 'skill'),
-          ).toHaveLength(4);
         });
         Then(
           'dry-ai lists commands, rules, and skills as distinct sync-manifest.json rows without dropping kinds',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            const { outputs } = readSyncManifest();
+            expect(outputs).toHaveLength(12);
+            expect(outputs).toEqual(
+              outputs.slice().sort(compareManifestEntryTuples),
+            );
+
+            expect(
+              outputs.filter((entry) => entry.kind === 'command'),
+            ).toHaveLength(4);
+            expect(
+              outputs.filter((entry) => entry.kind === 'rule'),
+            ).toHaveLength(4);
+            expect(
+              outputs.filter((entry) => entry.kind === 'skill'),
+            ).toHaveLength(4);
           },
         );
       },
@@ -2179,14 +2228,14 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          const env = createTestEnv({
             mockFileSystem,
           });
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-          stderrCapture = stderrMessages;
+          stderrCapture = env.effectStderrMessages;
         });
         Then(
           'dry-ai warns that sync-manifest.json is damaged or incomplete',
@@ -2235,14 +2284,14 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          const env = createTestEnv({
             mockFileSystem,
           });
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-          stderrCapture = stderrMessages;
+          stderrCapture = env.effectStderrMessages;
         });
         Then('dry-ai warns that sync-manifest.json could not be read', () => {
           expect(stderrCapture.join('\n')).toContain(
@@ -2280,14 +2329,14 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          const env = createTestEnv({
             mockFileSystem,
           });
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-          stderrCapture = stderrMessages;
+          stderrCapture = env.effectStderrMessages;
         });
         Then(
           'dry-ai warns that sync-manifest.json did not match the expected layout',
@@ -2320,42 +2369,45 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Report no applied changes when sync state stays aligned',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have already synced the basic trio once so outputs match sources',
           async () => {
             resetDryAiSyncTestFixtures();
             arrangeBasicSources();
-            const { cliOptions, stderrMessages } = createTestEnv({
+            const setupEnv = createTestEnv({
               mockFileSystem,
             });
             await runCLI({
               argv: ['sync'],
-              ...cliOptions,
+              ...setupEnv.cliOptions,
             });
-            expect(stderrMessages).toEqual([]);
+            expect(setupEnv.cmderStderrMessages).toEqual([]);
+            expect(setupEnv.effectStderrMessages).toEqual([]);
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
-          clearCapturedOutput({ stdoutMessages, stderrMessages });
+          clearCapturedOutput(env);
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stderrMessages).toEqual([]);
-          const report = stripAnsi(stdoutMessages.join(''));
-          expect(report).toContain('Applied changes: None');
-          expect(report).not.toContain('- Copilot');
         });
         Then(
           'dry-ai reports that nothing needs applying on a second sync against an already-aligned tree',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            const report = stripAnsi(env.effectStdoutMessages.join(''));
+            expect(report).toContain('Applied changes: None');
+            expect(report).not.toContain('- Copilot');
           },
         );
       },
@@ -2365,6 +2417,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Write manifest rows and report text only for non-conflicting outputs',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have a command and skill that share the same Cursor-facing name',
           () => {
@@ -2373,43 +2427,49 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
+        });
+        Then(
+          'dry-ai mentions only written paths in the manifest and report, not paths skipped for conflicts',
+          () => {
+            expect(env.cmderStdoutMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
 
-          expect(stderrMessages).toEqual([]);
-          expect(readSyncManifest().outputs).toEqual([
-            {
-              agent: 'copilot',
-              kind: 'command',
-              name: 'shared',
-              outputPath: path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'shared-command.prompt.md',
-              ),
-            },
-            {
-              agent: 'copilot',
-              kind: 'skill',
-              name: 'shared',
-              outputPath: path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'skills',
-                'shared',
-              ),
-            },
-          ]);
+            expect(readSyncManifest().outputs).toEqual([
+              {
+                agent: 'copilot',
+                kind: 'command',
+                name: 'shared',
+                outputPath: path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'prompts',
+                  'shared-command.prompt.md',
+                ),
+              },
+              {
+                agent: 'copilot',
+                kind: 'skill',
+                name: 'shared',
+                outputPath: path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'skills',
+                  'shared',
+                ),
+              },
+            ]);
 
-          const report = stripAnsi(stdoutMessages.join(''));
-          expect(report).toMatchInlineSnapshot(`
+            const report = stripAnsi(env.effectStdoutMessages.join(''));
+            expect(report).toMatchInlineSnapshot(`
         "Applied changes:
 
         - Copilot
@@ -2425,11 +2485,6 @@ defineFeature('dry-ai sync', (f) => {
           * due to: Cursor skill name "shared"
         "
       `);
-        });
-        Then(
-          'dry-ai mentions only written paths in the manifest and report, not paths skipped for conflicts',
-          () => {
-            expect(true).toBe(true);
           },
         );
       },
@@ -2474,12 +2529,16 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          const env = createTestEnv({
             mockFileSystem,
           });
-          await runCLI({ argv: ['sync'], ...cliOptions });
-          expect(stderrMessages).toEqual([]);
-          reportText = stripAnsi(stdoutMessages.join(''));
+          await runCLI({ argv: ['sync'], ...env.cliOptions });
+
+          expect(env.cmderStdoutMessages).toEqual([]);
+          expect(env.cmderStderrMessages).toEqual([]);
+          expect(env.effectStderrMessages).toEqual([]);
+
+          reportText = stripAnsi(env.effectStdoutMessages.join(''));
         });
         Then(
           'dry-ai writes both rule and skill outputs for every supported agent',
@@ -2590,12 +2649,16 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          const env = createTestEnv({
             mockFileSystem,
           });
-          await runCLI({ argv: ['sync'], ...cliOptions });
-          expect(stderrMessages).toEqual([]);
-          reportText = stripAnsi(stdoutMessages.join(''));
+          await runCLI({ argv: ['sync'], ...env.cliOptions });
+
+          expect(env.cmderStdoutMessages).toEqual([]);
+          expect(env.cmderStderrMessages).toEqual([]);
+          expect(env.effectStderrMessages).toEqual([]);
+
+          reportText = stripAnsi(env.effectStdoutMessages.join(''));
         });
         Then(
           'dry-ai writes both rule and command outputs for every supported agent',
@@ -2654,6 +2717,16 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Write valid command output when another agent block is invalid',
       ({ Given, When, Then }) => {
+        let results: {
+          expectedSkipPattern: RegExp;
+          env: TestEnv;
+          outcomes: {
+            validWritten: boolean;
+            validBody: string;
+            invalidWritten: boolean;
+          };
+        }[] = [];
+
         Given(
           'I reset the workspace before syncing commands with one valid and one invalid agent block each',
           () => {
@@ -2661,6 +2734,7 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
+          results = [];
           for (const __row of [
             {
               validAgent: 'Copilot',
@@ -2711,6 +2785,7 @@ defineFeature('dry-ai sync', (f) => {
               fileStem,
               invalidOutputPath,
               sourceLines,
+              validAgent,
               validOutputPath,
             } = __row;
             storeMockTextFile({
@@ -2732,85 +2807,48 @@ defineFeature('dry-ai sync', (f) => {
               ].join('\n'),
             });
 
-            const { cliOptions } = createTestEnv({ mockFileSystem });
+            const env = createTestEnv({ mockFileSystem });
 
             await runCLI({
               argv: ['sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             });
 
-            expect(mockFileSystem.files.has(validOutputPath)).toBe(true);
-            expect(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: validOutputPath,
-              }),
-            ).toContain('Command body');
-            expect(mockFileSystem.files.has(invalidOutputPath)).toBe(false);
+            const skipAgent = validAgent === 'Copilot' ? 'Cursor' : 'Copilot';
+            const expectedSkipPattern = new RegExp(
+              `Skipping ${skipAgent} for .*${fileStem}\\.md`,
+              's',
+            );
+
+            results.push({
+              expectedSkipPattern,
+              env,
+              outcomes: {
+                validWritten: mockFileSystem.files.has(validOutputPath),
+                validBody: mockFileSystem.files.has(validOutputPath)
+                  ? readMockTextFile({
+                      handle: mockFileSystem,
+                      filePath: validOutputPath,
+                    })
+                  : '',
+                invalidWritten: mockFileSystem.files.has(invalidOutputPath),
+              },
+            });
           }
         });
         Then(
           'dry-ai still writes the healthy agent command and skips the invalid block with a useful warning',
           () => {
-            expect(true).toBe(true);
-          },
-        );
-      },
-    );
-    r.RuleScenario(
-      'Skip a command when top-level frontmatter fails validation',
-      ({ Given, When, Then }) => {
-        Given(
-          'I have a command whose top-level frontmatter is missing a required description',
-          () => {
-            resetDryAiSyncTestFixtures();
-            storeMockTextFile({
-              handle: mockFileSystem,
-              filePath: path.join(
-                DEFAULT_CONFIG_ROOT,
-                'commands',
-                'invalid-command.md',
-              ),
-              content: [
-                '---',
-                'name: invalid-command',
-                '---',
-                '',
-                'Invalid command body',
-                '',
-              ].join('\n'),
-            });
-          },
-        );
-        When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
-            mockFileSystem,
-          });
-
-          await runCLI({
-            argv: ['sync'],
-            ...cliOptions,
-          });
-
-          expect(stderrMessages).toEqual([]);
-          expect(stripAnsi(stdoutMessages.join(''))).toMatch(
-            /Skipping invalid frontmatter in .*invalid-command\.md.*description/s,
-          );
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'invalid-command.prompt.md',
-              ),
-            ),
-          ).toBe(false);
-        });
-        Then(
-          'dry-ai skips the broken command without leaving partial Copilot or Cursor files',
-          () => {
-            expect(true).toBe(true);
+            for (const r of results) {
+              expect(r.outcomes.validWritten).toBe(true);
+              expect(r.outcomes.validBody).toContain('Command body');
+              expect(r.outcomes.invalidWritten).toBe(false);
+              expect(r.env.cmderStdoutMessages).toEqual([]);
+              expect(r.env.cmderStderrMessages).toEqual([]);
+              expect(stripAnsi(r.env.effectStderrMessages.join(''))).toMatch(
+                r.expectedSkipPattern,
+              );
+            }
           },
         );
       },
@@ -2818,6 +2856,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Skip a rule when top-level frontmatter fails validation',
       ({ Given, When, Then, And }) => {
+        let env: TestEnv;
+
         Given(
           'I have one invalid rule and one valid command in the config root',
           () => {
@@ -2862,39 +2902,48 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
+        });
+        Then(
+          'dry-ai skips the broken rule without leaving partial Copilot or Cursor rule files',
+          () => {
+            expect(env.cmderStdoutMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
 
-          expect(stderrMessages).toEqual([]);
-          expect(stripAnsi(stdoutMessages.join(''))).toMatch(
-            /Skipping invalid frontmatter in .*invalid-rule\.md.*description/s,
-          );
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'instructions',
-                'invalid-rule.instructions.md',
+            expect(stripAnsi(env.effectStdoutMessages.join(''))).toMatch(
+              /Skipping invalid frontmatter in .*invalid-rule\.md.*description/s,
+            );
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'instructions',
+                  'invalid-rule.instructions.md',
+                ),
               ),
-            ),
-          ).toBe(false);
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.cursor',
-                'rules',
-                'invalid-rule.mdc',
+            ).toBe(false);
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.cursor',
+                  'rules',
+                  'invalid-rule.mdc',
+                ),
               ),
-            ),
-          ).toBe(false);
+            ).toBe(false);
+          },
+        );
+        And('still writes the valid command outputs', () => {
           expect(
             mockFileSystem.files.has(
               path.join(
@@ -2917,20 +2966,13 @@ defineFeature('dry-ai sync', (f) => {
             ),
           ).toBe(true);
         });
-        Then(
-          'dry-ai skips the broken rule without leaving partial Copilot or Cursor rule files',
-          () => {
-            expect(true).toBe(true);
-          },
-        );
-        And('still writes the valid command outputs', () => {
-          expect(true).toBe(true);
-        });
       },
     );
     r.RuleScenario(
       'Keep syncing after one command or rule is skipped for invalid frontmatter',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have one invalid command and one valid command in the config root',
           () => {
@@ -2970,44 +3012,45 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stderrMessages).toEqual([]);
-          expect(stripAnsi(stdoutMessages.join(''))).toMatch(
-            /Skipping invalid frontmatter in .*invalid-command\.md.*description/s,
-          );
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'valid-command.prompt.md',
-              ),
-            ),
-          ).toBe(true);
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'invalid-command.prompt.md',
-              ),
-            ),
-          ).toBe(false);
         });
         Then(
           'dry-ai still syncs later valid sources cleanly after it skips an earlier command or rule',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStdoutMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            expect(stripAnsi(env.effectStdoutMessages.join(''))).toMatch(
+              /Skipping invalid frontmatter in .*invalid-command\.md.*description/s,
+            );
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'prompts',
+                  'valid-command.prompt.md',
+                ),
+              ),
+            ).toBe(true);
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'prompts',
+                  'invalid-command.prompt.md',
+                ),
+              ),
+            ).toBe(false);
           },
         );
       },
@@ -3015,6 +3058,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Skip a command agent output when its per-agent block fails validation',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have a command with a valid Copilot block and an invalid Cursor block',
           () => {
@@ -3042,44 +3087,43 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stripAnsi(stderrMessages.join(''))).toMatch(
-            /Skipping Cursor for .*bad-agent-command\.md.*agents\.cursor/s,
-          );
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'bad-agent-command.prompt.md',
-              ),
-            ),
-          ).toBe(true);
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.cursor',
-                'skills',
-                'bad-agent-command',
-                'SKILL.md',
-              ),
-            ),
-          ).toBe(false);
         });
         Then(
           'dry-ai skips only the failing per-agent slice while other agents continue to receive output',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(stripAnsi(env.effectStderrMessages.join(''))).toMatch(
+              /Skipping Cursor for .*bad-agent-command\.md.*agents\.cursor/s,
+            );
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'prompts',
+                  'bad-agent-command.prompt.md',
+                ),
+              ),
+            ).toBe(true);
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.cursor',
+                  'skills',
+                  'bad-agent-command',
+                  'SKILL.md',
+                ),
+              ),
+            ).toBe(false);
           },
         );
       },
@@ -3087,6 +3131,8 @@ defineFeature('dry-ai sync', (f) => {
     r.RuleScenario(
       'Warn and skip without partial outputs when frontmatter parses but validation fails',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+
         Given(
           'I have a command whose top-level frontmatter is missing a required description',
           () => {
@@ -3110,54 +3156,58 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(stderrMessages).toEqual([]);
-          expect(stripAnsi(stdoutMessages.join(''))).toMatch(
-            /Skipping invalid frontmatter in .*invalid-command\.md.*description/s,
-          );
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'prompts',
-                'invalid-command.prompt.md',
-              ),
-            ),
-          ).toBe(false);
-          expect(
-            mockFileSystem.files.has(
-              path.join(
-                VIRTUAL_HOME_DIR,
-                '.cursor',
-                'skills',
-                'invalid-command',
-                'SKILL.md',
-              ),
-            ),
-          ).toBe(false);
-          const manifest = mockSyncManifestSchema.parse(
-            JSON.parse(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
-              }),
-            ),
-          );
-          expect(manifest.outputs).toEqual([]);
         });
         Then(
           'dry-ai warns, skips the invalid file, and avoids half-written outputs',
           () => {
-            expect(true).toBe(true);
+            expect(env.cmderStdoutMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
+
+            expect(stripAnsi(env.effectStdoutMessages.join(''))).toMatch(
+              /Skipping invalid frontmatter in .*invalid-command\.md.*description/s,
+            );
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.copilot',
+                  'prompts',
+                  'invalid-command.prompt.md',
+                ),
+              ),
+            ).toBe(false);
+            expect(
+              mockFileSystem.files.has(
+                path.join(
+                  VIRTUAL_HOME_DIR,
+                  '.cursor',
+                  'skills',
+                  'invalid-command',
+                  'SKILL.md',
+                ),
+              ),
+            ).toBe(false);
+            const manifest = mockSyncManifestSchema.parse(
+              JSON.parse(
+                readMockTextFile({
+                  handle: mockFileSystem,
+                  filePath: path.join(
+                    DEFAULT_CONFIG_ROOT,
+                    'sync-manifest.json',
+                  ),
+                }),
+              ),
+            );
+            expect(manifest.outputs).toEqual([]);
           },
         );
       },
@@ -3168,6 +3218,8 @@ defineFeature('dry-ai sync', (f) => {
       'Read sources from an absolute config root while using the default output tree',
       ({ Given, When, Then }) => {
         const configRoot = '/virtual/custom-config';
+        let env: TestEnv;
+
         Given(
           'I have a command under an absolute config root outside the default path',
           () => {
@@ -3190,16 +3242,22 @@ defineFeature('dry-ai sync', (f) => {
         When(
           'I run `dry-ai --config-root /virtual/custom-config sync`',
           async () => {
-            const { cliOptions, stderrMessages } = createTestEnv({
+            env = createTestEnv({
               mockFileSystem,
             });
 
             await runCLI({
               argv: ['--config-root', configRoot, 'sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             });
+          },
+        );
+        Then(
+          'dry-ai still writes into the default home-relative layout when I pass an absolute `--config-root` without overriding outputs',
+          () => {
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
 
-            expect(stderrMessages).toEqual([]);
             expect(
               mockFileSystem.files.has(
                 path.join(
@@ -3222,18 +3280,14 @@ defineFeature('dry-ai sync', (f) => {
             ).toBe(false);
           },
         );
-        Then(
-          'dry-ai still writes into the default home-relative layout when I pass an absolute `--config-root` without overriding outputs',
-          () => {
-            expect(true).toBe(true);
-          },
-        );
       },
     );
     r.RuleScenario(
       'Prefer --output-root when --test is also passed',
       ({ Given, When, Then }) => {
         const outputRoot = '/virtual/explicit-output';
+        let env: TestEnv;
+
         Given(
           'I have the usual command, rule, and skill under the default config root',
           () => {
@@ -3244,16 +3298,22 @@ defineFeature('dry-ai sync', (f) => {
         When(
           'I run `dry-ai sync` with --test and an explicit output root',
           async () => {
-            const { cliOptions, stdoutMessages, stderrMessages } =
-              createTestEnv({ mockFileSystem });
+            env = createTestEnv({ mockFileSystem });
 
             await runCLI({
               argv: ['--test', '--output-root', outputRoot, 'sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             });
+          },
+        );
+        Then(
+          'dry-ai prefers an explicit `--output-root` over the preview path implied by `--test`',
+          () => {
+            expect(env.cmderStdoutMessages).toEqual([]);
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
 
-            expect(stderrMessages).toEqual([]);
-            expect(stripAnsi(stdoutMessages.join(''))).toContain(
+            expect(stripAnsi(env.effectStdoutMessages.join(''))).toContain(
               `Generated output written to ${outputRoot}`,
             );
             expect(
@@ -3278,12 +3338,6 @@ defineFeature('dry-ai sync', (f) => {
             ).toBe(false);
           },
         );
-        Then(
-          'dry-ai prefers an explicit `--output-root` over the preview path implied by `--test`',
-          () => {
-            expect(true).toBe(true);
-          },
-        );
       },
     );
     r.RuleScenario(
@@ -3299,17 +3353,20 @@ defineFeature('dry-ai sync', (f) => {
           },
         );
         When('I run `dry-ai sync` with only --test', async () => {
-          const { cliOptions, stdoutMessages, stderrMessages } = createTestEnv({
+          const env = createTestEnv({
             mockFileSystem,
           });
 
           await runCLI({
             argv: ['--test', 'sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
 
-          expect(stderrMessages).toEqual([]);
-          stdoutJoined = stripAnsi(stdoutMessages.join(''));
+          expect(env.cmderStdoutMessages).toEqual([]);
+          expect(env.cmderStderrMessages).toEqual([]);
+          expect(env.effectStderrMessages).toEqual([]);
+
+          stdoutJoined = stripAnsi(env.effectStdoutMessages.join(''));
         });
         Then(
           'dry-ai writes agent outputs under the resolved test preview directory',
@@ -3347,6 +3404,8 @@ defineFeature('dry-ai sync', (f) => {
       'Keep --config-root from changing the output root',
       ({ Given, When, Then }) => {
         const configRoot = '/virtual/config-only-root';
+        let env: TestEnv;
+
         Given(
           'I have a command only under an alternate absolute config root',
           () => {
@@ -3373,16 +3432,22 @@ defineFeature('dry-ai sync', (f) => {
         When(
           'I run `dry-ai --config-root /virtual/config-only-root sync`',
           async () => {
-            const { cliOptions, stderrMessages } = createTestEnv({
+            env = createTestEnv({
               mockFileSystem,
             });
 
             await runCLI({
               argv: ['--config-root', configRoot, 'sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             });
+          },
+        );
+        Then(
+          'dry-ai does not silently redirect agent outputs when I pass only `--config-root`',
+          () => {
+            expect(env.cmderStderrMessages).toEqual([]);
+            expect(env.effectStderrMessages).toEqual([]);
 
-            expect(stderrMessages).toEqual([]);
             expect(
               mockFileSystem.files.has(
                 path.join(
@@ -3400,40 +3465,37 @@ defineFeature('dry-ai sync', (f) => {
             ).toBe(true);
           },
         );
-        Then(
-          'dry-ai does not silently redirect agent outputs when I pass only `--config-root`',
-          () => {
-            expect(true).toBe(true);
-          },
-        );
       },
     );
     r.RuleScenario(
       'Reject an unsupported CLI flag',
       ({ Given, When, Then }) => {
+        let env: TestEnv;
+        let error: CommanderError;
+
         Given('I pass only invalid CLI options before sync', () => {
           resetDryAiSyncTestFixtures();
         });
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions, stderrMessages, stdoutMessages } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
-          const error = await runCLIExpectingError({
+          error = await runCLIExpectingError({
             argv: ['--bogus', 'sync'],
-            ...cliOptions,
+            ...env.cliOptions,
           });
-
-          expect(error).toBeInstanceOf(CommanderError);
-          expect(error.code).toBe('commander.unknownOption');
-          expect(error.exitCode).toBe(1);
-          expect(stdoutMessages).toEqual([]);
-          expect(stderrMessages.join('')).toContain("unknown option '--bogus'");
         });
         Then(
           'dry-ai stops the run with a clear error for an unknown flag',
           () => {
-            expect(true).toBe(true);
+            expect(error).toBeInstanceOf(CommanderError);
+            expect(error.code).toBe('commander.unknownOption');
+            expect(error.exitCode).toBe(1);
+            expect(env.cmderStdoutMessages).toEqual([]);
+            expect(env.cmderStderrMessages.join('')).toContain(
+              "unknown option '--bogus'",
+            );
           },
         );
       },
@@ -3442,31 +3504,31 @@ defineFeature('dry-ai sync', (f) => {
       'Reject a missing config root path',
       ({ Given, When, Then }) => {
         const missingConfigRoot = '/virtual/missing-config-root';
+        let env: TestEnv;
+
         Given('I point --config-root at a path that does not exist', () => {
           resetDryAiSyncTestFixtures();
         });
         When('I run `dry-ai sync`', async () => {
-          const { cliOptions } = createTestEnv({
+          env = createTestEnv({
             mockFileSystem,
           });
 
           await expect(
             runCLI({
               argv: ['--config-root', missingConfigRoot, 'sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             }),
           ).rejects.toThrow(`Config root does not exist: ${missingConfigRoot}`);
-
-          expect(
-            mockFileSystem.files.has(
-              path.join(missingConfigRoot, 'sync-manifest.json'),
-            ),
-          ).toBe(false);
         });
         Then(
           'dry-ai fails fast with a clear error for a missing configuration directory',
           () => {
-            expect(true).toBe(true);
+            expect(
+              mockFileSystem.files.has(
+                path.join(missingConfigRoot, 'sync-manifest.json'),
+              ),
+            ).toBe(false);
           },
         );
       },
@@ -3511,25 +3573,23 @@ defineFeature('dry-ai sync', (f) => {
             },
           );
           When('I run `dry-ai sync`', async () => {
-            const { cliOptions } = createTestEnv({
+            const env = createTestEnv({
               mockFileSystem,
             });
 
             await expect(
               runCLI({
                 argv: ['sync'],
-                ...cliOptions,
+                ...env.cliOptions,
               }),
             ).rejects.toThrow(
               /sync-manifest\.json references unregistered agent "retired-agent"\. Remove entries for "retired-agent" from sync-manifest\.json, or delete sync-manifest\.json to rebuild it on the next sync\./,
             );
-
-            expect(mockFileSystem.files.has(staleOutputPath)).toBe(true);
           });
           Then(
             'dry-ai exits before doing work when the manifest names an unregistered agent',
             () => {
-              expect(true).toBe(true);
+              expect(mockFileSystem.files.has(staleOutputPath)).toBe(true);
             },
           );
         },
@@ -3576,19 +3636,23 @@ defineFeature('dry-ai sync', (f) => {
             },
           );
           When('I run `dry-ai sync`', async () => {
-            const { cliOptions } = createTestEnv({ mockFileSystem });
+            const env = createTestEnv({ mockFileSystem });
 
             await expect(
               runCLI({
                 argv: ['sync'],
-                ...cliOptions,
+                ...env.cliOptions,
               }),
             ).rejects.toThrow(`Could not read file: ${unreadablePath}`);
           });
           Then(
             'dry-ai surfaces unreadable discovered sources as failures instead of skipping them quietly',
             () => {
-              expect(true).toBe(true);
+              expect(
+                mockFileSystem.files.has(
+                  path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+                ),
+              ).toBe(false);
             },
           );
         },
@@ -3631,26 +3695,24 @@ defineFeature('dry-ai sync', (f) => {
             },
           );
           When('I run `dry-ai sync`', async () => {
-            const { cliOptions } = createTestEnv({ mockFileSystem });
+            const env = createTestEnv({ mockFileSystem });
 
             await expect(
               runCLI({
                 argv: ['sync'],
-                ...cliOptions,
+                ...env.cliOptions,
               }),
             ).rejects.toThrow(`Could not write file: ${failingOutputPath}`);
-
-            expect(mockFileSystem.files.has(failingOutputPath)).toBe(false);
-            expect(
-              mockFileSystem.files.has(
-                path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
-              ),
-            ).toBe(false);
           });
           Then(
             'dry-ai surfaces failed writes to a target file as hard errors',
             () => {
-              expect(true).toBe(true);
+              expect(mockFileSystem.files.has(failingOutputPath)).toBe(false);
+              expect(
+                mockFileSystem.files.has(
+                  path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+                ),
+              ).toBe(false);
             },
           );
         },
@@ -3658,6 +3720,18 @@ defineFeature('dry-ai sync', (f) => {
       r.RuleScenario(
         'Surface filesystem failures when applying a directory skill target',
         ({ Given, When, Then }) => {
+          const targetDir = path.join(
+            VIRTUAL_HOME_DIR,
+            '.copilot',
+            'skills',
+            'error-skill',
+          );
+          type SkillMirrorScenario = 'emptyDir' | 'copy';
+          let results: {
+            scenario: SkillMirrorScenario;
+            caught: unknown;
+          }[];
+
           Given(
             'I run subcases that each reset the mock, seed a skill, and break Copilot skill mirroring',
             () => {
@@ -3665,6 +3739,7 @@ defineFeature('dry-ai sync', (f) => {
             },
           );
           When('I run `dry-ai sync`', async () => {
+            results = [];
             for (const scenario of ['emptyDir', 'copy'] as const) {
               mockFileSystem = createMockFileSystemState();
               clearMockFileSystemFailures(mockFileSystem);
@@ -3684,12 +3759,6 @@ defineFeature('dry-ai sync', (f) => {
                 ),
                 content: '# Error skill\n',
               });
-              const targetDir = path.join(
-                VIRTUAL_HOME_DIR,
-                '.copilot',
-                'skills',
-                'error-skill',
-              );
 
               if (scenario === 'emptyDir') {
                 mockFailRemove({
@@ -3704,24 +3773,32 @@ defineFeature('dry-ai sync', (f) => {
                   message: 'copy failed',
                 });
               }
-              const { cliOptions } = createTestEnv({ mockFileSystem });
+              const env = createTestEnv({ mockFileSystem });
 
-              await expect(
-                runCLI({
+              try {
+                await runCLI({
                   argv: ['sync'],
-                  ...cliOptions,
-                }),
-              ).rejects.toThrow(
-                scenario === 'emptyDir'
-                  ? `Could not prepare directory: ${targetDir}`
-                  : `Could not copy into the sync output (${path.join(targetDir, 'SKILL.md')}).`,
-              );
+                  ...env.cliOptions,
+                });
+                results.push({ scenario, caught: undefined });
+              } catch (error) {
+                results.push({ scenario, caught: error });
+              }
             }
           });
           Then(
             'dry-ai aborts the run when copying a directory skill target fails',
             () => {
-              expect(true).toBe(true);
+              expect(results.map((entry) => entry.scenario)).toEqual([
+                'emptyDir',
+                'copy',
+              ]);
+              expect(String(results[0].caught)).toContain(
+                `Could not prepare directory: ${targetDir}`,
+              );
+              expect(String(results[1].caught)).toContain(
+                `Could not copy into the sync output (${path.join(targetDir, 'SKILL.md')}).`,
+              );
             },
           );
         },
@@ -3764,24 +3841,25 @@ defineFeature('dry-ai sync', (f) => {
             },
           );
           When('I run `dry-ai sync`', async () => {
-            const { cliOptions } = createTestEnv({ mockFileSystem });
+            const env = createTestEnv({ mockFileSystem });
 
             await expect(
               runCLI({
                 argv: ['sync'],
-                ...cliOptions,
+                ...env.cliOptions,
               }),
             ).rejects.toThrow(
               `Could not write file: ${path.join(failingParentDir, 'SKILL.md')}`,
             );
-            expect(
-              mockFileSystem.files.has(path.join(failingParentDir, 'SKILL.md')),
-            ).toBe(false);
           });
           Then(
             'dry-ai stops the workflow on directory creation failures before writes or copies proceed',
             () => {
-              expect(true).toBe(true);
+              expect(
+                mockFileSystem.files.has(
+                  path.join(failingParentDir, 'SKILL.md'),
+                ),
+              ).toBe(false);
             },
           );
         },
@@ -3801,6 +3879,8 @@ defineFeature('dry-ai sync', (f) => {
             'hand-written.prompt.md',
           );
           const untrackedContent = '# Hand written\n';
+          let env: TestEnv;
+
           Given(
             'the config tree is empty but an unmanaged Copilot prompt already exists under home',
             () => {
@@ -3813,35 +3893,37 @@ defineFeature('dry-ai sync', (f) => {
             },
           );
           When('I run `dry-ai sync`', async () => {
-            const { cliOptions, stderrMessages } = createTestEnv({
+            env = createTestEnv({
               mockFileSystem,
             });
 
             await runCLI({
               argv: ['sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             });
-
-            expect(stderrMessages).toEqual([]);
-            expect(
-              readMockTextFile({
-                handle: mockFileSystem,
-                filePath: untrackedOutput,
-              }),
-            ).toBe(untrackedContent);
-            expect(readSyncManifest().outputs).toEqual([]);
-            expect(
-              [...mockFileSystem.files.keys()].filter(
-                (filePath) =>
-                  filePath !== untrackedOutput &&
-                  !filePath.endsWith('sync-manifest.json'),
-              ),
-            ).toEqual([]);
           });
           Then(
             'dry-ai writes empty sync state without creating agent outputs or touching untracked files',
             () => {
-              expect(true).toBe(true);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
+
+              expect(
+                readMockTextFile({
+                  handle: mockFileSystem,
+                  filePath: untrackedOutput,
+                }),
+              ).toBe(untrackedContent);
+
+              expect(readSyncManifest().outputs).toEqual([]);
+
+              expect(
+                [...mockFileSystem.files.keys()].filter(
+                  (filePath) =>
+                    filePath !== untrackedOutput &&
+                    !filePath.endsWith('sync-manifest.json'),
+                ),
+              ).toEqual([]);
             },
           );
         },
@@ -3854,6 +3936,8 @@ defineFeature('dry-ai sync', (f) => {
       r.RuleScenario(
         'Render a coherent report for mixed applied and skipped work',
         ({ Given, When, Then }) => {
+          let env: TestEnv;
+
           Given(
             'I have a command and skill that share a name so installs and skips appear together',
             () => {
@@ -3888,31 +3972,31 @@ defineFeature('dry-ai sync', (f) => {
             },
           );
           When('I run `dry-ai sync`', async () => {
-            const { cliOptions, stdoutMessages, stderrMessages } =
-              createTestEnv({ mockFileSystem });
+            env = createTestEnv({ mockFileSystem });
 
             await runCLI({
               argv: ['sync'],
-              ...cliOptions,
+              ...env.cliOptions,
             });
-
-            expect(stderrMessages).toEqual([]);
-            const report = stripAnsi(stdoutMessages.join(''));
-            expect(report).toContain('Applied changes:');
-            expect(report).toContain('all-skipped (installed)');
-            expect(report).toContain('Skipped conflicts:');
-            expect(report).not.toContain('Skipped conflicts: None');
-            expect(report).toMatch(
-              /command "all-skipped" from .*all-skipped-command\.md/,
-            );
-            expect(report).toMatch(
-              /skill "all-skipped" from .*skills\/all-skipped/,
-            );
           });
           Then(
             'dry-ai renders applied work and skipped conflicts coherently in the same report',
             () => {
-              expect(true).toBe(true);
+              expect(env.cmderStdoutMessages).toEqual([]);
+              expect(env.cmderStderrMessages).toEqual([]);
+              expect(env.effectStderrMessages).toEqual([]);
+
+              const report = stripAnsi(env.effectStdoutMessages.join(''));
+              expect(report).toContain('Applied changes:');
+              expect(report).toContain('all-skipped (installed)');
+              expect(report).toContain('Skipped conflicts:');
+              expect(report).not.toContain('Skipped conflicts: None');
+              expect(report).toMatch(
+                /command "all-skipped" from .*all-skipped-command\.md/,
+              );
+              expect(report).toMatch(
+                /skill "all-skipped" from .*skills\/all-skipped/,
+              );
             },
           );
         },

@@ -191,12 +191,12 @@ describe('dry-ai skills update', () => {
       it('writes the fetched remote files into the local skill directory with the remote bytes', async () => {
         // Arrange: seed the local skill + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: every remote file is now on disk with the remote bytes
@@ -222,12 +222,12 @@ describe('dry-ai skills update', () => {
         // Arrange: seed the local skill (which includes `legacy.md`,
         // absent from the remote snapshot) + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: `legacy.md` is gone — if `replaceManagedSkillDirectory`
@@ -248,12 +248,12 @@ describe('dry-ai skills update', () => {
       it('updates the lockfile entry with the fetched commit and remote file hashes while preserving importedAt', async () => {
         // Arrange: seed the local skill + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: the lockfile was saved exactly once.
@@ -287,21 +287,23 @@ describe('dry-ai skills update', () => {
       it('prints the updated skill summary to stdout and keeps stderr empty', async () => {
         // Arrange: seed the local skill + matching lockfile entry.
         arrangeHappyPathUpdate();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
-        // Assert: the "Updated <summary>" `logInfo` line lands on stdout.
-        expect(environment.stdoutMessages).toEqual([
+        // Assert: the "Updated <summary>" `logInfo` line lands on the Effect
+        // logger; Commander stdio stays quiet.
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           `Updated ${TARGET_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${TARGET_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}\n`,
         ]);
-
-        // Assert: stderr stays empty on a successful update (no warnings).
-        expect(environment.stderrMessages).toEqual([]);
       });
 
       // priority: med
@@ -329,12 +331,12 @@ describe('dry-ai skills update', () => {
       it('skips updating the skill when local edits are detected', async () => {
         // Arrange: on-disk `SKILL.md` bytes differ from lockfile hashes.
         const { onDiskFiles } = arrangeSkillWithLocalEdits();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: every seeded on-disk file still holds its pre-run
@@ -363,19 +365,23 @@ describe('dry-ai skills update', () => {
       it('warns on stderr with the user-edited files and a hint to use --force', async () => {
         // Arrange: on-disk `SKILL.md` bytes differ from lockfile hashes.
         arrangeSkillWithLocalEdits();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         // Act
         await runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         // Assert: a single `logWarn` payload names the skill, lists the
         // changed file(s), and hints at `--force` — these three pieces
         // together are what tells the user what went wrong AND how to
         // proceed.
-        expect(environment.stderrMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([
           `Skipped ${TARGET_SKILL.name} because local edits were detected in: SKILL.md. Re-run with --force to overwrite local changes.\n`,
         ]);
       });
@@ -393,11 +399,11 @@ describe('dry-ai skills update', () => {
         // not match lockfile hashes, so `modified` is true; `--force` must
         // bypass the early return and run the full update.
         arrangeSkillWithLocalEdits();
-        const environment = createTestEnv({ mockFileSystem });
+        const env = createTestEnv({ mockFileSystem });
 
         await runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name, '--force'],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         });
 
         for (const [relativeFilePath, content] of Object.entries(
@@ -414,6 +420,7 @@ describe('dry-ai skills update', () => {
             }),
           ).toBe(content);
         }
+
         expect(
           mockFileSystem.files.has(
             path.join(
@@ -446,8 +453,11 @@ describe('dry-ai skills update', () => {
           ],
         });
 
-        expect(environment.stderrMessages).toEqual([]);
-        expect(environment.stdoutMessages).toEqual([
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+
+        expect(env.effectStdoutMessages).toEqual([
           `Updated ${TARGET_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${TARGET_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}\n`,
         ]);
       });
@@ -502,12 +512,12 @@ describe('dry-ai skills update', () => {
           ],
         }),
       });
-      const environment = createTestEnv({ mockFileSystem });
+      const env = createTestEnv({ mockFileSystem });
 
       await expect(
         runCLI({
           argv: ['skills', 'update', TARGET_SKILL.name],
-          ...environment.cliOptions,
+          ...env.cliOptions,
         }),
       ).rejects.toThrow(
         `No managed skill named "${TARGET_SKILL.name}" is listed in the skills lockfile. Try \`skills list\`.`,
