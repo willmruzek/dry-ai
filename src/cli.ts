@@ -174,6 +174,10 @@ export function createCLI(options: CLIOptions): Command {
       'Shortcut for writing generated output into ./output-test unless --output-root is also provided',
     )
     .option(
+      '--debug',
+      'After a failed command, also log the full Effect failure cause on stderr (for troubleshooting)',
+    )
+    .option(
       '--config-root <path>',
       'Read configs from a different root instead of ~/.config/dry-ai',
       parseOptionValue({

@@ -121,6 +121,7 @@ describe('dry-ai skills add', () => {
   });
 
   describe('happy paths', () => {
+    // TODO(cli-user-message): add failure runCLI scenario for EnsureSkillsSourceRootError if skills root cannot be created (present-error.ts).
     describe('single skill import', () => {
       it.each([
         ['anthropics/skills'],
@@ -706,6 +707,7 @@ describe('dry-ai skills add', () => {
     });
 
     // priority: low
+    // TODO(cli-user-message): when implemented, assert InvalidSkillsLockfile and lockfile I/O errors (SkillsLockfile* in present-error.ts) user lines.
     it.todo(
       'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',
     );
@@ -716,6 +718,7 @@ describe('dry-ai skills add', () => {
     );
 
     // priority: med
+    // TODO(cli-user-message): when implemented, assert GitCheckoutTempDirectoryError if temp clone dir creation fails (present-error.ts).
     it.todo(
       'propagates git-clone errors (fetch failure) without writing to the lockfile',
     );
@@ -726,6 +729,7 @@ describe('dry-ai skills add', () => {
     );
 
     describe('skill source resolution', () => {
+      // TODO(cli-user-message): when implemented, assert RemoteSkillDirectoryInvalid, RemoteSkillValidationFsError, SkillDirectoryWalkError curated lines (present-error.ts).
       // priority: med
       it.todo(
         'throws when the resolved skill directory does not exist inside the cloned repository',

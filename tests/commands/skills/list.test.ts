@@ -43,6 +43,7 @@ const mockedOs = vi.mocked(os);
 describe('dry-ai skills list', () => {
   let mockFileSystem: MockFileSystemHandle;
 
+  // TODO(cli-user-message): add runCLI failure scenario for ListSkillSubdirectoriesError (Could not list skill folders under: …).
   beforeEach(() => {
     mockFileSystem = createMockFileSystemState();
 
@@ -272,6 +273,7 @@ describe('dry-ai skills list', () => {
     );
 
     describe('lockfile edge cases', () => {
+      // TODO(cli-user-message): when implemented, assert InvalidSkillsLockfile curated user line (present-error.ts).
       // priority: low
       it.todo(
         'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',

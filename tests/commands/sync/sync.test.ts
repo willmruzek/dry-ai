@@ -3539,6 +3539,11 @@ defineFeature('dry-ai sync', (f) => {
   f.Rule(
     'Filesystem failures fail the run without silent partial success',
     (r) => {
+      // TODO(cli-user-message): add runCLI scenario + assert EnsureDirError (Could not create directory: …).
+      // TODO(cli-user-message): add runCLI scenario + assert PathExistsCheckError (Could not check whether path exists: …).
+      // TODO(cli-user-message): add runCLI scenario + assert ReadDirectoryError (Could not read directory: …).
+      // TODO(cli-user-message): add runCLI scenario + assert SyncStatPathError (Could not inspect path while syncing: …).
+      // TODO(cli-user-message): add runCLI scenario + assert SkillDirectoryWalkError (Could not scan skill directory: …).
       r.RuleScenario(
         'Surface read errors for discovered files',
         ({ Given, When, Then }) => {
@@ -3578,7 +3583,7 @@ defineFeature('dry-ai sync', (f) => {
                 argv: ['sync'],
                 ...cliOptions,
               }),
-            ).rejects.toThrow(/Could not read file:/);
+            ).rejects.toThrow(`Could not read file: ${unreadablePath}`);
           });
           Then(
             'dry-ai surfaces unreadable discovered sources as failures instead of skipping them quietly',
@@ -3633,7 +3638,7 @@ defineFeature('dry-ai sync', (f) => {
                 argv: ['sync'],
                 ...cliOptions,
               }),
-            ).rejects.toThrow(/Could not write file:/);
+            ).rejects.toThrow(`Could not write file: ${failingOutputPath}`);
 
             expect(mockFileSystem.files.has(failingOutputPath)).toBe(false);
             expect(
@@ -3707,7 +3712,9 @@ defineFeature('dry-ai sync', (f) => {
                   ...cliOptions,
                 }),
               ).rejects.toThrow(
-                scenario === 'emptyDir' ? 'emptyDir failed' : 'copy failed',
+                scenario === 'emptyDir'
+                  ? `Could not prepare directory: ${targetDir}`
+                  : `Could not copy into the sync output (${path.join(targetDir, 'SKILL.md')}).`,
               );
             }
           });
@@ -3764,7 +3771,9 @@ defineFeature('dry-ai sync', (f) => {
                 argv: ['sync'],
                 ...cliOptions,
               }),
-            ).rejects.toThrow(/Could not write file:/);
+            ).rejects.toThrow(
+              `Could not write file: ${path.join(failingParentDir, 'SKILL.md')}`,
+            );
             expect(
               mockFileSystem.files.has(path.join(failingParentDir, 'SKILL.md')),
             ).toBe(false);

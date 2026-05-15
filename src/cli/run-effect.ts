@@ -3,8 +3,12 @@ import type { Layer } from 'effect/Layer';
 import * as Runtime from 'effect/Runtime';
 
 import type { CommandEnv } from '../lib/command-env.js';
+import { areCliFailureDiagnosticsEnabled } from '../lib/command-options.js';
 
-import { formatCliUserMessageFromCause } from './present-error.js';
+import {
+  formatCliFailureDiagnostics,
+  formatCliUserMessageFromCause,
+} from './present-error.js';
 
 /**
  * Thrown after the CLI records a user-facing line for an Effect failure. Carries
@@ -62,15 +66,21 @@ export function createCliLoggerLayer(sinks: CliLogSinks): Layer<never> {
 
 /**
  * Runs an already-provided effect (caller supplies layers/services). On failure,
- * logs one user-facing line with {@link Effect.logError} inside
- * {@link Effect.tapErrorCause}, then throws {@link CliHandledFiberFailure}.
+ * logs one curated user-facing line with {@link Effect.logError}, and when
+ * {@link areCliFailureDiagnosticsEnabled} is true logs a second line with the full
+ * cause tree. Then throws {@link CliHandledFiberFailure}.
  */
 export async function runCliEffect<A, E>(
-  env: Pick<CommandEnv, 'runtime'>,
+  env: CommandEnv,
   effect: Effect.Effect<A, E, never>,
 ): Promise<A> {
   const instrumented = Effect.tapErrorCause(effect, (cause) =>
-    Effect.logError(formatCliUserMessageFromCause(cause)),
+    Effect.gen(function* () {
+      yield* Effect.logError(formatCliUserMessageFromCause(cause));
+      if (areCliFailureDiagnosticsEnabled(env.rootOptions)) {
+        yield* Effect.logError(formatCliFailureDiagnostics(cause));
+      }
+    }),
   ).pipe(Effect.provide(env.runtime.loggerLayer));
 
   const exit = await Effect.runPromiseExit(instrumented);

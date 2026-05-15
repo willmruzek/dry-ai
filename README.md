@@ -9,6 +9,7 @@ Global CLI options:
 - `--config-root <path>` reads configs from a different root such as `./config`.
 - `--output-root <path>` writes generated output somewhere other than your home directory.
 - `--test` is a shortcut for `--output-root ./output-test`, and if both are provided, `--output-root` wins.
+- `--debug` logs the full Effect failure cause on stderr **after** the normal user-facing error line when a command fails (you can also set `DRY_AI_DEBUG=1`).
 
 These are root-level options for the CLI. They modify command behavior for any given command.
 

@@ -517,6 +517,7 @@ describe('dry-ai skills update', () => {
     });
 
     // priority: med
+    // TODO(cli-user-message): when clone/hash/read fails mid-update, assert SkillContentHashReadError if applicable (present-error.ts).
     it.todo(
       'cleans up the temporary remote-snapshot directory even when a fetch or copy error is thrown mid-update',
     );
@@ -532,6 +533,7 @@ describe('dry-ai skills update', () => {
     );
 
     // priority: low
+    // TODO(cli-user-message): when implemented, assert InvalidSkillsLockfile + lockfile errors (SkillsLockfile* in present-error.ts).
     it.todo(
       'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',
     );

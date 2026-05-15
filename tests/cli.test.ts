@@ -76,6 +76,8 @@ describe('runCLI', () => {
           -v, --version         Display the current version
           --test                Shortcut for writing generated output into ./output-test
                                 unless --output-root is also provided
+          --debug               After a failed command, also log the full Effect failure
+                                cause on stderr (for troubleshooting)
           --config-root <path>  Read configs from a different root instead of
                                 ~/.config/dry-ai
           --output-root <path>  Write generated output under a different root instead of

@@ -459,7 +459,9 @@ describe('dry-ai skills update-all', () => {
             argv: ['skills', 'update-all'],
             ...environment.cliOptions,
           }),
-        ).rejects.toThrow('simulated second-skill replace failure');
+        ).rejects.toThrow(
+          /Could not install skill files into: .*review-helper/,
+        );
 
         expect(mockFileSystem.lockfileWrites).toHaveLength(1);
         const persistedPayload = mockFileSystem.lockfileWrites[0];
@@ -787,6 +789,7 @@ describe('dry-ai skills update-all', () => {
     );
 
     // priority: low
+    // TODO(cli-user-message): when implemented, assert InvalidSkillsLockfile, SkillsLockfileWriteError, and related lockfile I/O user lines (present-error.ts).
     it.todo(
       'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',
     );

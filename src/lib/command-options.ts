@@ -5,11 +5,32 @@ export const nonEmptyOptionStringSchema = z.string().trim().min(1);
 
 export const rootOptionsSchema = z.object({
   test: z.boolean().optional().default(false),
+  debug: z.boolean().optional().default(false),
   configRoot: nonEmptyOptionStringSchema.optional(),
   outputRoot: nonEmptyOptionStringSchema.optional(),
 });
 
 export type RootOptions = z.output<typeof rootOptionsSchema>;
+
+/**
+ * Whether CLI failure diagnostics are enabled (`--debug` or `DRY_AI_DEBUG`).
+ *
+ * When true, the CLI logs the curated user-facing failure line plus a second
+ * stderr line with the full Effect cause tree (`Cause.pretty`).
+ *
+ * Enabled by `--debug` or `DRY_AI_DEBUG=1` / `true` / `yes` (case-insensitive).
+ */
+export function areCliFailureDiagnosticsEnabled(root: RootOptions): boolean {
+  if (root.debug) {
+    return true;
+  }
+  const fromEnv = process.env.DRY_AI_DEBUG;
+  if (fromEnv === undefined) {
+    return false;
+  }
+  const normalized = fromEnv.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
 
 /**
  * Parses a value with a Zod schema, throwing a Commander InvalidArgumentError on failure.

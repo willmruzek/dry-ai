@@ -1,12 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { Cause, Chunk, Runtime } from 'effect';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
-import { CliHandledFiberFailure } from '../../../src/cli/run-effect.js';
-import { InvalidSkillsLockfile } from '../../../src/lib/skills.js';
 
 import {
   DEFAULT_SKILLS_LOCKFILE_PATH,
@@ -22,33 +19,6 @@ import {
   seedLocalSkillDirectory,
   storeMockTextFile,
 } from '../../helpers.ts';
-
-function findInvalidSkillsLockfileInCause(
-  err: unknown,
-): InvalidSkillsLockfile | undefined {
-  if (err instanceof CliHandledFiberFailure) {
-    return findInvalidSkillsLockfileInCause(err.fiberFailure);
-  }
-  if (err instanceof InvalidSkillsLockfile) {
-    return err;
-  }
-  if (!Runtime.isFiberFailure(err)) {
-    return undefined;
-  }
-  const cause = err[Runtime.FiberFailureCauseId];
-  for (const failure of Chunk.toReadonlyArray(Cause.failures(cause))) {
-    if (failure instanceof InvalidSkillsLockfile) {
-      return failure;
-    }
-  }
-  for (const defect of Chunk.toReadonlyArray(Cause.defects(cause))) {
-    const nested = findInvalidSkillsLockfileInCause(defect);
-    if (nested !== undefined) {
-      return nested;
-    }
-  }
-  return undefined;
-}
 
 const REMOVED_SKILL = {
   name: 'note-taker',
@@ -311,19 +281,15 @@ describe('dry-ai skills remove', () => {
         });
         const environment = createTestEnv({ mockFileSystem });
 
-        // Act — load runs inside Effect; failures surface as FiberFailure-wrapped causes.
-        try {
-          await runCLI({
+        // Act
+        await expect(
+          runCLI({
             argv: ['skills', 'remove', REMOVED_SKILL.name],
             ...environment.cliOptions,
-          });
-          expect.fail('expected runCLI(skills remove) to reject');
-        } catch (err) {
-          const invalid = findInvalidSkillsLockfileInCause(err);
-          expect(invalid).toBeDefined();
-          expect(invalid!.lockfilePath).toBe(DEFAULT_SKILLS_LOCKFILE_PATH);
-          expect(invalid!.message).toMatch(/^Invalid skills lockfile at /);
-        }
+          }),
+        ).rejects.toThrow(
+          `Could not parse the skills lockfile (${DEFAULT_SKILLS_LOCKFILE_PATH}). Fix JSON/schema errors in that file.`,
+        );
 
         // Assert
         expect(mockFileSystem.lockfileWrites).toHaveLength(0);
@@ -332,6 +298,7 @@ describe('dry-ai skills remove', () => {
     );
 
     // priority: med — removal uses FS; failures must surface instead of a misleading success path.
+    // TODO(cli-user-message): when implemented, assert RemovePathError / RemoveManagedSkillDirectoryError curated lines (present-error.ts).
     it.todo(
       'propagates filesystem errors thrown while removing the skill directory',
     );
