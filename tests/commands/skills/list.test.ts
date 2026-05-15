@@ -1,7 +1,10 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineFeature } from '@amiceli/vitest-cucumber';
+import { Effect } from 'effect';
+import * as Ref from 'effect/Ref';
+import { expect, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
 
@@ -16,6 +19,13 @@ import {
   configureMockOs,
   createMockFileSystemState,
   createTestEnv,
+  ensureMockDirectory,
+  mockFailExists,
+  mockFailMakeDirectory,
+  mockFailReadDirectory,
+  mockFailReadFileString,
+  mockFailStat,
+  seedLocalSkillDirectory,
   storeMockTextFile,
 } from '../../helpers.js';
 
@@ -31,6 +41,13 @@ const SECOND_SKILL = {
   commit: '1234567890abcdef',
 } as const;
 
+/** Managed skill listed in the lockfile but with no on-disk folder. */
+const MISSING_LOCAL_SKILL = {
+  name: 'ghost-skill',
+  path: 'skills/ghost',
+  commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+} as const;
+
 vi.mock('node:os', () => ({
   default: {
     homedir: vi.fn(),
@@ -40,251 +57,625 @@ vi.mock('node:os', () => ({
 
 const mockedOs = vi.mocked(os);
 
-describe('dry-ai skills list', () => {
+function managedLockfileEntry(skill: {
+  readonly name: string;
+  readonly path: string;
+  readonly commit: string;
+}) {
+  return {
+    name: skill.name,
+    repo: SAMPLE_NORMALIZED_REPO,
+    path: skill.path,
+    commit: skill.commit,
+    importedAt: SAMPLE_IMPORTED_AT,
+    updatedAt: SAMPLE_IMPORTED_AT,
+  };
+}
+
+/**
+ * Expected `skills list` summary segment for fixtures above — not imported from
+ * production code so this file only *acts* on the app via {@link runCLI}.
+ */
+function expectedManagedSkillSummaryFromFixture(skill: {
+  readonly name: string;
+  readonly path: string;
+  readonly commit: string;
+}): string {
+  const shortCommit = skill.commit.slice(0, 7);
+  return `${skill.name} repo=${SAMPLE_NORMALIZED_REPO} path=${skill.path} ref=HEAD commit=${shortCommit}`;
+}
+
+defineFeature('dry-ai skills list', (f) => {
   let mockFileSystem: MockFileSystemHandle;
 
-  // TODO(cli-user-message): add runCLI failure scenario for ListSkillSubdirectoriesError (Could not list skill folders under: …).
-  beforeEach(() => {
+  f.BeforeEachScenario(() => {
     mockFileSystem = createMockFileSystemState();
 
     configureMockFileSystem({
       handle: mockFileSystem,
       lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
     });
+
     configureMockOs({
-      mockedOs: mockedOs,
+      mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
   });
 
-  describe('happy paths', () => {
-    describe('basic list', () => {
-      it('lists every local skill directory with its managed summary when all skills are in the lockfile', async () => {
-        // Arrange: seed two local skill directories AND matching lockfile
-        // entries, so every on-disk skill is "managed". Seeding the skills in
-        // reverse-alphabetical mock-insertion order verifies the output is
-        // driven by `listLocalSkillDirectories`'s sort, not by insertion
-        // order.
-        storeMockTextFile({
+  f.Scenario(
+    'No skills to show — folder already exists',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the skills source root directory already exists', () => {
+        ensureMockDirectory({
           handle: mockFileSystem,
-          filePath: path.join(
-            DEFAULT_SKILLS_SOURCE_ROOT,
-            SECOND_SKILL.name,
-            'SKILL.md',
-          ),
-          content: '---\nname: review-helper\n---\n\n# Review helper\n',
-        });
-        storeMockTextFile({
-          handle: mockFileSystem,
-          filePath: path.join(
-            DEFAULT_SKILLS_SOURCE_ROOT,
-            FIRST_SKILL.name,
-            'SKILL.md',
-          ),
-          content: '---\nname: note-taker\n---\n\n# Note taker\n',
-        });
-        storeMockTextFile({
-          handle: mockFileSystem,
-          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          content: JSON.stringify({
-            version: 1,
-            skills: [
-              {
-                commit: FIRST_SKILL.commit,
-                files: { 'SKILL.md': 'a'.repeat(64) },
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: FIRST_SKILL.name,
-                path: FIRST_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-              {
-                commit: SECOND_SKILL.commit,
-                files: { 'SKILL.md': 'b'.repeat(64) },
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: SECOND_SKILL.name,
-                path: SECOND_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-            ],
-          }),
+          directoryPath: DEFAULT_SKILLS_SOURCE_ROOT,
         });
 
-        const env = createTestEnv({ mockFileSystem });
-
-        // Act
-        await runCLI({
-          argv: ['skills', 'list'],
-          ...env.cliOptions,
-        });
-
-        // Assert: stdout is one logInfo payload with one "- <summary>" line
-        // per local skill. No "unmanaged" suffix (both are tracked) and no
-        // "missing-local-directory" suffix (both have on-disk directories).
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
-        expect(env.effectStdoutMessages).toEqual([
-          [
-            `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FIRST_SKILL.commit.slice(0, 7)}`,
-            `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${SECOND_SKILL.commit.slice(0, 7)}`,
-            '',
-          ].join('\n'),
-        ]);
-      });
-
-      // priority: med
-      it.todo(
-        'prints "No local skills found." when neither local directories nor lockfile entries exist',
-      );
-
-      it('creates the skills root directory on first run if it is missing', async () => {
-        // Arrange: fresh mock filesystem with neither a skills root directory
-        // nor a lockfile. Sanity-check the pre-state so the post-state
-        // assertion below is meaningful.
-        expect(mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT)).toBe(
-          false,
-        );
-
-        const env = createTestEnv({ mockFileSystem });
-
-        // Act
-        await runCLI({
-          argv: ['skills', 'list'],
-          ...env.cliOptions,
-        });
-
-        // Assert: the skills root was created and is visible to the in-memory mock filesystem.
         expect(mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT)).toBe(
           true,
         );
+      });
 
-        // Assert: with no local skills and no lockfile, stdout is the
-        // empty-state message and stderr is empty.
+      And('there is no skills lockfile on disk', () => {
+        expect(mockFileSystem.files.has(DEFAULT_SKILLS_LOCKFILE_PATH)).toBe(
+          false,
+        );
+      });
+
+      When('I run `dry-ai skills list`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then('the command prints that no local skills were found', () => {
         expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
         expect(env.effectStdoutMessages).toEqual(['No local skills found.\n']);
       });
 
-      // priority: low
-      it.todo('keeps stderr empty on every successful list invocation');
-    });
+      And('the command does not print errors', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+    },
+  );
 
-    describe('managed vs unmanaged annotation', () => {
-      it('labels a local directory as unmanaged when absent from the lockfile, and a lockfile-only entry as missing-local-directory', async () => {
-        // Arrange: two directories under the skills root — one tracked in the
-        // lockfile (`FIRST_SKILL`), one not (`extra-local`). The lockfile also
-        // references `SECOND_SKILL`, which has no on-disk directory.
+  f.Scenario(
+    'No skills to show when the skills folder did not exist and `dry-ai skills list` creates it',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('my skills folder does not exist yet', () => {
+        expect(mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT)).toBe(
+          false,
+        );
+      });
+
+      And('creating it does not fail', () => {
+        const failures = Effect.runSync(Ref.get(mockFileSystem.failuresRef));
+        expect(failures.makeDirectory.size).toBe(0);
+      });
+
+      And('there is no skills lockfile on disk', () => {
+        expect(mockFileSystem.files.has(DEFAULT_SKILLS_LOCKFILE_PATH)).toBe(
+          false,
+        );
+      });
+
+      And('there are no local skill folders to list', () => {
+        const root = DEFAULT_SKILLS_SOURCE_ROOT;
+        const childPrefix = `${root}${path.sep}`;
+        expect(
+          [...mockFileSystem.directories].every(
+            (d) => d !== root && !d.startsWith(childPrefix),
+          ),
+        ).toBe(true);
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then('I see a message that no local skills were found', () => {
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual(['No local skills found.\n']);
+      });
+
+      And(
+        'the command completes successfully and the skills folder now exists',
+        () => {
+          expect(env.cmderStderrMessages).toEqual([]);
+          expect(env.effectStderrMessages).toEqual([]);
+          expect(
+            mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT),
+          ).toBe(true);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'Fails when the skills directory cannot be created',
+    ({ Given, When, Then, And }) => {
+      let env!: ReturnType<typeof createTestEnv>;
+
+      Given('my skills folder is not there yet', () => {
+        expect(mockFileSystem.directories.has(DEFAULT_SKILLS_SOURCE_ROOT)).toBe(
+          false,
+        );
+      });
+
+      And('creating my skills folder fails', () => {
+        mockFailMakeDirectory({
+          handle: mockFileSystem,
+          absolutePath: DEFAULT_SKILLS_SOURCE_ROOT,
+          message: 'permission denied (test)',
+        });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'the CLI prints that the skills directory could not be created',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not create the skills directory: ${DEFAULT_SKILLS_SOURCE_ROOT}\n`,
+          ]);
+        },
+      );
+
+      And('Commander stays quiet on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Fails when the skills folder cannot be read',
+    ({ Given, When, Then, And }) => {
+      let env!: ReturnType<typeof createTestEnv>;
+
+      Given('reading entries under my skills folder fails', () => {
+        mockFailReadDirectory({
+          handle: mockFileSystem,
+          absolutePath: DEFAULT_SKILLS_SOURCE_ROOT,
+          message: 'readdir failed (test)',
+        });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then('the CLI prints that skill folders could not be listed', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Could not list skill folders under: ${DEFAULT_SKILLS_SOURCE_ROOT}\n`,
+        ]);
+      });
+
+      And('Commander stays quiet on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Fails when a skill entry cannot be inspected',
+    ({ Given, When, Then, And }) => {
+      let env!: ReturnType<typeof createTestEnv>;
+      const skillPath = path.join(DEFAULT_SKILLS_SOURCE_ROOT, 'my-skill');
+
+      Given('there is at least one folder under my skills directory', () => {
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: 'my-skill',
+          files: { 'SKILL.md': 'x' },
+        });
+      });
+
+      And('inspecting that folder with stat fails', () => {
+        mockFailStat({
+          handle: mockFileSystem,
+          absolutePath: skillPath,
+          message: 'stat failed (test)',
+        });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then('the CLI prints that skill folders could not be listed', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Could not list skill folders under: ${DEFAULT_SKILLS_SOURCE_ROOT}\n`,
+        ]);
+      });
+
+      And('Commander stays quiet on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Fails when the skills lockfile presence check errors',
+    ({ Given, When, Then, And }) => {
+      let env!: ReturnType<typeof createTestEnv>;
+
+      Given('checking whether the skills lockfile exists fails', () => {
+        mockFailExists({
+          handle: mockFileSystem,
+          absolutePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          message: 'exists failed (test)',
+        });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then('the CLI prints that the lockfile could not be checked', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Could not check the skills lockfile: ${DEFAULT_SKILLS_LOCKFILE_PATH}\n`,
+        ]);
+      });
+
+      And('Commander stays quiet on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Fails when the skills lockfile cannot be read',
+    ({ Given, When, Then, And }) => {
+      let env!: ReturnType<typeof createTestEnv>;
+
+      Given('the skills lockfile is present', () => {
         storeMockTextFile({
           handle: mockFileSystem,
-          filePath: path.join(
-            DEFAULT_SKILLS_SOURCE_ROOT,
-            FIRST_SKILL.name,
-            'SKILL.md',
-          ),
-          content: '---\nname: note-taker\n---\n\n# Note taker\n',
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
+            version: 1,
+            skills: [],
+          }),
         });
+      });
+
+      And('reading the skills lockfile fails', () => {
+        mockFailReadFileString({
+          handle: mockFileSystem,
+          absolutePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          message: 'read failed (test)',
+        });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then('the CLI prints that the lockfile could not be read', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Could not read the skills lockfile: ${DEFAULT_SKILLS_LOCKFILE_PATH}\n`,
+        ]);
+      });
+
+      And('Commander stays quiet on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Fails when the skills lockfile is not valid JSON',
+    ({ Given, When, Then, And }) => {
+      let env!: ReturnType<typeof createTestEnv>;
+      const message = `Could not parse the skills lockfile (${DEFAULT_SKILLS_LOCKFILE_PATH}). Fix JSON/schema errors in that file.`;
+
+      Given('the skills lockfile is not valid JSON', () => {
         storeMockTextFile({
           handle: mockFileSystem,
-          filePath: path.join(
-            DEFAULT_SKILLS_SOURCE_ROOT,
-            'extra-local',
-            'SKILL.md',
-          ),
-          content: '---\nname: extra-local\n---\n\n# Extra\n',
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: '{"version":1,"skills":[}',
         });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then('the CLI prints a parse error for the skills lockfile', () => {
+        expect(env.effectStderrMessages).toEqual([`${message}\n`]);
+      });
+
+      And('Commander stays quiet on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.cmderStdoutMessages).toEqual([]);
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Shows managed skill summaries for lockfile-backed folders',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the skills source root already exists', () => {
+        ensureMockDirectory({
+          handle: mockFileSystem,
+          directoryPath: DEFAULT_SKILLS_SOURCE_ROOT,
+        });
+      });
+
+      And('two managed skills exist locally in sorted order', () => {
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: FIRST_SKILL.name,
+          files: { 'SKILL.md': 'a' },
+        });
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: SECOND_SKILL.name,
+          files: { 'SKILL.md': 'b' },
+        });
+      });
+
+      And('the lockfile lists those skills', () => {
         storeMockTextFile({
           handle: mockFileSystem,
           filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
           content: JSON.stringify({
             version: 1,
             skills: [
-              {
-                commit: FIRST_SKILL.commit,
-                files: { 'SKILL.md': 'a'.repeat(64) },
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: FIRST_SKILL.name,
-                path: FIRST_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-              {
-                commit: SECOND_SKILL.commit,
-                files: { 'SKILL.md': 'b'.repeat(64) },
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: SECOND_SKILL.name,
-                path: SECOND_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
+              managedLockfileEntry(SECOND_SKILL),
+              managedLockfileEntry(FIRST_SKILL),
             ],
           }),
         });
+      });
 
-        const env = createTestEnv({ mockFileSystem });
-
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
         await runCLI({
           argv: ['skills', 'list'],
           ...env.cliOptions,
         });
+      });
 
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
+      Then('the command prints a line for each managed skill', () => {
+        const firstLine = `- ${expectedManagedSkillSummaryFromFixture(FIRST_SKILL)}`;
+        const secondLine = `- ${expectedManagedSkillSummaryFromFixture(SECOND_SKILL)}`;
         expect(env.effectStdoutMessages).toEqual([
-          [
-            '- extra-local unmanaged',
-            `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FIRST_SKILL.commit.slice(0, 7)}`,
-            `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${SECOND_SKILL.commit.slice(0, 7)} missing-local-directory`,
-            '',
-          ].join('\n'),
+          `${firstLine}\n${secondLine}\n`,
         ]);
       });
 
-      // priority: med
-      it.todo(
-        'prints managed skills before missing-local-directory entries in the output',
-      );
-    });
+      And('the command does not print errors', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+    },
+  );
 
-    describe('ordering', () => {
-      // priority: low
-      it.todo(
-        'orders local skill entries alphabetically (case-sensitive localeCompare) regardless of the filesystem listing order',
+  f.Scenario(
+    'Marks a local folder as unmanaged when it is not in the lockfile',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the skills source root already exists', () => {
+        ensureMockDirectory({
+          handle: mockFileSystem,
+          directoryPath: DEFAULT_SKILLS_SOURCE_ROOT,
+        });
+      });
+
+      And('a local skill folder is not listed in the lockfile', () => {
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: 'side-project',
+          files: { 'SKILL.md': 'x' },
+        });
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
+            version: 1,
+            skills: [managedLockfileEntry(FIRST_SKILL)],
+          }),
+        });
+        seedLocalSkillDirectory({
+          handle: mockFileSystem,
+          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+          skillName: FIRST_SKILL.name,
+          files: { 'SKILL.md': 'y' },
+        });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then('the output tags the extra folder as unmanaged', () => {
+        const managedLine = `- ${expectedManagedSkillSummaryFromFixture(FIRST_SKILL)}`;
+        expect(env.effectStdoutMessages).toEqual([
+          `${managedLine}\n- side-project unmanaged\n`,
+        ]);
+      });
+
+      And('the command does not print errors', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Lists managed, unmanaged, and missing-on-disk skills in one run',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the skills source root already exists', () => {
+        ensureMockDirectory({
+          handle: mockFileSystem,
+          directoryPath: DEFAULT_SKILLS_SOURCE_ROOT,
+        });
+      });
+
+      And(
+        'local folders exist for a managed skill and for a name not in the lockfile',
+        () => {
+          seedLocalSkillDirectory({
+            handle: mockFileSystem,
+            skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+            skillName: FIRST_SKILL.name,
+            files: { 'SKILL.md': 'a' },
+          });
+          seedLocalSkillDirectory({
+            handle: mockFileSystem,
+            skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+            skillName: 'side-project',
+            files: { 'SKILL.md': 'x' },
+          });
+        },
       );
 
-      // priority: low
-      it.todo(
-        'orders multiple missing-local-directory entries by their position in the (already name-sorted) lockfile skills array',
+      And(
+        'the lockfile lists the managed skill and another skill with no local folder',
+        () => {
+          storeMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+            content: JSON.stringify({
+              version: 1,
+              skills: [
+                managedLockfileEntry(FIRST_SKILL),
+                managedLockfileEntry(MISSING_LOCAL_SKILL),
+              ],
+            }),
+          });
+        },
       );
-    });
 
-    describe('lockfile edge cases', () => {
-      // priority: med
-      it.todo(
-        'treats a missing lockfile file identically to an empty lockfile (no managed annotations)',
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then(
+        'the output includes a managed line, an unmanaged line, and a missing-local line',
+        () => {
+          const managedLine = `- ${expectedManagedSkillSummaryFromFixture(FIRST_SKILL)}`;
+          const missingLine = `- ${expectedManagedSkillSummaryFromFixture(MISSING_LOCAL_SKILL)} missing-local-directory`;
+          expect(env.effectStdoutMessages).toEqual([
+            `${managedLine}\n- side-project unmanaged\n${missingLine}\n`,
+          ]);
+        },
       );
-    });
-  });
 
-  describe('sad paths', () => {
-    // priority: low
-    it.todo(
-      'rejects "dry-ai skills list" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
-    );
+      And('the command does not print errors', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+    },
+  );
 
-    describe('lockfile edge cases', () => {
-      // TODO(cli-user-message): when implemented, assert InvalidSkillsLockfile curated user line (present-error.ts).
-      // priority: low
-      it.todo(
-        'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',
-      );
-    });
-  });
+  f.Scenario(
+    'Marks managed skills missing on disk',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the skills source root already exists', () => {
+        ensureMockDirectory({
+          handle: mockFileSystem,
+          directoryPath: DEFAULT_SKILLS_SOURCE_ROOT,
+        });
+      });
+
+      And('the lockfile lists a skill with no local folder', () => {
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({
+            version: 1,
+            skills: [managedLockfileEntry(MISSING_LOCAL_SKILL)],
+          }),
+        });
+      });
+
+      When('I run skills list', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'list'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then('the output says the managed skill is missing locally', () => {
+        const line = `- ${expectedManagedSkillSummaryFromFixture(MISSING_LOCAL_SKILL)} missing-local-directory`;
+        expect(env.effectStdoutMessages).toEqual([`${line}\n`]);
+      });
+
+      And('the command does not print errors', () => {
+        expect(env.cmderStderrMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+    },
+  );
 });

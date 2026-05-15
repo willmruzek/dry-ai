@@ -2470,21 +2470,21 @@ defineFeature('dry-ai sync', (f) => {
 
             const report = stripAnsi(env.effectStdoutMessages.join(''));
             expect(report).toMatchInlineSnapshot(`
-        "Applied changes:
+              "Applied changes:
 
-        - Copilot
-          * commands
-            - shared (installed)
-          * skills
-            - shared (installed)
+              - Copilot
+                * commands
+                  - shared (installed)
+                * skills
+                  - shared (installed)
 
-        Skipped conflicts:
-        - command "shared" from /virtual/home/.config/dry-ai/commands/shared-command.md
-          * due to: Cursor skill name "shared"
-        - skill "shared" from /virtual/home/.config/dry-ai/skills/shared
-          * due to: Cursor skill name "shared"
-        "
-      `);
+              Skipped conflicts:
+              - command "shared" from /virtual/home/.config/dry-ai/commands/shared-command.md
+                * due to: Cursor skill name "shared"
+              - skill "shared" from /virtual/home/.config/dry-ai/skills/shared
+                * due to: Cursor skill name "shared"
+              "
+            `);
           },
         );
       },

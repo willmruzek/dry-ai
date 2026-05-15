@@ -59,6 +59,9 @@ export type MockFsFailures = {
   remove: Map<string, string>;
   copyDest: Map<string, string>;
   makeDirectory: Map<string, string>;
+  exists: Map<string, string>;
+  readDirectory: Map<string, string>;
+  stat: Map<string, string>;
 };
 
 function createEmptyMockFsSnapshot(): MockFsSnapshot {
@@ -79,6 +82,9 @@ function createEmptyMockFsFailures(): MockFsFailures {
     remove: new Map(),
     copyDest: new Map(),
     makeDirectory: new Map(),
+    exists: new Map(),
+    readDirectory: new Map(),
+    stat: new Map(),
   };
 }
 
@@ -375,7 +381,21 @@ export function mockFileSystemLayer(
 ): Layer<FileSystem> {
   return fileSystemLayerNoop({
     exists: (filePath: string) =>
-      Effect.sync(() => mockPathExistsSnapshot(handle.getSnapshot(), filePath)),
+      Effect.gen(function* () {
+        const norm = normalizeMockPath(filePath);
+        const failures = yield* Ref.get(handle.failuresRef);
+        const failMsg = failures.exists.get(norm);
+        if (failMsg !== undefined) {
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'exists',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: filePath,
+          });
+        }
+        return mockPathExistsSnapshot(handle.getSnapshot(), filePath);
+      }),
 
     makeDirectory: (directoryPath: string, options?: { recursive?: boolean }) =>
       Effect.gen(function* () {
@@ -488,45 +508,63 @@ export function mockFileSystemLayer(
         yield* Effect.sync(() => removeMockPath({ handle, targetPath }));
       }),
 
-    readDirectory: (directoryPath: string) => {
-      const snap = handle.getSnapshot();
-      const normalizedDirectoryPath = normalizeMockPath(directoryPath);
+    readDirectory: (directoryPath: string) =>
+      Effect.gen(function* () {
+        const normalizedDirectoryPath = normalizeMockPath(directoryPath);
+        const failures = yield* Ref.get(handle.failuresRef);
+        const failMsg = failures.readDirectory.get(normalizedDirectoryPath);
+        if (failMsg !== undefined) {
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'readDirectory',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: directoryPath,
+          });
+        }
 
-      if (!snap.directories.has(normalizedDirectoryPath)) {
-        return Effect.fail(
-          new SystemError({
+        const snap = yield* Ref.get(handle.snapshotRef);
+        if (!snap.directories.has(normalizedDirectoryPath)) {
+          return yield* new SystemError({
             module: 'FileSystem',
             method: 'readDirectory',
             reason: 'NotFound',
             description: 'No such file or directory',
             pathOrDescriptor: directoryPath,
-          }),
-        );
-      }
+          });
+        }
 
-      return Effect.sync(() =>
-        listMockDirectoryEntriesFromSnapshot(snap, directoryPath).map(
+        return listMockDirectoryEntriesFromSnapshot(snap, directoryPath).map(
           (entry) => entry.name,
-        ),
-      );
-    },
+        );
+      }),
 
-    stat: (filePath: string) => {
-      const snap = handle.getSnapshot();
+    stat: (filePath: string) =>
+      Effect.gen(function* () {
+        const norm = normalizeMockPath(filePath);
+        const failures = yield* Ref.get(handle.failuresRef);
+        const failMsg = failures.stat.get(norm);
+        if (failMsg !== undefined) {
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'stat',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: filePath,
+          });
+        }
 
-      if (!mockPathExistsSnapshot(snap, filePath)) {
-        return Effect.fail(
-          new SystemError({
+        const snap = yield* Ref.get(handle.snapshotRef);
+        if (!mockPathExistsSnapshot(snap, filePath)) {
+          return yield* new SystemError({
             module: 'FileSystem',
             method: 'stat',
             reason: 'NotFound',
             description: 'No such file or directory',
             pathOrDescriptor: filePath,
-          }),
-        );
-      }
+          });
+        }
 
-      return Effect.sync(() => {
         const mockStat = getMockStatResultFromSnapshot(snap, filePath);
 
         const info: File.Info = {
@@ -547,8 +585,7 @@ export function mockFileSystemLayer(
         };
 
         return info;
-      });
-    },
+      }),
 
     readFileString: (filePath: string) =>
       Effect.gen(function* () {
@@ -1201,6 +1238,54 @@ export function mockFailMakeDirectory(options: {
     Ref.update(handle.failuresRef, (f) =>
       produce(f, (draft) => {
         draft.makeDirectory.set(norm, message);
+      }),
+    ),
+  );
+}
+
+export function mockFailExists(options: {
+  handle: MockFileSystemHandle;
+  absolutePath: string;
+  message: string;
+}): void {
+  const { handle, absolutePath, message } = options;
+  const norm = normalizeMockPath(absolutePath);
+  Effect.runSync(
+    Ref.update(handle.failuresRef, (f) =>
+      produce(f, (draft) => {
+        draft.exists.set(norm, message);
+      }),
+    ),
+  );
+}
+
+export function mockFailReadDirectory(options: {
+  handle: MockFileSystemHandle;
+  absolutePath: string;
+  message: string;
+}): void {
+  const { handle, absolutePath, message } = options;
+  const norm = normalizeMockPath(absolutePath);
+  Effect.runSync(
+    Ref.update(handle.failuresRef, (f) =>
+      produce(f, (draft) => {
+        draft.readDirectory.set(norm, message);
+      }),
+    ),
+  );
+}
+
+export function mockFailStat(options: {
+  handle: MockFileSystemHandle;
+  absolutePath: string;
+  message: string;
+}): void {
+  const { handle, absolutePath, message } = options;
+  const norm = normalizeMockPath(absolutePath);
+  Effect.runSync(
+    Ref.update(handle.failuresRef, (f) =>
+      produce(f, (draft) => {
+        draft.stat.set(norm, message);
       }),
     ),
   );

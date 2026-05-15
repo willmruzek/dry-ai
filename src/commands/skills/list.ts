@@ -7,9 +7,9 @@ import {
   ensureSkillsRoot,
   findManagedSkill,
   formatManagedSkillSummary,
-  type LoadSkillsLockfileError,
   listLocalSkillDirectories,
   loadSkillsLockfile,
+  type LoadSkillsLockfileError,
 } from '../../lib/skills.js';
 import type {
   EnsureSkillsSourceRootError,
@@ -21,7 +21,7 @@ import type {
  * listing output. Composes with `Effect.runPromise` or `Effect.provide` in
  * tests without involving Commander.
  */
-export function skillsListEffect(options: {
+function skillsListEffect(options: {
   env: CommandEnv;
 }): Effect.Effect<
   void,

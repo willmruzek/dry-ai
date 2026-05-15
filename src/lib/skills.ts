@@ -430,7 +430,6 @@ export function removeManagedSkill(
 
 /**
  * List names of subdirectories under the skills source root (via Effect {@link FileSystem}).
- * Ensures the root exists, ignores non-directories, returns a sorted name list.
  *
  * Requires {@link FileSystem} (provide `env.runtime.fileSystemLayer` at the command root).
  */
@@ -442,8 +441,6 @@ export function listLocalSkillDirectories(
 
   return Effect.gen(function* () {
     const fs = yield* FileSystem;
-
-    yield* fs.makeDirectory(skillsRoot, { recursive: true });
 
     const names = yield* fs.readDirectory(skillsRoot);
 
