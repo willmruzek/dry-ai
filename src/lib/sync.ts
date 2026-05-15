@@ -7,7 +7,7 @@ import { Chalk } from 'chalk';
 import { Effect } from 'effect';
 import { Data } from 'effect';
 import * as Either from 'effect/Either';
-import * as ParseResult from 'effect/ParseResult';
+import type { ParseError } from 'effect/ParseResult';
 import * as Schema from 'effect/Schema';
 import { glob } from 'glob';
 import { z } from 'zod';
@@ -55,13 +55,6 @@ import {
 } from './fs.js';
 import { computeDirectoryHashes, pathExistsInFileSystem } from './skills.js';
 
-function platformErrorLine(error: PlatformError): string {
-  if (error._tag === 'SystemError' || error._tag === 'BadArgument') {
-    return error.message;
-  }
-  return String(error);
-}
-
 /** Skills: ensure `~/.config/.../skills` (or configured skills root) exists. */
 export class EnsureSkillsSourceRootError extends Data.TaggedError(
   'EnsureSkillsSourceRootError',
@@ -70,7 +63,7 @@ export class EnsureSkillsSourceRootError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Ensuring skills source root ${this.skillsRoot}: ${platformErrorLine(this.cause)}`;
+    return `Ensuring skills source root ${this.skillsRoot}`;
   }
 }
 
@@ -82,7 +75,7 @@ export class SkillsLockfileExistsCheckError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Checking skills lockfile exists ${this.lockfilePath}: ${platformErrorLine(this.cause)}`;
+    return `Checking skills lockfile exists ${this.lockfilePath}`;
   }
 }
 
@@ -94,7 +87,7 @@ export class SkillsLockfileReadContentsError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Reading skills lockfile ${this.lockfilePath}: ${platformErrorLine(this.cause)}`;
+    return `Reading skills lockfile ${this.lockfilePath}`;
   }
 }
 
@@ -106,7 +99,7 @@ export class SkillsLockfileWriteError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Writing skills lockfile ${this.lockfilePath}: ${platformErrorLine(this.cause)}`;
+    return `Writing skills lockfile ${this.lockfilePath}`;
   }
 }
 
@@ -115,10 +108,10 @@ export class SkillsLockfileEncodeError extends Data.TaggedError(
   'SkillsLockfileEncodeError',
 )<{
   readonly lockfilePath: string;
-  readonly cause: ParseResult.ParseError;
+  readonly cause: ParseError;
 }> {
   override get message(): string {
-    return `Encoding skills lockfile ${this.lockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(this.cause)}`;
+    return `Encoding skills lockfile ${this.lockfilePath}`;
   }
 }
 
@@ -130,7 +123,7 @@ export class ListSkillSubdirectoriesError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Listing skill directories under ${this.skillsRoot}: ${platformErrorLine(this.cause)}`;
+    return `Listing skill directories under ${this.skillsRoot}`;
   }
 }
 
@@ -143,7 +136,7 @@ export class GitCheckoutTempDirectoryError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Creating temporary directory for git checkout (prefix ${this.tempPrefix}): ${platformErrorLine(this.cause)}`;
+    return `Creating temporary directory for git checkout (prefix ${this.tempPrefix})`;
   }
 }
 
@@ -156,7 +149,7 @@ export class ReplaceManagedSkillOutputError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Replacing managed skill output at ${this.targetDir} (from ${this.sourceDir}): ${platformErrorLine(this.cause)}`;
+    return `Replacing managed skill output at ${this.targetDir} (from ${this.sourceDir})`;
   }
 }
 
@@ -168,7 +161,7 @@ export class RemoveManagedSkillDirectoryError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Removing managed skill directory ${this.directoryPath}: ${platformErrorLine(this.cause)}`;
+    return `Removing managed skill directory ${this.directoryPath}`;
   }
 }
 
@@ -180,7 +173,7 @@ export class SkillDirectoryWalkError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Listing files under skill directory ${this.directoryPath}: ${platformErrorLine(this.cause)}`;
+    return `Listing files under skill directory ${this.directoryPath}`;
   }
 }
 
@@ -193,7 +186,7 @@ export class SkillContentHashReadError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Reading skill file for hashing ${path.join(this.directoryPath, this.relativePath)}: ${platformErrorLine(this.cause)}`;
+    return `Reading skill file for hashing ${path.join(this.directoryPath, this.relativePath)}`;
   }
 }
 
@@ -205,7 +198,7 @@ export class RemoteSkillValidationFsError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Validating remote skill at ${this.sourceDir}: ${platformErrorLine(this.cause)}`;
+    return `Validating remote skill at ${this.sourceDir}`;
   }
 }
 
@@ -215,7 +208,7 @@ export class SyncStatPathError extends Data.TaggedError('SyncStatPathError')<{
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Inspecting path ${this.path}: ${platformErrorLine(this.cause)}`;
+    return `Inspecting path ${this.path}`;
   }
 }
 
@@ -227,7 +220,7 @@ export class GlobMarkdownFilesError extends Data.TaggedError(
   readonly cause: unknown;
 }> {
   override get message(): string {
-    return `Glob markdown files under ${this.rootDir}: ${String(this.cause)}`;
+    return `Glob markdown files under ${this.rootDir}`;
   }
 }
 

@@ -84,7 +84,7 @@ describe('ensureDirectory', () => {
         expect(error.directoryPath).toBe(directoryPath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('disk full');
+        expect(error.cause.message).toContain('disk full');
       }
     }),
   );
@@ -146,7 +146,7 @@ describe('readFileUtf8', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('permission denied');
+        expect(error.cause.message).toContain('permission denied');
       }
     }),
   );
@@ -175,7 +175,7 @@ describe('readFileUtf8', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('missing.txt');
+        expect(error.cause.message).toContain('missing.txt');
       }
     }),
   );
@@ -233,7 +233,7 @@ describe('writeTextFile', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('read-only filesystem');
+        expect(error.cause.message).toContain('read-only filesystem');
       }
     }),
   );
@@ -271,7 +271,7 @@ describe('writeTextFile', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('quota exceeded');
+        expect(error.cause.message).toContain('quota exceeded');
       }
     }),
   );
@@ -318,7 +318,7 @@ describe('removePath', () => {
         expect(error._tag).toBe('RemovePathError');
 
         expect(error.targetPath).toBe(targetPath);
-        expect(error.message).toContain('cannot delete');
+        expect(error.cause.message).toContain('cannot delete');
       }
     }),
   );
@@ -398,7 +398,7 @@ describe('emptyDirectory', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(EmptyDirError);
 
-        expect(error.message).toContain('busy');
+        expect(error.cause.message).toContain('busy');
       }
     }),
   );
@@ -429,7 +429,7 @@ describe('emptyDirectory', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(EmptyDirError);
 
-        expect(error.message).toContain('no space');
+        expect(error.cause.message).toContain('no space');
       }
     }),
   );
@@ -523,7 +523,7 @@ describe('copyDirectoryContents', () => {
         const error = failureOpt.value;
         expect(error).toBeInstanceOf(CopyDirectoryEntryError);
 
-        expect(error.message).toContain('copy blocked');
+        expect(error.cause.message).toContain('copy blocked');
       }
     }),
   );
@@ -561,7 +561,7 @@ describe('copyDirectoryContents', () => {
       if (Option.isSome(failureOpt)) {
         expect(failureOpt.value).toBeInstanceOf(EmptyDirError);
 
-        expect(failureOpt.value.message).toContain('target locked');
+        expect(failureOpt.value.cause.message).toContain('target locked');
       }
     }),
   );

@@ -74,7 +74,7 @@ describe('ensureDirectory', () => {
         expect(error.directoryPath).toBe(directoryPath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('disk full');
+        expect(error.cause.message).toContain('disk full');
       }
     }),
   );
@@ -135,7 +135,7 @@ describe('readFileUtf8', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('permission denied');
+        expect(error.cause.message).toContain('permission denied');
       }
     }),
   );
@@ -164,7 +164,7 @@ describe('readFileUtf8', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('missing.txt');
+        expect(error.cause.message).toContain('missing.txt');
       }
     }),
   );
@@ -222,7 +222,7 @@ describe('writeTextFile', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('read-only filesystem');
+        expect(error.cause.message).toContain('read-only filesystem');
       }
     }),
   );
@@ -260,7 +260,7 @@ describe('writeTextFile', () => {
         expect(error.filePath).toBe(filePath);
         expect(error.cause._tag).toBe('SystemError');
 
-        expect(error.message).toContain('quota exceeded');
+        expect(error.cause.message).toContain('quota exceeded');
       }
     }),
   );

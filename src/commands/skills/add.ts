@@ -46,7 +46,10 @@ import type {
   SkillsLockfileWriteError,
 } from '../../lib/sync.js';
 
-/** CLI validation failures for `skills add` (missing flags, conflicting options, blocked paths). */
+/**
+ * Error representing invalid `skills add` arguments or import preconditions
+ * (before remote fetch or install).
+ */
 export class SkillsAddValidationError extends Data.TaggedError(
   'SkillsAddValidationError',
 )<{
@@ -68,7 +71,10 @@ export class SkillsAddValidationError extends Data.TaggedError(
   }
 }
 
-/** Lockfile save failed after files were installed to disk. {@link cause} is that save/encode failure — not a rollback/removal failure (removal is best-effort). */
+/**
+ * Error representing failure to persist the skills lockfile after `skills add`
+ * already wrote the skill under {@link targetDir}.
+ */
 export class SkillsAddLockfilePersistAfterInstallError extends Data.TaggedError(
   'SkillsAddLockfilePersistAfterInstallError',
 )<{
@@ -76,9 +82,7 @@ export class SkillsAddLockfilePersistAfterInstallError extends Data.TaggedError(
   readonly cause: unknown;
 }> {
   override get message(): string {
-    const inner =
-      this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `Failed to persist skills lockfile after installing to ${this.targetDir}; attempted to remove installed files. ${inner}`;
+    return `Failed to persist skills lockfile after installing to ${this.targetDir} (installed files removal was attempted)`;
   }
 }
 

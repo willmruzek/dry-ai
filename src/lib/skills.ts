@@ -6,7 +6,7 @@ import type { PlatformError } from '@effect/platform/Error';
 import { SystemError } from '@effect/platform/Error';
 import { FileSystem } from '@effect/platform/FileSystem';
 import { Data, Effect, Schema } from 'effect';
-import * as ParseResult from 'effect/ParseResult';
+import type { ParseError } from 'effect/ParseResult';
 import { simpleGit } from 'simple-git';
 
 import type { CommandEnv } from './command-env.js';
@@ -81,10 +81,10 @@ export class InvalidSkillsLockfile extends Data.TaggedError(
   'InvalidSkillsLockfile',
 )<{
   readonly lockfilePath: string;
-  readonly cause: ParseResult.ParseError;
+  readonly cause: ParseError;
 }> {
   override get message(): string {
-    return `Invalid skills lockfile at ${this.lockfilePath}:\n${ParseResult.TreeFormatter.formatErrorSync(this.cause)}`;
+    return `Invalid skills lockfile at ${this.lockfilePath}`;
   }
 }
 
@@ -156,7 +156,7 @@ export class RemoteSkillDirectoryResolveError extends Data.TaggedError(
   readonly cause: unknown;
 }> {
   override get message(): string {
-    return `Could not resolve remote skill directory: ${String(this.cause)}`;
+    return 'Could not resolve remote skill directory';
   }
 }
 
@@ -168,9 +168,7 @@ export class FetchRemoteSkillError extends Data.TaggedError(
   readonly cause: unknown;
 }> {
   override get message(): string {
-    const inner =
-      this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `Failed to fetch skill from ${this.repo}: ${inner}`;
+    return `Failed to fetch skill from ${this.repo}`;
   }
 }
 
@@ -182,9 +180,7 @@ export class GitRemoteOperationError extends Data.TaggedError(
   readonly cause: unknown;
 }> {
   override get message(): string {
-    const inner =
-      this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `Failed to fetch repository from ${this.repo}: ${inner}`;
+    return `Failed to fetch repository from ${this.repo}`;
   }
 }
 

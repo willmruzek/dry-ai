@@ -4,20 +4,13 @@ import { SystemError, type PlatformError } from '@effect/platform/Error';
 import { FileSystem } from '@effect/platform/FileSystem';
 import { Data, Effect } from 'effect';
 
-function platformErrorLine(error: PlatformError): string {
-  if (error._tag === 'SystemError' || error._tag === 'BadArgument') {
-    return error.message;
-  }
-  return String(error);
-}
-
 /** Sync: create a directory before writing generated output. */
 export class EnsureDirError extends Data.TaggedError('EnsureDirError')<{
   readonly directoryPath: string;
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Creating directory ${this.directoryPath}: ${platformErrorLine(this.cause)}`;
+    return `Creating directory ${this.directoryPath}`;
   }
 }
 
@@ -27,7 +20,7 @@ export class ReadFileError extends Data.TaggedError('ReadFileError')<{
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Reading file ${this.filePath}: ${platformErrorLine(this.cause)}`;
+    return `Reading file ${this.filePath}`;
   }
 }
 
@@ -37,7 +30,7 @@ export class WriteFileError extends Data.TaggedError('WriteFileError')<{
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Writing file ${this.filePath}: ${platformErrorLine(this.cause)}`;
+    return `Writing file ${this.filePath}`;
   }
 }
 
@@ -47,7 +40,7 @@ export class RemovePathError extends Data.TaggedError('RemovePathError')<{
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Removing path ${this.targetPath}: ${platformErrorLine(this.cause)}`;
+    return `Removing path ${this.targetPath}`;
   }
 }
 
@@ -57,7 +50,7 @@ export class EmptyDirError extends Data.TaggedError('EmptyDirError')<{
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Emptying and preparing directory ${this.directoryPath}: ${platformErrorLine(this.cause)}`;
+    return `Emptying and preparing directory ${this.directoryPath}`;
   }
 }
 
@@ -69,7 +62,7 @@ export class PathExistsCheckError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Checking path exists ${this.filePath}: ${platformErrorLine(this.cause)}`;
+    return `Checking path exists ${this.filePath}`;
   }
 }
 
@@ -79,7 +72,7 @@ export class ReadDirectoryError extends Data.TaggedError('ReadDirectoryError')<{
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Reading directory ${this.directoryPath}: ${platformErrorLine(this.cause)}`;
+    return `Reading directory ${this.directoryPath}`;
   }
 }
 
@@ -92,7 +85,7 @@ export class CopyDirectoryEntryError extends Data.TaggedError(
   readonly cause: PlatformError;
 }> {
   override get message(): string {
-    return `Copying ${this.sourcePath} → ${this.targetPath}: ${platformErrorLine(this.cause)}`;
+    return `Copying ${this.sourcePath} → ${this.targetPath}`;
   }
 }
 
