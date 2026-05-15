@@ -3,6 +3,7 @@ import { recommended } from '@willmruzek/my-toolkit/eslint';
 const base = Array.isArray(recommended) ? recommended : [recommended];
 
 export default [
+  { ignores: ['repos/**'] },
   ...base,
   {
     // Compiled output — lint `src/` instead; avoids `no-undef` on Node globals in emitted JS.
