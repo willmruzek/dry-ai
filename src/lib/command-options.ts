@@ -33,6 +33,13 @@ export function areCliFailureDiagnosticsEnabled(root: RootOptions): boolean {
 }
 
 /**
+ * Whether `--test` or `--output-root` was passed so output is written outside the default home layout.
+ */
+export function wasRequestedOutputRootUsed(rootOptions: RootOptions): boolean {
+  return rootOptions.test || rootOptions.outputRoot !== undefined;
+}
+
+/**
  * Parses a value with a Zod schema, throwing a Commander InvalidArgumentError on failure.
  */
 function parseWithSchema<TSchema extends z.ZodTypeAny>({

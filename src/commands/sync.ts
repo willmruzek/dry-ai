@@ -3,6 +3,7 @@ import { Effect } from 'effect';
 
 import { runCliEffect } from '../cli/run-effect.js';
 import type { CommandEnv } from '../lib/command-env.js';
+import { wasRequestedOutputRootUsed } from '../lib/command-options.js';
 import { pathExistsInFileSystem } from '../lib/skills.js';
 import {
   applySyncChanges,
@@ -20,9 +21,9 @@ import {
 
 /**
  * Effect program: validate config root when overridden, ensure targets, load
- * manifest, compute and apply sync changes, persist manifest, then log the
- * report. Composes with `Effect.runPromise` or `Effect.provide` in tests
- * without involving Commander.
+ * manifest, compute and apply sync changes, persist manifest, log the report,
+ * and when `--test` or `--output-root` was used, log where output was written.
+ * Composes with `Effect.runPromise` or `Effect.provide` in tests without involving Commander.
  */
 export function syncEffect(options: {
   env: CommandEnv;
@@ -58,6 +59,12 @@ export function syncEffect(options: {
     );
 
     yield* Effect.logInfo(renderSyncReport(result, changes));
+
+    if (wasRequestedOutputRootUsed(rootOptions)) {
+      yield* Effect.logInfo(
+        `Generated output written to ${context.outputRoot}`,
+      );
+    }
   });
 }
 

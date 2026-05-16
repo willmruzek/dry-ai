@@ -1,6 +1,5 @@
 import type { FileSystem } from '@effect/platform/FileSystem';
 import { Command } from 'commander';
-import { Effect } from 'effect';
 import type { Layer } from 'effect/Layer';
 
 import { addSkillsCommand } from './commands/skills/index.js';
@@ -60,13 +59,6 @@ function getRootOptions(program: Command): RootOptions {
     options: program.opts(),
     optionsLabel: 'root options',
   });
-}
-
-/**
- * Returns true if --test or --output-root was passed.
- */
-function wasRequestedOutputRootUsed(rootOptions: RootOptions): boolean {
-  return rootOptions.test || rootOptions.outputRoot !== undefined;
 }
 
 /**
@@ -210,21 +202,7 @@ export function createCLI(options: CLIOptions): Command {
       `Sync generated output into ${describeSupportedAgents()} targets`,
     )
     .action(async () => {
-      const rootOptions = getRootOptions(program);
-      const env = resolveEnv();
-
-      await runSyncCommand(env);
-
-      if (wasRequestedOutputRootUsed(rootOptions)) {
-        const notice = Effect.logInfo(
-          `Generated output written to ${env.context.outputRoot}`,
-        );
-        await Effect.runPromise(
-          runtime.loggerLayer !== undefined
-            ? notice.pipe(Effect.provide(runtime.loggerLayer))
-            : notice,
-        );
-      }
+      await runSyncCommand(resolveEnv());
     });
 
   addSkillsCommand({
