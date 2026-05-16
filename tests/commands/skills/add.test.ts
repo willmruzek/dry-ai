@@ -1,13 +1,15 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineFeature } from '@amiceli/vitest-cucumber';
+import { expect, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
 
 import {
   DEFAULT_CONFIG_ROOT,
   DEFAULT_SKILLS_LOCKFILE_PATH,
+  DEFAULT_SKILLS_SOURCE_ROOT,
   type MockFileSystemHandle,
   SAMPLE_IMPORTED_AT,
   type TestEnv,
@@ -20,26 +22,106 @@ import {
   createTestEnv as createBaseTestEnv,
   hashFileSet,
   isAgentsSkillCloneCheckoutDir,
-  mockPathExists,
+  mockFailExists,
+  mockFailMakeDirectory,
+  mockFailReadFileBytes,
+  mockFailReadFileString,
+  mockFailRemove,
+  mockFailWriteFile,
+  normalizeMockPath,
   readMockTextFile,
   seedRemoteSkillCheckout,
   storeMockTextFile,
 } from '../../helpers.js';
 
-// `skills add` tests exercise an *explicit* config root (not the default),
-// so the local `SKILLS_LOCKFILE_PATH` intentionally points under `CONFIG_ROOT`
-// rather than reusing the shared `DEFAULT_SKILLS_LOCKFILE_PATH` export.
-const CONFIG_ROOT = '/virtual/config';
-const SKILLS_LOCKFILE_PATH = path.join(CONFIG_ROOT, 'skills.lock.json');
+const SKILLS_LOCKFILE_PATH = DEFAULT_SKILLS_LOCKFILE_PATH;
+const FETCHED_COMMIT = 'abcdef1234567890';
+const REPO_SHORT = 'anthropics/skills';
+const NORMALIZED_REPO = 'https://github.com/anthropics/skills.git';
 const MANAGED_SKILL_NAME = 'review-helper';
 const MANAGED_SKILL_PATH = 'skills/review-helper';
-const FETCHED_COMMIT = 'abcdef1234567890';
 
 const REMOTE_SKILL_FILES = {
   'SKILL.md': '---\nname: review-helper\n---\n\n# Review Helper\n',
   'guides/checklist.md': '- verify tests\n',
   'rules.md': 'Check edge cases.\n',
 } as const;
+
+const SECOND_SKILL_NAME = 'note-taker';
+const SECOND_SKILL_PATH = 'skills/note-taker';
+const SECOND_SKILL_FILES = {
+  'SKILL.md': '---\nname: note-taker\n---\n\n# Note Taker\n',
+} as const;
+
+const PATH_TOOLS_SKILL_PATH = 'tools/review-helper';
+const PATH_DOT_SKILL = 'my-skill';
+const PATH_DOT_SKILL_FILES = {
+  'SKILL.md': '---\nname: my-skill\n---\n\n# My Skill\n',
+} as const;
+
+const invalidLockfileLine = `Could not parse the skills lockfile (${SKILLS_LOCKFILE_PATH}). Fix JSON/schema errors in that file.\n`;
+
+const agentsSkillTempPrefix = normalizeMockPath(
+  path.join('/virtual/tmp', 'agents-skill.'),
+);
+
+function wrapTestEnv(mockFileSystem: MockFileSystemHandle): TestEnv {
+  return createBaseTestEnv({
+    defaultConfigRoot: DEFAULT_CONFIG_ROOT,
+    defaultOutputRoot: VIRTUAL_HOME_DIR,
+    mockFileSystem,
+  });
+}
+
+function assertNoAgentsSkillCheckoutDirs(handle: MockFileSystemHandle): void {
+  expect(
+    [...handle.directories].filter((d) =>
+      path.basename(d).startsWith('agents-skill.'),
+    ),
+  ).toEqual([]);
+}
+
+function configureDefaultRemoteCheckout(handle: MockFileSystemHandle): void {
+  configureMockGitClient({
+    mockedGit,
+    fetchedCommit: FETCHED_COMMIT,
+    checkoutImplementation: async (repoRoot) => {
+      if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+        return;
+      }
+      seedRemoteSkillCheckout({
+        handle,
+        checkoutDir: repoRoot,
+        skillPath: MANAGED_SKILL_PATH,
+        files: REMOTE_SKILL_FILES,
+      });
+    },
+  });
+}
+
+function configureTwoSkillsRemote(handle: MockFileSystemHandle): void {
+  configureMockGitClient({
+    mockedGit,
+    fetchedCommit: FETCHED_COMMIT,
+    checkoutImplementation: async (repoRoot) => {
+      if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+        return;
+      }
+      seedRemoteSkillCheckout({
+        handle,
+        checkoutDir: repoRoot,
+        skillPath: MANAGED_SKILL_PATH,
+        files: REMOTE_SKILL_FILES,
+      });
+      seedRemoteSkillCheckout({
+        handle,
+        checkoutDir: repoRoot,
+        skillPath: SECOND_SKILL_PATH,
+        files: SECOND_SKILL_FILES,
+      });
+    },
+  });
+}
 
 vi.mock('simple-git', () => ({
   simpleGit: vi.fn(),
@@ -52,413 +134,826 @@ vi.mock('node:os', () => ({
   },
 }));
 
-// `vi.mocked` is a pure type helper: it returns the mocked default export but
-// types each method as `MockedFunction<typeof fs.method>`, so
-// `.mockResolvedValue` / `.mockReturnValue` calls are checked against the real
-// module signatures without any explicit casts.
 const mockedOs = vi.mocked(os);
-
-// `mockedGit` stubs the subset of simple-git's chain used by `cloneRemoteRepo`.
-// It's wired into the `simpleGit(...)` factory by `configureMockGitClient`.
 const mockedGit = createMockedGit();
 
-/**
- * Creates a test environment with the virtual config and output roots pre-filled.
- */
-function createTestEnv({
-  defaultConfigRoot = DEFAULT_CONFIG_ROOT,
-  defaultOutputRoot = VIRTUAL_HOME_DIR,
-  mockFileSystem,
-}: {
-  defaultConfigRoot?: string;
-  defaultOutputRoot?: string;
-  mockFileSystem?: MockFileSystemHandle;
-} = {}): TestEnv {
-  return createBaseTestEnv({
-    defaultConfigRoot,
-    defaultOutputRoot,
-    ...(mockFileSystem !== undefined ? { mockFileSystem } : {}),
-  });
-}
-
-describe('dry-ai skills add', () => {
+defineFeature('dry-ai skills add', (f) => {
   let mockFileSystem: MockFileSystemHandle;
 
-  beforeEach(() => {
+  f.BeforeEachScenario(() => {
     mockFileSystem = createMockFileSystemState();
-
     configureMockFileSystem({
       handle: mockFileSystem,
       lockfilePath: SKILLS_LOCKFILE_PATH,
     });
-    configureMockGitClient({
-      mockedGit,
-      fetchedCommit: FETCHED_COMMIT,
-      checkoutImplementation: async (repoRoot) => {
-        if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
-          return;
-        }
-        seedRemoteSkillCheckout({
-          handle: mockFileSystem,
-          checkoutDir: repoRoot,
-          skillPath: MANAGED_SKILL_PATH,
-          files: REMOTE_SKILL_FILES,
-        });
-      },
-    });
+    configureDefaultRemoteCheckout(mockFileSystem);
     configureMockOs({
-      mockedOs: mockedOs,
+      mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
-
+    mockedGit.fetch.mockClear();
+    mockedGit.init.mockClear();
+    mockedGit.addRemote.mockClear();
+    mockedGit.checkout.mockClear();
+    mockedGit.revparse.mockClear();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(SAMPLE_IMPORTED_AT));
   });
 
-  afterEach(() => {
+  f.AfterEachScenario(() => {
     vi.useRealTimers();
   });
 
-  describe('happy paths', () => {
-    // TODO(cli-user-message): add failure runCLI scenario for EnsureSkillsSourceRootError if skills root cannot be created (present-error.ts).
-    describe('single skill import', () => {
-      it.each([
-        ['anthropics/skills'],
-        ['anthropics/skills.git'],
-        ['https://github.com/anthropics/skills.git'],
-      ])('imports one skill when repo is provided as %s', async (repo) => {
-        // Arrange
-        const env = createTestEnv({ mockFileSystem });
-        const defaultSkillsLockfilePath = path.join(
-          env.defaultConfigRoot,
-          'skills.lock.json',
-        );
-        const defaultSkillsSourceRoot = path.join(
-          env.defaultConfigRoot,
-          'skills',
-        );
-        const normalizedRepo = 'https://github.com/anthropics/skills.git';
-        const expectedFileHashes = hashFileSet(REMOTE_SKILL_FILES);
-        const targetSkillDir = path.join(
-          defaultSkillsSourceRoot,
-          MANAGED_SKILL_NAME,
-        );
-
-        // Act
+  f.Scenario(
+    'The command requires at least one `--skill` when adding from a repository',
+    ({ When, Then, And }) => {
+      let env: TestEnv;
+      When('I run add with a repo but omit `--skill`', async () => {
+        env = wrapTestEnv(mockFileSystem);
         await runCLI({
-          argv: ['skills', 'add', repo, '--skill', 'review-helper'],
+          argv: ['skills', 'add', REPO_SHORT],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see the no-skills validation line on stderr', () => {
+        expect(env.effectStderrMessages).toEqual([
+          'At least one skill name must be provided with --skill\n',
+        ]);
+      });
+      And('stdout has no effect log lines', () => {
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+      And('nothing changes the skills lockfile', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    '`--as` may only be used when importing exactly one skill',
+    ({ When, Then, And }) => {
+      let env: TestEnv;
+      When('I pass `--as` with two skill names', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
+            '--skill',
+            MANAGED_SKILL_NAME,
+            SECOND_SKILL_NAME,
+            '--as',
+            'alias',
+          ],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see the as-requires-single-skill line on stderr', () => {
+        expect(env.effectStderrMessages).toEqual([
+          '--as may only be used when importing exactly one skill\n',
+        ]);
+      });
+      And('stdout has no effect log lines', () => {
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+      And('nothing changes the skills lockfile', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Import stops if the local skill folder already exists but the skill is not managed yet',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given(
+        'a skill directory on disk has files but the lockfile does not list it',
+        () => {
+          const skillDir = path.join(
+            DEFAULT_SKILLS_SOURCE_ROOT,
+            MANAGED_SKILL_NAME,
+          );
+          storeMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(skillDir, 'SKILL.md'),
+            content: REMOTE_SKILL_FILES['SKILL.md'],
+          });
+        },
+      );
+      When('I try to add that skill from the remote', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see the target directory exists line on stderr', () => {
+        const skillDir = normalizeMockPath(
+          path.join(DEFAULT_SKILLS_SOURCE_ROOT, MANAGED_SKILL_NAME),
+        );
+        expect(env.effectStderrMessages).toEqual([
+          `A local skill directory already exists: ${skillDir}\n`,
+        ]);
+      });
+      And('stdout has no effect log lines', () => {
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+      And('no managed skill entry is persisted in the lockfile', () => {
+        const raw = readMockTextFile({
+          handle: mockFileSystem,
+          filePath: SKILLS_LOCKFILE_PATH,
+        });
+        const parsed = JSON.parse(raw) as { skills: { name: string }[] };
+        expect(parsed.skills.some((s) => s.name === MANAGED_SKILL_NAME)).toBe(
+          false,
+        );
+      });
+    },
+  );
+
+  f.Scenario(
+    '`dry-ai skills add` rejects a flag that is not defined',
+    ({ When, Then, And }) => {
+      let env: TestEnv;
+      When('I run add with `--bogus`', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--bogus', '--skill', 'x'],
+          ...env.cliOptions,
+          exitOverride: true,
+        }).catch(() => undefined);
+      });
+      Then('Commander reports an unknown option on its stderr stream', () => {
+        expect(env.cmderStderrMessages).toEqual([
+          "error: unknown option '--bogus'\n",
+        ]);
+      });
+      And('Commander does not write help text to stdout', () => {
+        expect(env.cmderStdoutMessages).toEqual([]);
+      });
+      And('the Effect logger stays quiet', () => {
+        expect(env.effectStdoutMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+      And('the command stops before changing skills or the lockfile', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    '`dry-ai skills add` rejects extra arguments after the repository',
+    ({ When, Then, And }) => {
+      let env: TestEnv;
+      When('I pass another positional token after the repo', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
+            'extra-arg',
+            '--skill',
+            MANAGED_SKILL_NAME,
+          ],
+          ...env.cliOptions,
+          exitOverride: true,
+        }).catch(() => undefined);
+      });
+      Then('Commander reports too many arguments on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([
+          "error: too many arguments for 'add'. Expected 1 argument but got 2.\n",
+        ]);
+      });
+      And('Commander does not write help text to stdout', () => {
+        expect(env.cmderStdoutMessages).toEqual([]);
+      });
+      And('the Effect logger stays quiet', () => {
+        expect(env.effectStdoutMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+      And('the command stops before changing skills or the lockfile', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    '`dry-ai skills add` requires the repository argument',
+    ({ When, Then, And }) => {
+      let env: TestEnv;
+      When('I run add without a `<repo>` value', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+          exitOverride: true,
+        }).catch(() => undefined);
+      });
+      Then('Commander reports a missing repo argument on stderr', () => {
+        expect(env.cmderStderrMessages).toEqual([
+          "error: missing required argument 'repo'\n",
+        ]);
+      });
+      And('Commander does not write help text to stdout', () => {
+        expect(env.cmderStdoutMessages).toEqual([]);
+      });
+      And('the Effect logger stays quiet', () => {
+        expect(env.effectStdoutMessages).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+      And('the command stops before changing skills or the lockfile', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if the skills directory cannot be created',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given(
+        'creating the skills source root is set up to fail (simulated)',
+        () => {
+          mockFailMakeDirectory({
+            handle: mockFileSystem,
+            absolutePath: DEFAULT_SKILLS_SOURCE_ROOT,
+            message: 'mkdir skills root failed (test)',
+          });
+        },
+      );
+      When('I run a normal import', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then(
+        'I see an error that the skills directory could not be created',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not create the skills directory: ${DEFAULT_SKILLS_SOURCE_ROOT}\n`,
+          ]);
+        },
+      );
+      And('nothing writes the lockfile', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if the skills lockfile cannot be checked',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given('checking whether the lockfile exists fails (simulated)', () => {
+        mockFailExists({
+          handle: mockFileSystem,
+          absolutePath: SKILLS_LOCKFILE_PATH,
+          message: 'exists failed (test)',
+        });
+      });
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see an error that the lockfile could not be checked', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Could not check the skills lockfile: ${SKILLS_LOCKFILE_PATH}\n`,
+        ]);
+      });
+      And('no lockfile writes are recorded', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if the skills lockfile cannot be read',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given('a lockfile exists but reading it fails (simulated)', () => {
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({ version: 1, skills: [] }),
+        });
+        mockFailReadFileString({
+          handle: mockFileSystem,
+          absolutePath: SKILLS_LOCKFILE_PATH,
+          message: 'read failed (test)',
+        });
+      });
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see an error that the lockfile could not be read', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Could not read the skills lockfile: ${SKILLS_LOCKFILE_PATH}\n`,
+        ]);
+      });
+      And('no successful import occurs', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if the existing lockfile is invalid',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given('the lockfile on disk is not valid JSON', () => {
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: SKILLS_LOCKFILE_PATH,
+          content: '{"version":1,"skills":[}',
+        });
+      });
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see an error explaining the lockfile could not be parsed', () => {
+        expect(env.effectStderrMessages).toEqual([invalidLockfileLine]);
+      });
+      And(
+        'the broken lockfile is not overwritten by a successful import',
+        () => {
+          expect(env.effectStdoutMessages).toEqual([]);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if cloning the repository fails',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given('git fetch is configured to reject', () => {
+        mockedGit.fetch.mockRejectedValue(
+          new Error('simulated network failure'),
+        );
+      });
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see an error that the repository could not be fetched', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Failed to fetch repository from ${NORMALIZED_REPO}\n`,
+        ]);
+      });
+      And('no import or lockfile update from the import runs', () => {
+        expect(
+          mockFileSystem.files.has(
+            path.join(
+              DEFAULT_SKILLS_SOURCE_ROOT,
+              MANAGED_SKILL_NAME,
+              'SKILL.md',
+            ),
+          ),
+        ).toBe(false);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if a temporary clone directory cannot be created',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given(
+        'creating the temp clone directory is set up to fail (simulated)',
+        () => {
+          mockFailMakeDirectory({
+            handle: mockFileSystem,
+            absolutePath: agentsSkillTempPrefix,
+            message: 'mkdtemp failed (test)',
+          });
+        },
+      );
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see an error about the temporary clone directory', () => {
+        expect(env.effectStderrMessages).toEqual([
+          'Could not create a temporary directory for cloning (prefix agents-skill.).\n',
+        ]);
+      });
+      And('no managed skill directory is created', () => {
+        expect(mockPathExistsInSkills(MANAGED_SKILL_NAME)).toBe(false);
+      });
+    },
+  );
+
+  function mockPathExistsInSkills(skillName: string): boolean {
+    return mockFileSystem.files.has(
+      path.join(DEFAULT_SKILLS_SOURCE_ROOT, skillName, 'SKILL.md'),
+    );
+  }
+
+  f.Scenario(
+    'Add stops with an error if the skill path is missing in the cloned repository',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given('the checkout seeds no matching skill tree', () => {
+        configureMockGitClient({
+          mockedGit,
+          fetchedCommit: FETCHED_COMMIT,
+          checkoutImplementation: async (repoRoot) => {
+            if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+              return;
+            }
+            // empty checkout
+          },
+        });
+      });
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see that the skill path was not found in the repository', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `That skill path was not found in the repository: ${MANAGED_SKILL_PATH}\n`,
+        ]);
+      });
+      And('temporary clone directories are cleaned up', () => {
+        assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if installing the copied skill onto disk fails',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      const targetDir = normalizeMockPath(
+        path.join(DEFAULT_SKILLS_SOURCE_ROOT, MANAGED_SKILL_NAME),
+      );
+      Given(
+        'removing the destination skill directory fails during install (simulated)',
+        () => {
+          mockFailRemove({
+            handle: mockFileSystem,
+            absolutePath: targetDir,
+            message: 'replace-remove failed (test)',
+          });
+        },
+      );
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then(
+        'I see an error that files could not be installed into the skill folder',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not install skill files into: ${targetDir}\n`,
+          ]);
+        },
+      );
+      And('temporary clone directories are cleaned up', () => {
+        assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Add stops with an error if hashing the remote snapshot fails before install',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given(
+        'the remote checkout is seeded but reading SKILL.md for hashing fails (simulated)',
+        () => {
+          configureMockGitClient({
+            mockedGit,
+            fetchedCommit: FETCHED_COMMIT,
+            checkoutImplementation: async (repoRoot) => {
+              if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+                return;
+              }
+              seedRemoteSkillCheckout({
+                handle: mockFileSystem,
+                checkoutDir: repoRoot,
+                skillPath: MANAGED_SKILL_PATH,
+                files: REMOTE_SKILL_FILES,
+              });
+              const skillMd = normalizeMockPath(
+                path.join(
+                  repoRoot,
+                  ...MANAGED_SKILL_PATH.split('/'),
+                  'SKILL.md',
+                ),
+              );
+              mockFailReadFileBytes({
+                handle: mockFileSystem,
+                absolutePath: skillMd,
+                message: 'hash read failed (test)',
+              });
+            },
+          });
+        },
+      );
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see an error while hashing the skill content', () => {
+        const msg = env.effectStderrMessages[0] ?? '';
+        expect(msg).toContain(
+          'Could not read file while hashing skill content',
+        );
+      });
+      And('temporary clone directories are cleaned up', () => {
+        assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+      });
+    },
+  );
+
+  f.Scenario(
+    'If saving the lockfile fails after files were installed, the skill folder is rolled back and a specific error is shown',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given(
+        'the lockfile already exists so setup does not need to write it, but persisting after install fails (simulated)',
+        () => {
+          storeMockTextFile({
+            handle: mockFileSystem,
+            filePath: SKILLS_LOCKFILE_PATH,
+            content: JSON.stringify({ version: 1, skills: [] }),
+          });
+          mockFailWriteFile({
+            handle: mockFileSystem,
+            absolutePath: SKILLS_LOCKFILE_PATH,
+            message: 'save after install failed (test)',
+          });
+        },
+      );
+      When('I run add', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('I see the lockfile-after-install failure line', () => {
+        const targetDir = normalizeMockPath(
+          path.join(DEFAULT_SKILLS_SOURCE_ROOT, MANAGED_SKILL_NAME),
+        );
+        expect(env.effectStderrMessages).toEqual([
+          `Failed to persist skills lockfile after installing to ${targetDir} (installed files removal was attempted)\n`,
+        ]);
+      });
+      And('the installed skill directory is removed', () => {
+        expect(mockPathExistsInSkills(MANAGED_SKILL_NAME)).toBe(false);
+        assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+      });
+    },
+  );
+
+  f.Scenario(
+    'When importing two skills, a failure on the second leaves the first import and lockfile entry in place',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given(
+        'both skills exist remotely but replacing the second fails during install (simulated)',
+        () => {
+          configureTwoSkillsRemote(mockFileSystem);
+          const secondDir = normalizeMockPath(
+            path.join(DEFAULT_SKILLS_SOURCE_ROOT, SECOND_SKILL_NAME),
+          );
+          mockFailRemove({
+            handle: mockFileSystem,
+            absolutePath: secondDir,
+            message: 'second replace failed (test)',
+          });
+        },
+      );
+      When('I import both in one invocation', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
+            '--skill',
+            MANAGED_SKILL_NAME,
+            SECOND_SKILL_NAME,
+          ],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+      Then('the first skill is on disk with remote bytes', () => {
+        expect(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: path.join(
+              DEFAULT_SKILLS_SOURCE_ROOT,
+              MANAGED_SKILL_NAME,
+              'SKILL.md',
+            ),
+          }),
+        ).toBe(REMOTE_SKILL_FILES['SKILL.md']);
+      });
+      And('the lockfile lists the first skill and not the second', () => {
+        const saved = JSON.parse(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: SKILLS_LOCKFILE_PATH,
+          }),
+        ) as { skills: { name: string }[] };
+        expect(saved.skills.map((s) => s.name)).toEqual([MANAGED_SKILL_NAME]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Importing one skill from a GitHub shorthand repo records the normalized URL and copies every file',
+    ({ When, Then, And }) => {
+      let env: TestEnv;
+      When('I run add for review-helper', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: ['skills', 'add', REPO_SHORT, '--skill', MANAGED_SKILL_NAME],
           ...env.cliOptions,
         });
-
-        // Assert: success message emitted via Effect Logger; Commander quiet.
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
+      });
+      Then('I see one Imported line with the short commit id', () => {
         expect(env.effectStdoutMessages).toEqual([
-          `Imported ${MANAGED_SKILL_NAME} repo=${normalizedRepo} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+          `Imported ${MANAGED_SKILL_NAME} repo=${NORMALIZED_REPO} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
         ]);
-
-        // Assert: git clone sequence executed correctly
+      });
+      And('I see no warnings', () => {
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+      And('git ran the expected clone sequence', () => {
         expect(mockedGit.init).toHaveBeenCalled();
         expect(mockedGit.addRemote).toHaveBeenCalledWith(
           'origin',
-          normalizedRepo,
+          NORMALIZED_REPO,
         );
         expect(mockedGit.fetch).toHaveBeenCalledWith('origin', 'HEAD', [
           '--depth',
           '1',
         ]);
-        expect(mockedGit.checkout).toHaveBeenCalledWith([
-          '--quiet',
-          'FETCH_HEAD',
-        ]);
-        expect(mockedGit.revparse).toHaveBeenCalledWith(['HEAD']);
-
-        // Assert: lockfile written twice — once to initialize, once with the added skill
-        const savedLockfile = JSON.parse(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: defaultSkillsLockfilePath,
-          }),
-        ) as unknown;
-        expect(savedLockfile).toEqual({
-          version: 1,
-          skills: [
-            {
-              commit: FETCHED_COMMIT,
-              files: expectedFileHashes,
-              importedAt: SAMPLE_IMPORTED_AT,
-              name: MANAGED_SKILL_NAME,
-              path: MANAGED_SKILL_PATH,
-              repo: normalizedRepo,
-              updatedAt: SAMPLE_IMPORTED_AT,
-            },
-          ],
-        });
-
-        // Assert: skill files copied into the config source root
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(targetSkillDir, 'SKILL.md'),
-          }),
-        ).toBe(REMOTE_SKILL_FILES['SKILL.md']);
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(targetSkillDir, 'guides', 'checklist.md'),
-          }),
-        ).toBe(REMOTE_SKILL_FILES['guides/checklist.md']);
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(targetSkillDir, 'rules.md'),
-          }),
-        ).toBe(REMOTE_SKILL_FILES['rules.md']);
-
-        // Assert: both temporary directories (checkout and staging) cleaned up after import
-        expect(mockFileSystem.tempDirectories).toHaveLength(2);
-        const [checkoutDirectory, stagingDirectory] =
-          mockFileSystem.tempDirectories;
-
-        if (!checkoutDirectory || !stagingDirectory) {
-          throw new Error('Expected exactly two temporary directories.');
-        }
-
-        expect(checkoutDirectory).toMatch(
-          /^\/virtual\/tmp\/agents-skill\.\d+$/,
-        );
-        expect(
-          mockPathExists({
-            handle: mockFileSystem,
-            targetPath: checkoutDirectory,
-          }),
-        ).toBe(false);
-        expect(
-          mockPathExists({
-            handle: mockFileSystem,
-            targetPath: stagingDirectory,
-          }),
-        ).toBe(false);
       });
-    });
+      And('the lockfile holds the new skill with file hashes', () => {
+        const saved = JSON.parse(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: SKILLS_LOCKFILE_PATH,
+          }),
+        ) as { skills: Record<string, unknown>[] };
+        expect(saved.skills).toHaveLength(1);
+        expect(saved.skills[0]).toMatchObject({
+          name: MANAGED_SKILL_NAME,
+          path: MANAGED_SKILL_PATH,
+          repo: NORMALIZED_REPO,
+          commit: FETCHED_COMMIT,
+        });
+      });
+    },
+  );
 
-    describe('flag variations', () => {
-      it('stores the resolved commit as the lockfile ref when --pin is passed without --ref', async () => {
-        const env = createTestEnv({ mockFileSystem });
-        const defaultSkillsLockfilePath = path.join(
-          env.defaultConfigRoot,
-          'skills.lock.json',
-        );
-
+  f.Scenario(
+    'With `--pin`, the lockfile ref stores the resolved commit hash',
+    ({ When, Then }) => {
+      let env: TestEnv;
+      When('I add with `--pin`', async () => {
+        env = wrapTestEnv(mockFileSystem);
         await runCLI({
           argv: [
             'skills',
             'add',
-            'anthropics/skills',
+            REPO_SHORT,
             '--skill',
             MANAGED_SKILL_NAME,
             '--pin',
           ],
           ...env.cliOptions,
         });
-
-        const savedLockfile = JSON.parse(
+      });
+      Then('the saved entry `ref` equals the fetched commit', () => {
+        const saved = JSON.parse(
           readMockTextFile({
             handle: mockFileSystem,
-            filePath: defaultSkillsLockfilePath,
+            filePath: SKILLS_LOCKFILE_PATH,
           }),
         ) as { skills: { ref: string }[] };
-
-        expect(savedLockfile.skills[0]?.ref).toBe(FETCHED_COMMIT);
+        expect(saved.skills[0]?.ref).toBe(FETCHED_COMMIT);
       });
+    },
+  );
 
-      // priority: med
-      it.todo(
-        'stores the provided --ref string in the lockfile instead of the commit hash when --pin is not set',
-      );
-
-      // priority: low
-      it.todo(
-        'stores the resolved commit as the lockfile ref when --pin is passed together with --ref (commit wins over the requested ref)',
-      );
-
-      // priority: med
-      it.todo(
-        'stores the skill under the --as name in the lockfile and on disk',
-      );
-
-      // priority: med
-      it.todo(
-        'resolves each skill path relative to --path instead of the default skills/ directory',
-      );
-
-      // priority: med
-      it.todo(
-        'resolves each skill from the repository root when --path . is passed',
-      );
-
-      // priority: low
-      it.todo(
-        'defaults the managed skill name to the repository name when --path . is passed without --as',
-      );
-    });
-
-    describe('multiple skills', () => {
-      it('imports multiple skills in one invocation and writes the lockfile once per skill', async () => {
-        // Arrange: seed two skills into the same remote checkout. Use a fresh
-        // mock FS so lockfile tracking targets DEFAULT_SKILLS_LOCKFILE_PATH
-        // (the shared `beforeEach` tracks SKILLS_LOCKFILE_PATH under CONFIG_ROOT).
-        const SECOND_SKILL_NAME = 'note-taker';
-        const SECOND_SKILL_PATH = 'skills/note-taker';
-        const SECOND_SKILL_FILES = {
-          'SKILL.md': '---\nname: note-taker\n---\n\n# Note Taker\n',
-        } as const;
-
-        mockFileSystem = createMockFileSystemState();
-        configureMockFileSystem({
-          handle: mockFileSystem,
-          lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-        });
-        configureMockGitClient({
-          mockedGit,
-          fetchedCommit: FETCHED_COMMIT,
-          checkoutImplementation: async (repoRoot) => {
-            if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
-              return;
-            }
-            seedRemoteSkillCheckout({
-              handle: mockFileSystem,
-              checkoutDir: repoRoot,
-              skillPath: MANAGED_SKILL_PATH,
-              files: REMOTE_SKILL_FILES,
-            });
-            seedRemoteSkillCheckout({
-              handle: mockFileSystem,
-              checkoutDir: repoRoot,
-              skillPath: SECOND_SKILL_PATH,
-              files: SECOND_SKILL_FILES,
-            });
-          },
-        });
-
-        const env = createTestEnv({ mockFileSystem });
-        const skillsSourceRoot = path.join(env.defaultConfigRoot, 'skills');
-        const normalizedRepo = 'https://github.com/anthropics/skills.git';
-
-        // Act
+  f.Scenario(
+    'Without `--pin`, the lockfile ref stores the requested git ref string',
+    ({ When, Then, And }) => {
+      let env: TestEnv;
+      When('I add with `--ref topic-branch` and no `--pin`', async () => {
+        env = wrapTestEnv(mockFileSystem);
         await runCLI({
           argv: [
             'skills',
             'add',
-            'anthropics/skills',
+            REPO_SHORT,
             '--skill',
             MANAGED_SKILL_NAME,
-            SECOND_SKILL_NAME,
+            '--ref',
+            'topic-branch',
           ],
           ...env.cliOptions,
         });
-
-        // Assert: one "Imported ..." line per skill, emitted in input order.
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
-        expect(env.effectStdoutMessages).toEqual([
-          `Imported ${MANAGED_SKILL_NAME} repo=${normalizedRepo} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
-          `Imported ${SECOND_SKILL_NAME} repo=${normalizedRepo} path=${SECOND_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+      });
+      Then('the saved entry keeps that ref label', () => {
+        const saved = JSON.parse(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: SKILLS_LOCKFILE_PATH,
+          }),
+        ) as { skills: { ref: string }[] };
+        expect(saved.skills[0]?.ref).toBe('topic-branch');
+      });
+      And('fetch used that ref', () => {
+        expect(mockedGit.fetch).toHaveBeenCalledWith('origin', 'topic-branch', [
+          '--depth',
+          '1',
         ]);
+      });
+    },
+  );
 
-        // Assert: the lockfile was written exactly three times:
-        //   1. An initial `{ version: 1, skills: [] }` from
-        //      `ensureSkillsLockfile` before any clone/import work begins.
-        //   2. An incremental save after the first skill finishes importing.
-        //   3. An incremental save after the second skill finishes importing.
-        expect(mockFileSystem.lockfileWrites).toHaveLength(3);
-
-        const [initialWrite, firstIncrementalWrite, finalWrite] =
-          mockFileSystem.lockfileWrites.map(
-            (raw) =>
-              JSON.parse(raw) as {
-                version: number;
-                skills: { name: string }[];
-              },
-          );
-
-        if (!initialWrite || !firstIncrementalWrite || !finalWrite) {
-          throw new Error('Expected exactly three lockfile writes.');
-        }
-
-        expect(initialWrite).toEqual({ version: 1, skills: [] });
-        expect(firstIncrementalWrite.skills.map((skill) => skill.name)).toEqual(
-          [MANAGED_SKILL_NAME],
-        );
-        expect(finalWrite.skills.map((skill) => skill.name)).toEqual(
-          // `saveSkillsLockfile` sorts by name; `note-taker` < `review-helper`.
-          [SECOND_SKILL_NAME, MANAGED_SKILL_NAME],
-        );
-
-        // Assert: both skills' SKILL.md files are copied into the config
-        // source root, proving each loop iteration completed its directory
-        // replacement.
+  f.Scenario(
+    '`--as` stores the skill under the chosen local name',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      const alias = 'my-alias';
+      Given('the remote is seeded as usual', () => {
+        configureDefaultRemoteCheckout(mockFileSystem);
+      });
+      When('I import with `--as`', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
+            '--skill',
+            MANAGED_SKILL_NAME,
+            '--as',
+            alias,
+          ],
+          ...env.cliOptions,
+        });
+      });
+      Then('I see the Imported line use that name', () => {
+        expect(
+          env.effectStdoutMessages.some((m) => m.includes(`Imported ${alias}`)),
+        ).toBe(true);
+      });
+      And('files live under that folder name', () => {
         expect(
           readMockTextFile({
             handle: mockFileSystem,
-            filePath: path.join(
-              skillsSourceRoot,
-              MANAGED_SKILL_NAME,
-              'SKILL.md',
-            ),
+            filePath: path.join(DEFAULT_SKILLS_SOURCE_ROOT, alias, 'SKILL.md'),
           }),
         ).toBe(REMOTE_SKILL_FILES['SKILL.md']);
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              skillsSourceRoot,
-              SECOND_SKILL_NAME,
-              'SKILL.md',
-            ),
-          }),
-        ).toBe(SECOND_SKILL_FILES['SKILL.md']);
       });
+    },
+  );
 
-      it('de-duplicates repeated --skill values, importing each skill only once', async () => {
-        const env = createTestEnv({ mockFileSystem });
-        const normalizedRepo = 'https://github.com/anthropics/skills.git';
-
-        await runCLI({
-          argv: [
-            'skills',
-            'add',
-            'anthropics/skills',
-            '--skill',
-            MANAGED_SKILL_NAME,
-            MANAGED_SKILL_NAME,
-          ],
-          ...env.cliOptions,
-        });
-
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
-        expect(env.effectStdoutMessages).toEqual([
-          `Imported ${MANAGED_SKILL_NAME} repo=${normalizedRepo} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
-        ]);
-      });
-    });
-
-    describe('skipping already-imported skills', () => {
-      const SECOND_SKILL_NAME = 'note-taker';
-      const SECOND_SKILL_PATH = 'skills/note-taker';
-      const SECOND_SKILL_FILES = {
-        'SKILL.md': '---\nname: note-taker\n---\n\n# Note Taker\n',
-      } as const;
-
-      function configureRemoteWithTwoSkills(): void {
+  f.Scenario(
+    'With `--path tools`, skills resolve under that repository folder',
+    ({ Given, When, Then }) => {
+      let env: TestEnv;
+      Given('the remote checkout has the skill under tools/', () => {
         configureMockGitClient({
           mockedGit,
           fetchedCommit: FETCHED_COMMIT,
@@ -469,96 +964,229 @@ describe('dry-ai skills add', () => {
             seedRemoteSkillCheckout({
               handle: mockFileSystem,
               checkoutDir: repoRoot,
-              skillPath: MANAGED_SKILL_PATH,
+              skillPath: PATH_TOOLS_SKILL_PATH,
               files: REMOTE_SKILL_FILES,
-            });
-            seedRemoteSkillCheckout({
-              handle: mockFileSystem,
-              checkoutDir: repoRoot,
-              skillPath: SECOND_SKILL_PATH,
-              files: SECOND_SKILL_FILES,
             });
           },
         });
-      }
-
-      it('skips a skill that is already present in the lockfile and still imports the remaining requested skills', async () => {
-        mockFileSystem = createMockFileSystemState();
-        configureMockFileSystem({
-          handle: mockFileSystem,
-          lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-        });
-        configureRemoteWithTwoSkills();
-
-        const normalizedRepo = 'https://github.com/anthropics/skills.git';
-        storeMockTextFile({
-          handle: mockFileSystem,
-          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          content: JSON.stringify({
-            version: 1,
-            skills: [
-              {
-                commit: FETCHED_COMMIT,
-                files: hashFileSet(REMOTE_SKILL_FILES),
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: MANAGED_SKILL_NAME,
-                path: MANAGED_SKILL_PATH,
-                repo: normalizedRepo,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-            ],
-          }),
-        });
-
-        const env = createTestEnv({ mockFileSystem });
-        const skillsSourceRoot = path.join(env.defaultConfigRoot, 'skills');
-
+      });
+      When('I pass `--path tools`', async () => {
+        env = wrapTestEnv(mockFileSystem);
         await runCLI({
           argv: [
             'skills',
             'add',
-            'anthropics/skills',
+            REPO_SHORT,
+            '--path',
+            'tools',
+            '--skill',
+            MANAGED_SKILL_NAME,
+          ],
+          ...env.cliOptions,
+        });
+      });
+      Then('the lockfile path is tools/review-helper', () => {
+        const saved = JSON.parse(
+          readMockTextFile({
+            handle: mockFileSystem,
+            filePath: SKILLS_LOCKFILE_PATH,
+          }),
+        ) as { skills: { path: string }[] };
+        expect(saved.skills[0]?.path).toBe(PATH_TOOLS_SKILL_PATH);
+      });
+    },
+  );
+
+  f.Scenario(
+    'With `--path .`, the skill resolves from the repository root',
+    ({ Given, When, Then }) => {
+      let env: TestEnv;
+      Given('the remote checkout has a root-level skill folder', () => {
+        configureMockGitClient({
+          mockedGit,
+          fetchedCommit: FETCHED_COMMIT,
+          checkoutImplementation: async (repoRoot) => {
+            if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+              return;
+            }
+            seedRemoteSkillCheckout({
+              handle: mockFileSystem,
+              checkoutDir: repoRoot,
+              skillPath: PATH_DOT_SKILL,
+              files: PATH_DOT_SKILL_FILES,
+            });
+          },
+        });
+      });
+      When('I pass `--path .` and that skill name', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
+            '--path',
+            '.',
+            '--skill',
+            PATH_DOT_SKILL,
+          ],
+          ...env.cliOptions,
+        });
+      });
+      Then(
+        'the managed skill name is the root-level folder name under `--path .`',
+        () => {
+          const saved = JSON.parse(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: SKILLS_LOCKFILE_PATH,
+            }),
+          ) as { skills: { name: string; path: string }[] };
+          expect(saved.skills[0]?.path).toBe(PATH_DOT_SKILL);
+          expect(saved.skills[0]?.name).toBe(PATH_DOT_SKILL);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'Multiple skills import in request order and each triggers a lockfile save',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given('the remote has two skills', () => {
+        configureTwoSkillsRemote(mockFileSystem);
+      });
+      When('I pass both names after `--skill`', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
             '--skill',
             MANAGED_SKILL_NAME,
             SECOND_SKILL_NAME,
           ],
           ...env.cliOptions,
         });
-
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-
+      });
+      Then('stdout lists imports in the same order I requested', () => {
         expect(env.effectStdoutMessages).toEqual([
-          `Imported ${SECOND_SKILL_NAME} repo=${normalizedRepo} path=${SECOND_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+          `Imported ${MANAGED_SKILL_NAME} repo=${NORMALIZED_REPO} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+          `Imported ${SECOND_SKILL_NAME} repo=${NORMALIZED_REPO} path=${SECOND_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
         ]);
+      });
+      And(
+        'the lockfile was written for the empty file, then incrementally',
+        () => {
+          expect(mockFileSystem.lockfileWrites.length).toBeGreaterThanOrEqual(
+            3,
+          );
+          type Snapshot = { version: number; skills: { name: string }[] };
+          const parsed = mockFileSystem.lockfileWrites.map(
+            (raw): Snapshot => JSON.parse(raw) as Snapshot,
+          );
+          expect(parsed[0]).toEqual({ version: 1, skills: [] });
+          const last = parsed[parsed.length - 1];
+          expect(last.skills.map((s) => s.name)).toEqual([
+            SECOND_SKILL_NAME,
+            MANAGED_SKILL_NAME,
+          ]);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'Repeated `--skill` values de-duplicate so each skill imports once',
+    ({ When, Then }) => {
+      let env: TestEnv;
+      When('I pass the same skill twice', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
+            '--skill',
+            MANAGED_SKILL_NAME,
+            MANAGED_SKILL_NAME,
+          ],
+          ...env.cliOptions,
+        });
+      });
+      Then('only one Imported line appears', () => {
+        expect(env.effectStdoutMessages).toEqual([
+          `Imported ${MANAGED_SKILL_NAME} repo=${NORMALIZED_REPO} path=${MANAGED_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+        ]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'A skill already in the lockfile is skipped while the rest still import',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given(
+        'the lockfile already lists review-helper and the checkout has two skills',
+        () => {
+          configureTwoSkillsRemote(mockFileSystem);
+          storeMockTextFile({
+            handle: mockFileSystem,
+            filePath: SKILLS_LOCKFILE_PATH,
+            content: JSON.stringify({
+              version: 1,
+              skills: [
+                {
+                  commit: FETCHED_COMMIT,
+                  files: hashFileSet(REMOTE_SKILL_FILES),
+                  importedAt: SAMPLE_IMPORTED_AT,
+                  name: MANAGED_SKILL_NAME,
+                  path: MANAGED_SKILL_PATH,
+                  repo: NORMALIZED_REPO,
+                  updatedAt: SAMPLE_IMPORTED_AT,
+                },
+              ],
+            }),
+          });
+        },
+      );
+      When('I request both skills', async () => {
+        env = wrapTestEnv(mockFileSystem);
+        await runCLI({
+          argv: [
+            'skills',
+            'add',
+            REPO_SHORT,
+            '--skill',
+            MANAGED_SKILL_NAME,
+            SECOND_SKILL_NAME,
+          ],
+          ...env.cliOptions,
+        });
+      });
+      Then('I see only the new skill imported', () => {
+        expect(env.effectStdoutMessages).toEqual([
+          `Imported ${SECOND_SKILL_NAME} repo=${NORMALIZED_REPO} path=${SECOND_SKILL_PATH} ref=HEAD commit=abcdef1\n`,
+        ]);
+      });
+      And('I see a skip warning for the one already managed', () => {
         expect(env.effectStderrMessages).toEqual([
           `Skipped already-imported skills: ${MANAGED_SKILL_NAME}\n`,
         ]);
-
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              skillsSourceRoot,
-              SECOND_SKILL_NAME,
-              'SKILL.md',
-            ),
-          }),
-        ).toBe(SECOND_SKILL_FILES['SKILL.md']);
       });
+    },
+  );
 
-      it('warns about all skipped skills when every requested skill is already imported and logs "No skills were imported."', async () => {
-        mockFileSystem = createMockFileSystemState();
-        configureMockFileSystem({
-          handle: mockFileSystem,
-          lockfilePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-        });
-        configureRemoteWithTwoSkills();
-
-        const normalizedRepo = 'https://github.com/anthropics/skills.git';
+  f.Scenario(
+    'When every requested skill is already managed, I see only skips and a no-import message',
+    ({ Given, When, Then, And }) => {
+      let env: TestEnv;
+      Given('the lockfile already lists every requested skill', () => {
+        configureTwoSkillsRemote(mockFileSystem);
         storeMockTextFile({
           handle: mockFileSystem,
-          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          filePath: SKILLS_LOCKFILE_PATH,
           content: JSON.stringify({
             version: 1,
             skills: [
@@ -568,7 +1196,7 @@ describe('dry-ai skills add', () => {
                 importedAt: SAMPLE_IMPORTED_AT,
                 name: MANAGED_SKILL_NAME,
                 path: MANAGED_SKILL_PATH,
-                repo: normalizedRepo,
+                repo: NORMALIZED_REPO,
                 updatedAt: SAMPLE_IMPORTED_AT,
               },
               {
@@ -577,187 +1205,37 @@ describe('dry-ai skills add', () => {
                 importedAt: SAMPLE_IMPORTED_AT,
                 name: SECOND_SKILL_NAME,
                 path: SECOND_SKILL_PATH,
-                repo: normalizedRepo,
+                repo: NORMALIZED_REPO,
                 updatedAt: SAMPLE_IMPORTED_AT,
               },
             ],
           }),
         });
-
-        const env = createTestEnv({ mockFileSystem });
-
+      });
+      When('I request both again', async () => {
+        env = wrapTestEnv(mockFileSystem);
         await runCLI({
           argv: [
             'skills',
             'add',
-            'anthropics/skills',
+            REPO_SHORT,
             '--skill',
             MANAGED_SKILL_NAME,
             SECOND_SKILL_NAME,
           ],
           ...env.cliOptions,
         });
-
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-
+      });
+      Then('I see that no skills were imported', () => {
         expect(env.effectStdoutMessages).toEqual([
           'No skills were imported.\n',
         ]);
+      });
+      And('the skip warning lists both names', () => {
         expect(env.effectStderrMessages).toEqual([
           `Skipped already-imported skills: ${MANAGED_SKILL_NAME}, ${SECOND_SKILL_NAME}\n`,
         ]);
       });
-    });
-
-    describe('config and output roots', () => {
-      // priority: med
-      it.todo(
-        'uses ./output-test as output root when --test is passed without an explicit --output-root',
-      );
-
-      // priority: low
-      it.todo.each([
-        ['--config-root', '~'],
-        ['--config-root', '~/subpath'],
-        ['--output-root', '~'],
-        ['--output-root', '~/subpath'],
-      ])('expands %s value %s to the home directory', async () => {});
-    });
-
-    describe('skill source resolution', () => {
-      // priority: med
-      it.todo(
-        'accepts a remote SKILL.md that has no frontmatter block (body-only markdown)',
-      );
-    });
-  });
-
-  describe('sad paths', () => {
-    // priority: low
-    it.todo(
-      'rejects "dry-ai skills add" without a <repo> positional argument with a commander.missingArgument error',
-    );
-
-    // priority: low
-    it.todo(
-      'rejects "dry-ai skills add" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
-    );
-
-    it('throws when --skill is omitted', async () => {
-      const env = createTestEnv({ mockFileSystem });
-      await expect(
-        runCLI({
-          argv: ['skills', 'add', 'anthropics/skills'],
-          ...env.cliOptions,
-        }),
-      ).rejects.toThrow(
-        'At least one skill name must be provided with --skill',
-      );
-    });
-
-    // priority: low
-    it.todo(
-      'throws when --skill is provided without any value (empty list after normalization)',
-    );
-
-    it('throws when --as is combined with more than one --skill', async () => {
-      const env = createTestEnv({ mockFileSystem });
-      await expect(
-        runCLI({
-          argv: [
-            'skills',
-            'add',
-            'anthropics/skills',
-            '--skill',
-            MANAGED_SKILL_NAME,
-            'note-taker',
-            '--as',
-            'alias',
-          ],
-          ...env.cliOptions,
-        }),
-      ).rejects.toThrow(
-        '--as may only be used when importing exactly one skill',
-      );
-    });
-
-    // priority: low
-    it.todo.each([['.'], ['..'], ['with/slash'], ['with\\backslash']])(
-      'throws "Invalid skill name" when --skill value %s is rejected by the skill-name validator',
-      async () => {},
-    );
-
-    it('throws when the target skill directory already exists on disk but is absent from the lockfile', async () => {
-      const env = createTestEnv({ mockFileSystem });
-      const skillDir = path.join(
-        env.defaultConfigRoot,
-        'skills',
-        MANAGED_SKILL_NAME,
-      );
-      storeMockTextFile({
-        handle: mockFileSystem,
-        filePath: path.join(skillDir, 'SKILL.md'),
-        content: REMOTE_SKILL_FILES['SKILL.md'],
-      });
-
-      await expect(
-        runCLI({
-          argv: [
-            'skills',
-            'add',
-            'anthropics/skills',
-            '--skill',
-            MANAGED_SKILL_NAME,
-          ],
-          ...env.cliOptions,
-        }),
-      ).rejects.toThrow(`A local skill directory already exists: ${skillDir}`);
-    });
-
-    // priority: low
-    // TODO(cli-user-message): when implemented, assert InvalidSkillsLockfile and lockfile I/O errors (SkillsLockfile* in present-error.ts) user lines.
-    it.todo(
-      'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',
-    );
-
-    // priority: med
-    it.todo(
-      'cleans up temporary directories even when an error is thrown mid-import',
-    );
-
-    // priority: med
-    // TODO(cli-user-message): when implemented, assert GitCheckoutTempDirectoryError if temp clone dir creation fails (present-error.ts).
-    it.todo(
-      'propagates git-clone errors (fetch failure) without writing to the lockfile',
-    );
-
-    // priority: low
-    it.todo(
-      'keeps stdout empty when the command throws before any skill imports',
-    );
-
-    describe('skill source resolution', () => {
-      // TODO(cli-user-message): when implemented, assert RemoteSkillDirectoryInvalid, RemoteSkillValidationFsError, SkillDirectoryWalkError curated lines (present-error.ts).
-      // priority: med
-      it.todo(
-        'throws when the resolved skill directory does not exist inside the cloned repository',
-      );
-
-      // priority: med
-      it.todo(
-        'throws when the resolved skill directory exists but does not contain a SKILL.md file',
-      );
-
-      // priority: low
-      it.todo(
-        'throws "Skill path is not a directory" when the resolved path exists but points to a file',
-      );
-
-      // priority: low
-      it.todo(
-        'throws "Skill path escapes the repository checkout" when --path walks outside the cloned repository',
-      );
-    });
-  });
+    },
+  );
 });
