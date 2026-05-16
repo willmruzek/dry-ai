@@ -287,3 +287,28 @@ Add this to your VS Code user settings if you want prompt files installed by `dr
   }
 }
 ```
+
+## Tech notes
+
+The CLI is built with **[Commander](https://github.com/tj/commander.js)** for the usual CLI surface (arguments, help, subcommands) and **[Effect](https://effect.website/)**.
+
+**Why Effect?**
+
+Effect helps us build the CLI from small, typed programs. Each one carries its dependencies and failures in its type, so we can compose them safely: sequence steps, run work in parallel, interrupt a whole run, or add retries and timeouts at the boundary. That strengthens local reasoning because each unit stays understandable on its own while TypeScript checks how the pieces fit together.
+
+**Effect in dry-ai** — the features this repo uses today:
+
+- **Typed programs (`Effect.gen`)** — each top-level command (**`sync`**, **`skills add`**, **`skills update`**, **`skills update-all`**, **`skills list`**, **`skills remove`**) is built as an `Effect` and executed by **`runCliEffect`**. Shared work in **`src/lib/sync.ts`**, **`src/lib/skills.ts`**, and **`src/lib/fs.ts`** is split into smaller effects that the commands compose.
+- **Services and layers (`Effect.provide`)** — filesystem access goes through **`@effect/platform` FileSystem**, so production and tests provide the same service shape. Tests swap in snapshot filesystems and Logger layers instead of changing command code.
+- **Typed errors and causes** — sync I/O, config, and skills validation failures become tagged errors on the Effect error channel. **`runCliEffect`** turns them into one curated stderr line, while **`--debug`** / **`DRY_AI_DEBUG`** prints the full Effect cause for diagnosis.
+- **Effect logging** — command output that belongs to the Effect program uses **`Effect.log*`**: sync reports and import messages at info level, recoverable skipped-input or manifest issues as warnings, and command failures as errors.
+- **Composition and cleanup (`pipe`, `Effect.all`, `ensuring`, `catchIf`)** — independent filesystem work can run together with **`Effect.all`**; **`skills add`** uses **`ensuring`** to clean temp clone dirs; focused **`mapError`** / **`catchIf`** calls keep expected filesystem failures explicit.
+- **`effect/Schema`** — used where Schema adds value today: stable JSON encoding for sorted file-hash tuples when sync fingerprints directory skills. Other option, config, and manifest validation still uses **Zod**.
+
+### TODO
+
+- [ ] **Services & Layers** — model clone/fetch as a `Context.Tag` service with a `Layer` instead of ad hoc `simple-git` wiring.
+- [ ] **Clock** — use Effect’s `Clock` service for deterministic time in tests and fewer ad hoc timestamps.
+- [ ] **CLI** — experiment with `@effect/cli` for Effect-native command parsing (listed in dependencies; not wired in `src/` yet).
+- [ ] **Brands** — use Schema brands for paths, agent names, commit SHAs, etc.
+- [ ] **Schema** — gradually move Zod validation to `effect/Schema` where it pays off alongside Effect.
