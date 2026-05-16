@@ -432,12 +432,25 @@ export function mockFileSystemLayer(
       }),
 
     makeTempDirectory: (options?: MakeTempDirectoryOptions) =>
-      Effect.sync(() =>
-        createMockTempDirectory({
+      Effect.gen(function* () {
+        const prefix = resolveMakeTempDirectoryPrefix(options);
+        const normalizedPrefix = normalizeMockPath(prefix);
+        const failures = yield* Ref.get(handle.failuresRef);
+        const failMsg = failures.makeDirectory.get(normalizedPrefix);
+        if (failMsg !== undefined) {
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'makeTempDirectory',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: prefix,
+          });
+        }
+        return createMockTempDirectory({
           handle,
-          prefix: resolveMakeTempDirectoryPrefix(options),
-        }),
-      ),
+          prefix,
+        });
+      }),
 
     copy: (fromPath: string, toPath: string) =>
       Effect.gen(function* () {
@@ -624,7 +637,13 @@ export function mockFileSystemLayer(
         const failures = yield* Ref.get(handle.failuresRef);
         const failMsg = failures.readFileBytes.get(norm);
         if (failMsg !== undefined) {
-          return yield* Effect.die(new Error(failMsg));
+          return yield* new SystemError({
+            module: 'FileSystem',
+            method: 'readFile',
+            reason: 'Unknown',
+            description: failMsg,
+            pathOrDescriptor: filePath,
+          });
         }
 
         const snap = yield* Ref.get(handle.snapshotRef);

@@ -25,7 +25,7 @@ export type { CLIRuntime, CommandEnv } from './lib/command-env.js';
 export type { RootOptions } from './lib/command-options.js';
 
 /**
- * Raw stdout/stderr write functions, without newline conventions. Used by
+ * Raw stdout/stderr write functions. Used by
  * Commander for help, version, and parse errors.
  */
 export type StdioWriters = {
@@ -237,6 +237,17 @@ export function createCLI(options: CLIOptions): Command {
 }
 
 /**
+ * Ensures Commander throws {@link import('commander').CommanderError} instead of calling `process.exit`,
+ * including for nested subcommands (`skills`, etc.).
+ */
+function applyExitOverrideDeep(program: Command): void {
+  program.exitOverride();
+  for (const sub of program.commands) {
+    applyExitOverrideDeep(sub);
+  }
+}
+
+/**
  * Parses argv and runs the matching command.
  */
 export async function runCLI(
@@ -249,7 +260,7 @@ export async function runCLI(
   const program = createCLI(options);
 
   if (exitOverride === true) {
-    program.exitOverride();
+    applyExitOverrideDeep(program);
   }
 
   await program.parseAsync(argv, { from: 'user' });
