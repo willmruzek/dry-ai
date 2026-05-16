@@ -1,7 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineFeature } from '@amiceli/vitest-cucumber';
+import { expect, vi } from 'vitest';
 
 import { runCLI } from '../../../src/cli.js';
 
@@ -20,7 +21,13 @@ import {
   createTestEnv,
   hashFileSet,
   isAgentsSkillCloneCheckoutDir,
+  mockFailExists,
+  mockFailReadDirectory,
+  mockFailReadFileBytes,
   mockFailRemove,
+  mockFailReadFileString,
+  mockFailWriteFile,
+  normalizeMockPath,
   readMockTextFile,
   seedLocalSkillDirectory,
   seedRemoteSkillCheckout,
@@ -28,8 +35,6 @@ import {
 } from '../../helpers.js';
 
 const UPDATED_AT = '2026-05-01T12:00:00.000Z';
-// Returned by the mocked `git revparse ['HEAD']` for every clone, so both
-// skills end up at the same fresh commit after update-all.
 const FETCHED_COMMIT = 'fedcba9876543210';
 
 const FIRST_SKILL = {
@@ -58,6 +63,22 @@ const SECOND_SKILL = {
   },
 } as const;
 
+const FIRST_REMOTE_WITH_SUB = {
+  ...FIRST_SKILL.remoteFiles,
+  'sub/nested.md': 'nested\n',
+} as const;
+
+const invalidLockfileLine = `Could not parse the skills lockfile (${DEFAULT_SKILLS_LOCKFILE_PATH}). Fix JSON/schema errors in that file.\n`;
+
+const firstSkillDir = normalizeMockPath(
+  path.join(DEFAULT_SKILLS_SOURCE_ROOT, FIRST_SKILL.name),
+);
+const secondSkillDir = normalizeMockPath(
+  path.join(DEFAULT_SKILLS_SOURCE_ROOT, SECOND_SKILL.name),
+);
+const firstSkillRulesPath = path.join(firstSkillDir, 'rules.md');
+const firstSkillSubDir = path.join(firstSkillDir, 'sub');
+
 vi.mock('simple-git', () => ({
   simpleGit: vi.fn(),
 }));
@@ -69,22 +90,9 @@ vi.mock('node:os', () => ({
   },
 }));
 
-// `vi.mocked` is a pure type helper: it returns the mocked default export but
-// types each method as `MockedFunction<typeof fs.method>`, so
-// `.mockResolvedValue` / `.mockReturnValue` calls are checked against the real
-// module signatures without any explicit casts.
 const mockedOs = vi.mocked(os);
-
-// `mockedGit` stubs the subset of simple-git's chain used by `cloneRemoteRepo`.
-// It's wired into the `simpleGit(...)` factory by `configureMockGitClient`.
 const mockedGit = createMockedGit();
 
-/**
- * Seeds every managed skill's remote-source fixture files into one freshly
- * cloned checkout directory. `fetchRemoteSkillSnapshot` only reads the path
- * matching the current skill, so seeding both is cheap and keeps the
- * `checkoutImplementation` hook uniform across the two clones performed per run.
- */
 function seedAllRemoteSkills(options: {
   handle: MockFileSystemHandle;
   checkoutDir: string;
@@ -100,131 +108,204 @@ function seedAllRemoteSkills(options: {
   }
 }
 
-describe('dry-ai skills update-all', () => {
+function lockfilePayloadFromSkills(skills: Record<string, unknown>[]): string {
+  return JSON.stringify({ version: 1, skills });
+}
+
+function twoSkillEntriesInReverseNameOrder(): Record<string, unknown>[] {
+  return [
+    {
+      commit: SECOND_SKILL.originalCommit,
+      files: hashFileSet(SECOND_SKILL.localFiles),
+      importedAt: SAMPLE_IMPORTED_AT,
+      name: SECOND_SKILL.name,
+      path: SECOND_SKILL.path,
+      repo: SAMPLE_NORMALIZED_REPO,
+      updatedAt: SAMPLE_IMPORTED_AT,
+    },
+    {
+      commit: FIRST_SKILL.originalCommit,
+      files: hashFileSet(FIRST_SKILL.localFiles),
+      importedAt: SAMPLE_IMPORTED_AT,
+      name: FIRST_SKILL.name,
+      path: FIRST_SKILL.path,
+      repo: SAMPLE_NORMALIZED_REPO,
+      updatedAt: SAMPLE_IMPORTED_AT,
+    },
+  ];
+}
+
+function arrangeTwoSkillsHappyPath(handle: MockFileSystemHandle): void {
+  seedLocalSkillDirectory({
+    handle,
+    skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+    skillName: FIRST_SKILL.name,
+    files: FIRST_SKILL.localFiles,
+  });
+  seedLocalSkillDirectory({
+    handle,
+    skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+    skillName: SECOND_SKILL.name,
+    files: SECOND_SKILL.localFiles,
+  });
+  storeMockTextFile({
+    handle,
+    filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+    content: lockfilePayloadFromSkills([
+      {
+        commit: FIRST_SKILL.originalCommit,
+        files: hashFileSet(FIRST_SKILL.localFiles),
+        importedAt: SAMPLE_IMPORTED_AT,
+        name: FIRST_SKILL.name,
+        path: FIRST_SKILL.path,
+        repo: SAMPLE_NORMALIZED_REPO,
+        updatedAt: SAMPLE_IMPORTED_AT,
+      },
+      {
+        commit: SECOND_SKILL.originalCommit,
+        files: hashFileSet(SECOND_SKILL.localFiles),
+        importedAt: SAMPLE_IMPORTED_AT,
+        name: SECOND_SKILL.name,
+        path: SECOND_SKILL.path,
+        repo: SAMPLE_NORMALIZED_REPO,
+        updatedAt: SAMPLE_IMPORTED_AT,
+      },
+    ]),
+  });
+}
+
+function arrangeSingleSkillHappyPath(handle: MockFileSystemHandle): void {
+  seedLocalSkillDirectory({
+    handle,
+    skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+    skillName: FIRST_SKILL.name,
+    files: FIRST_SKILL.localFiles,
+  });
+  storeMockTextFile({
+    handle,
+    filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+    content: lockfilePayloadFromSkills([
+      {
+        commit: FIRST_SKILL.originalCommit,
+        files: hashFileSet(FIRST_SKILL.localFiles),
+        importedAt: SAMPLE_IMPORTED_AT,
+        name: FIRST_SKILL.name,
+        path: FIRST_SKILL.path,
+        repo: SAMPLE_NORMALIZED_REPO,
+        updatedAt: SAMPLE_IMPORTED_AT,
+      },
+    ]),
+  });
+}
+
+function arrangeOneSkippedOneUpdated(handle: MockFileSystemHandle): {
+  skippedSkillOnDiskFiles: Record<string, string>;
+} {
+  const skippedSkillOnDiskFiles = {
+    'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
+  } as const;
+
+  seedLocalSkillDirectory({
+    handle,
+    skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+    skillName: FIRST_SKILL.name,
+    files: skippedSkillOnDiskFiles,
+  });
+  seedLocalSkillDirectory({
+    handle,
+    skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+    skillName: SECOND_SKILL.name,
+    files: SECOND_SKILL.localFiles,
+  });
+
+  storeMockTextFile({
+    handle,
+    filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+    content: lockfilePayloadFromSkills([
+      {
+        commit: FIRST_SKILL.originalCommit,
+        files: hashFileSet(FIRST_SKILL.localFiles),
+        importedAt: SAMPLE_IMPORTED_AT,
+        name: FIRST_SKILL.name,
+        path: FIRST_SKILL.path,
+        repo: SAMPLE_NORMALIZED_REPO,
+        updatedAt: SAMPLE_IMPORTED_AT,
+      },
+      {
+        commit: SECOND_SKILL.originalCommit,
+        files: hashFileSet(SECOND_SKILL.localFiles),
+        importedAt: SAMPLE_IMPORTED_AT,
+        name: SECOND_SKILL.name,
+        path: SECOND_SKILL.path,
+        repo: SAMPLE_NORMALIZED_REPO,
+        updatedAt: SAMPLE_IMPORTED_AT,
+      },
+    ]),
+  });
+
+  return { skippedSkillOnDiskFiles };
+}
+
+function arrangeBothSkillsSkippedDueToLocalEdits(
+  handle: MockFileSystemHandle,
+): void {
+  seedLocalSkillDirectory({
+    handle,
+    skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+    skillName: FIRST_SKILL.name,
+    files: {
+      'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
+    },
+  });
+  seedLocalSkillDirectory({
+    handle,
+    skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+    skillName: SECOND_SKILL.name,
+    files: {
+      ...SECOND_SKILL.localFiles,
+      'SKILL.md':
+        '---\nname: review-helper\n---\n\n# Review helper (user edit)\n',
+    },
+  });
+
+  storeMockTextFile({
+    handle,
+    filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+    content: lockfilePayloadFromSkills([
+      {
+        commit: FIRST_SKILL.originalCommit,
+        files: hashFileSet(FIRST_SKILL.localFiles),
+        importedAt: SAMPLE_IMPORTED_AT,
+        name: FIRST_SKILL.name,
+        path: FIRST_SKILL.path,
+        repo: SAMPLE_NORMALIZED_REPO,
+        updatedAt: SAMPLE_IMPORTED_AT,
+      },
+      {
+        commit: SECOND_SKILL.originalCommit,
+        files: hashFileSet(SECOND_SKILL.localFiles),
+        importedAt: SAMPLE_IMPORTED_AT,
+        name: SECOND_SKILL.name,
+        path: SECOND_SKILL.path,
+        repo: SAMPLE_NORMALIZED_REPO,
+        updatedAt: SAMPLE_IMPORTED_AT,
+      },
+    ]),
+  });
+}
+
+function assertNoAgentsSkillCheckoutDirs(handle: MockFileSystemHandle): void {
+  expect(
+    [...handle.directories].filter((d) =>
+      path.basename(d).startsWith('agents-skill.'),
+    ),
+  ).toEqual([]);
+}
+
+defineFeature('dry-ai skills update-all', (f) => {
   let mockFileSystem: MockFileSystemHandle;
 
-  /**
-   * Arranges the "one-skipped, one-updated" scenario used by the
-   * `local edits without --force` test group:
-   *
-   *   - `FIRST_SKILL`: on-disk content differs from the hashes stored in the
-   *     lockfile, so `detectLocalSkillEdits` returns `modified: true` and
-   *     `update-all` skips it (no `--force`).
-   *   - `SECOND_SKILL`: on-disk content matches its lockfile hashes, so it
-   *     proceeds through the full clone → replace → hash update path.
-   *
-   * Returns the exact bytes seeded onto `FIRST_SKILL`'s disk so tests can
-   * assert the locally-edited content survives the run unchanged.
-   */
-  function arrangeOneSkippedOneUpdated(): {
-    skippedSkillOnDiskFiles: Record<string, string>;
-  } {
-    const skippedSkillOnDiskFiles = {
-      'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
-    } as const;
-
-    seedLocalSkillDirectory({
-      handle: mockFileSystem,
-      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-      skillName: FIRST_SKILL.name,
-      files: skippedSkillOnDiskFiles,
-    });
-    seedLocalSkillDirectory({
-      handle: mockFileSystem,
-      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-      skillName: SECOND_SKILL.name,
-      files: SECOND_SKILL.localFiles,
-    });
-
-    // The lockfile stores hashes of `FIRST_SKILL.localFiles` (the pre-edit
-    // baseline); comparing those against the hashes of the actual on-disk
-    // bytes (`skippedSkillOnDiskFiles`) yields `modified: true` with
-    // `changedFiles: ['SKILL.md']`.
-    storeMockTextFile({
-      handle: mockFileSystem,
-      filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-      content: JSON.stringify({
-        version: 1,
-        skills: [
-          {
-            commit: FIRST_SKILL.originalCommit,
-            files: hashFileSet(FIRST_SKILL.localFiles),
-            importedAt: SAMPLE_IMPORTED_AT,
-            name: FIRST_SKILL.name,
-            path: FIRST_SKILL.path,
-            repo: SAMPLE_NORMALIZED_REPO,
-            updatedAt: SAMPLE_IMPORTED_AT,
-          },
-          {
-            commit: SECOND_SKILL.originalCommit,
-            files: hashFileSet(SECOND_SKILL.localFiles),
-            importedAt: SAMPLE_IMPORTED_AT,
-            name: SECOND_SKILL.name,
-            path: SECOND_SKILL.path,
-            repo: SAMPLE_NORMALIZED_REPO,
-            updatedAt: SAMPLE_IMPORTED_AT,
-          },
-        ],
-      }),
-    });
-
-    return { skippedSkillOnDiskFiles };
-  }
-
-  /**
-   * Both managed skills have on-disk edits relative to the lockfile baseline,
-   * so `update-all` without `--force` skips every skill (`updatedLines` empty).
-   */
-  function arrangeBothSkillsSkippedDueToLocalEdits(): void {
-    seedLocalSkillDirectory({
-      handle: mockFileSystem,
-      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-      skillName: FIRST_SKILL.name,
-      files: {
-        'SKILL.md': '---\nname: note-taker\n---\n\n# Note taker (user edit)\n',
-      },
-    });
-    seedLocalSkillDirectory({
-      handle: mockFileSystem,
-      skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-      skillName: SECOND_SKILL.name,
-      files: {
-        ...SECOND_SKILL.localFiles,
-        'SKILL.md':
-          '---\nname: review-helper\n---\n\n# Review helper (user edit)\n',
-      },
-    });
-
-    storeMockTextFile({
-      handle: mockFileSystem,
-      filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-      content: JSON.stringify({
-        version: 1,
-        skills: [
-          {
-            commit: FIRST_SKILL.originalCommit,
-            files: hashFileSet(FIRST_SKILL.localFiles),
-            importedAt: SAMPLE_IMPORTED_AT,
-            name: FIRST_SKILL.name,
-            path: FIRST_SKILL.path,
-            repo: SAMPLE_NORMALIZED_REPO,
-            updatedAt: SAMPLE_IMPORTED_AT,
-          },
-          {
-            commit: SECOND_SKILL.originalCommit,
-            files: hashFileSet(SECOND_SKILL.localFiles),
-            importedAt: SAMPLE_IMPORTED_AT,
-            name: SECOND_SKILL.name,
-            path: SECOND_SKILL.path,
-            repo: SAMPLE_NORMALIZED_REPO,
-            updatedAt: SAMPLE_IMPORTED_AT,
-          },
-        ],
-      }),
-    });
-  }
-
-  beforeEach(() => {
+  f.BeforeEachScenario(() => {
     mockFileSystem = createMockFileSystemState();
 
     configureMockFileSystem({
@@ -242,104 +323,367 @@ describe('dry-ai skills update-all', () => {
       },
     });
     configureMockOs({
-      mockedOs: mockedOs,
+      mockedOs,
       homeDir: VIRTUAL_HOME_DIR,
       tmpDir: '/virtual/tmp',
     });
+
+    mockedGit.fetch.mockClear();
+    mockedGit.init.mockClear();
+    mockedGit.addRemote.mockClear();
+    mockedGit.checkout.mockClear();
+    mockedGit.revparse.mockClear();
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date(UPDATED_AT));
   });
 
-  afterEach(() => {
+  f.AfterEachScenario(() => {
     vi.useRealTimers();
   });
 
-  describe('happy paths', () => {
-    describe('basic update-all', () => {
-      it('updates every managed skill in the lockfile and saves the refreshed lockfile once', async () => {
-        // Arrange: seed two managed skills whose local on-disk hashes exactly
-        // match what's in the lockfile, so `detectLocalSkillEdits` returns
-        // `modified: false` and both skills proceed through the full update
-        // path (no --force required, no skips).
-        seedLocalSkillDirectory({
-          handle: mockFileSystem,
-          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-          skillName: FIRST_SKILL.name,
-          files: FIRST_SKILL.localFiles,
-        });
-        seedLocalSkillDirectory({
-          handle: mockFileSystem,
-          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-          skillName: SECOND_SKILL.name,
-          files: SECOND_SKILL.localFiles,
-        });
+  f.Scenario(
+    'With no skills lockfile on disk, update-all says there is nothing to update',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
 
-        storeMockTextFile({
-          handle: mockFileSystem,
-          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          content: JSON.stringify({
-            version: 1,
-            skills: [
-              {
-                commit: FIRST_SKILL.originalCommit,
-                files: hashFileSet(FIRST_SKILL.localFiles),
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: FIRST_SKILL.name,
-                path: FIRST_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-              {
-                commit: SECOND_SKILL.originalCommit,
-                files: hashFileSet(SECOND_SKILL.localFiles),
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: SECOND_SKILL.name,
-                path: SECOND_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-            ],
-          }),
-        });
+      Given('no skills lockfile exists on disk', () => {});
 
-        const env = createTestEnv({ mockFileSystem });
-
-        // Act
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
         await runCLI({
           argv: ['skills', 'update-all'],
           ...env.cliOptions,
         });
+      });
 
-        // Assert: one Effect logInfo payload with the count + per-skill
-        // summary lines (lockfile-iteration order, which is alphabetical
-        // since the lockfile was seeded alphabetically).
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
+      Then('I see a message that there are no managed skills to update', () => {
         expect(env.effectStdoutMessages).toEqual([
-          [
-            'Updated 2 managed skills:',
-            `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
-            `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
-            '',
-          ].join('\n'),
+          'No managed skills to update.\n',
         ]);
+      });
 
-        // Assert: the lockfile is saved after each successful skill update
-        // so partial runs stay consistent with disk.
-        expect(mockFileSystem.lockfileWrites).toHaveLength(2);
+      And(
+        'I see no warnings or errors, and the skills lockfile on disk is unchanged',
+        () => {
+          expect(env.effectStderrMessages).toEqual([]);
+          expect(mockFileSystem.lockfileWrites).toEqual([]);
+          expect(env.cmderStdoutMessages).toEqual([]);
+          expect(env.cmderStderrMessages).toEqual([]);
+        },
+      );
+    },
+  );
 
-        const savedLockfile = JSON.parse(
-          readMockTextFile({
+  f.Scenario(
+    'With an empty skills list in the lockfile, update-all says there is nothing to update',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the lockfile exists with an empty skills array', () => {
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({ version: 1, skills: [] }),
+        });
+      });
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then('I see a message that there are no managed skills to update', () => {
+        expect(env.effectStdoutMessages).toEqual([
+          'No managed skills to update.\n',
+        ]);
+      });
+
+      And('the skills lockfile on disk is not rewritten', () => {
+        expect(mockFileSystem.lockfileWrites).toEqual([]);
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if it cannot tell whether the skills lockfile exists',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'checking whether the skills lockfile exists fails (simulated)',
+        () => {
+          mockFailExists({
+            handle: mockFileSystem,
+            absolutePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+            message: 'exists failed (test)',
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error saying the skills lockfile could not be checked for existence',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not check the skills lockfile: ${DEFAULT_SKILLS_LOCKFILE_PATH}\n`,
+          ]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+        expect(env.effectStdoutMessages).toEqual([]);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if the skills lockfile cannot be read',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('a skills lockfile exists but reading it fails (simulated)', () => {
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: lockfilePayloadFromSkills([
+            {
+              commit: FIRST_SKILL.originalCommit,
+              files: hashFileSet(FIRST_SKILL.localFiles),
+              importedAt: SAMPLE_IMPORTED_AT,
+              name: FIRST_SKILL.name,
+              path: FIRST_SKILL.path,
+              repo: SAMPLE_NORMALIZED_REPO,
+              updatedAt: SAMPLE_IMPORTED_AT,
+            },
+          ]),
+        });
+        mockFailReadFileString({
+          handle: mockFileSystem,
+          absolutePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          message: 'read failed (test)',
+        });
+      });
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error saying the skills lockfile could not be read',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not read the skills lockfile: ${DEFAULT_SKILLS_LOCKFILE_PATH}\n`,
+          ]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if the skills lockfile is not valid JSON',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the lockfile contents are not valid JSON', () => {
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: '{"version":1,"skills":[}',
+        });
+      });
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error explaining the skills lockfile could not be parsed',
+        () => {
+          expect(env.effectStderrMessages).toEqual([invalidLockfileLine]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if the lockfile declares an unsupported format version',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('the lockfile JSON declares an unsupported version', () => {
+        storeMockTextFile({
+          handle: mockFileSystem,
+          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+          content: JSON.stringify({ version: 2, skills: [] }),
+        });
+      });
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error explaining the skills lockfile could not be parsed',
+        () => {
+          expect(env.effectStderrMessages).toEqual([invalidLockfileLine]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if the lockfile lists the same skill name twice',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'the lockfile JSON lists two entries with the same skill name',
+        () => {
+          storeMockTextFile({
             handle: mockFileSystem,
             filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          }),
-        ) as unknown;
-        expect(savedLockfile).toEqual({
-          version: 1,
-          skills: [
+            content: JSON.stringify({
+              version: 1,
+              skills: [
+                {
+                  name: 'dup-skill',
+                  repo: SAMPLE_NORMALIZED_REPO,
+                  path: 'skills/dup',
+                  commit: 'a'.repeat(40),
+                  importedAt: SAMPLE_IMPORTED_AT,
+                  updatedAt: SAMPLE_IMPORTED_AT,
+                },
+                {
+                  name: 'dup-skill',
+                  repo: SAMPLE_NORMALIZED_REPO,
+                  path: 'skills/dup-other',
+                  commit: 'b'.repeat(40),
+                  importedAt: SAMPLE_IMPORTED_AT,
+                  updatedAt: SAMPLE_IMPORTED_AT,
+                },
+              ],
+            }),
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error explaining the skills lockfile could not be parsed',
+        () => {
+          expect(env.effectStderrMessages).toEqual([invalidLockfileLine]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'When every managed skill can be updated, update-all refreshes them all, saves after each one, and shows no warnings',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'two managed skills are on disk with hashes matching the lockfile',
+        () => {
+          arrangeTwoSkillsHappyPath(mockFileSystem);
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then(
+        'I see a summary listing both skills in alphabetical order with the new short commit id',
+        () => {
+          expect(env.effectStdoutMessages).toEqual([
+            [
+              'Updated 2 managed skills:',
+              `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
+              `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
+              '',
+            ].join('\n'),
+          ]);
+        },
+      );
+
+      And('I see no warnings or errors', () => {
+        expect(env.effectStderrMessages).toEqual([]);
+      });
+
+      And('the skills lockfile on disk was saved twice', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(2);
+      });
+
+      And(
+        'each skill entry in the lockfile matches what was fetched from the remote',
+        () => {
+          const saved = JSON.parse(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+            }),
+          ) as {
+            version: number;
+            skills: {
+              name: string;
+              commit: string;
+              files: Record<string, string>;
+            }[];
+          };
+          expect(saved.skills).toEqual([
             {
               commit: FETCHED_COMMIT,
               files: hashFileSet(FIRST_SKILL.remoteFiles),
@@ -358,73 +702,115 @@ describe('dry-ai skills update-all', () => {
               repo: SAMPLE_NORMALIZED_REPO,
               updatedAt: UPDATED_AT,
             },
-          ],
-        });
+          ]);
+        },
+      );
+    },
+  );
 
-        // Assert: every local skill directory now contains the fresh
-        // remote content, and old-only files (present locally but absent
-        // remotely) were removed as part of the full-directory
-        // replacement.
-        for (const [relativeFilePath, content] of Object.entries(
-          FIRST_SKILL.remoteFiles,
-        )) {
-          expect(
-            readMockTextFile({
-              handle: mockFileSystem,
-              filePath: path.join(
-                DEFAULT_SKILLS_SOURCE_ROOT,
-                FIRST_SKILL.name,
-                relativeFilePath,
-              ),
-            }),
-          ).toBe(content);
-        }
+  f.Scenario(
+    'The success list follows alphabetical skill name order even if the lockfile file listed skills differently',
+    ({ Given, When, Then }) => {
+      let env: ReturnType<typeof createTestEnv>;
 
-        for (const [relativeFilePath, content] of Object.entries(
-          SECOND_SKILL.remoteFiles,
-        )) {
-          expect(
-            readMockTextFile({
-              handle: mockFileSystem,
-              filePath: path.join(
-                DEFAULT_SKILLS_SOURCE_ROOT,
-                SECOND_SKILL.name,
-                relativeFilePath,
-              ),
-            }),
-          ).toBe(content);
-        }
-        expect(
-          mockFileSystem.files.has(
-            path.join(
-              DEFAULT_SKILLS_SOURCE_ROOT,
-              SECOND_SKILL.name,
-              'guides/checklist.md',
+      Given(
+        'the lockfile on disk lists review-helper before note-taker in the skills array',
+        () => {
+          seedLocalSkillDirectory({
+            handle: mockFileSystem,
+            skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+            skillName: FIRST_SKILL.name,
+            files: FIRST_SKILL.localFiles,
+          });
+          seedLocalSkillDirectory({
+            handle: mockFileSystem,
+            skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
+            skillName: SECOND_SKILL.name,
+            files: SECOND_SKILL.localFiles,
+          });
+          storeMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+            content: lockfilePayloadFromSkills(
+              twoSkillEntriesInReverseNameOrder(),
             ),
-          ),
-        ).toBe(false);
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        });
       });
 
-      it('persists lockfile after the first skill when the second replace fails mid-filesystem swap', async () => {
-        seedLocalSkillDirectory({
-          handle: mockFileSystem,
-          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-          skillName: FIRST_SKILL.name,
-          files: FIRST_SKILL.localFiles,
-        });
-        seedLocalSkillDirectory({
-          handle: mockFileSystem,
-          skillsSourceRoot: DEFAULT_SKILLS_SOURCE_ROOT,
-          skillName: SECOND_SKILL.name,
-          files: SECOND_SKILL.localFiles,
-        });
+      Then(
+        'I see note-taker named before review-helper in the updated summary',
+        () => {
+          expect(env.effectStdoutMessages[0]).toContain(
+            `Updated 2 managed skills:\n- ${FIRST_SKILL.name} repo=`,
+          );
+          expect(env.effectStdoutMessages[0]).toContain(
+            `\n- ${SECOND_SKILL.name} repo=`,
+          );
+        },
+      );
+    },
+  );
 
-        storeMockTextFile({
-          handle: mockFileSystem,
-          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          content: JSON.stringify({
-            version: 1,
-            skills: [
+  f.Scenario(
+    'Update-all can refresh a single managed skill and says that one skill was updated',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'the lockfile lists only note-taker and disk matches the lockfile hashes',
+        () => {
+          arrangeSingleSkillHappyPath(mockFileSystem);
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then('I see that exactly one skill was updated', () => {
+        expect(env.effectStdoutMessages).toEqual([
+          [
+            'Updated 1 managed skills:',
+            `- ${FIRST_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${FIRST_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
+            '',
+          ].join('\n'),
+        ]);
+      });
+
+      And(
+        'the skills lockfile on disk is saved once with the new hashes',
+        () => {
+          expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'If the local skill folder is missing but the lockfile lists the skill, update-all still downloads and installs it',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'the lockfile lists note-taker but no local skill directory was seeded',
+        () => {
+          storeMockTextFile({
+            handle: mockFileSystem,
+            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+            content: lockfilePayloadFromSkills([
               {
                 commit: FIRST_SKILL.originalCommit,
                 files: hashFileSet(FIRST_SKILL.localFiles),
@@ -434,30 +820,60 @@ describe('dry-ai skills update-all', () => {
                 repo: SAMPLE_NORMALIZED_REPO,
                 updatedAt: SAMPLE_IMPORTED_AT,
               },
-              {
-                commit: SECOND_SKILL.originalCommit,
-                files: hashFileSet(SECOND_SKILL.localFiles),
-                importedAt: SAMPLE_IMPORTED_AT,
-                name: SECOND_SKILL.name,
-                path: SECOND_SKILL.path,
-                repo: SAMPLE_NORMALIZED_REPO,
-                updatedAt: SAMPLE_IMPORTED_AT,
-              },
-            ],
-          }),
+            ]),
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
         });
+      });
 
-        mockFailRemove({
-          handle: mockFileSystem,
-          absolutePath: path.join(
-            DEFAULT_SKILLS_SOURCE_ROOT,
-            SECOND_SKILL.name,
-          ),
-          message: 'simulated second-skill replace failure',
-        });
+      Then(
+        'the remote files exist under the managed path with the snapshot bytes',
+        () => {
+          for (const [relativeFilePath, content] of Object.entries(
+            FIRST_SKILL.remoteFiles,
+          )) {
+            expect(
+              readMockTextFile({
+                handle: mockFileSystem,
+                filePath: path.join(firstSkillDir, relativeFilePath),
+              }),
+            ).toBe(content);
+          }
+        },
+      );
 
-        const env = createTestEnv({ mockFileSystem });
+      And('the skills lockfile on disk records the update', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+      });
+    },
+  );
 
+  f.Scenario(
+    'If the second skill fails during install, the first skill is still saved on disk and temporary download folders are removed',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'both skills are clean and replacing the review-helper folder fails during install (simulated)',
+        () => {
+          arrangeTwoSkillsHappyPath(mockFileSystem);
+          mockFailRemove({
+            handle: mockFileSystem,
+            absolutePath: secondSkillDir,
+            message: 'simulated second-skill replace failure',
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
         await expect(
           runCLI({
             argv: ['skills', 'update-all'],
@@ -466,234 +882,376 @@ describe('dry-ai skills update-all', () => {
         ).rejects.toThrow(
           /Could not install skill files into: .*review-helper/,
         );
-
-        expect(mockFileSystem.lockfileWrites).toHaveLength(1);
-        const persistedPayload = mockFileSystem.lockfileWrites[0];
-        expect(persistedPayload).toBeDefined();
-
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          }),
-        ).toBe(persistedPayload);
-
-        const persisted = JSON.parse(persistedPayload) as {
-          version: number;
-          skills: {
-            name: string;
-            commit: string;
-            files: Record<string, string>;
-            updatedAt: string;
-          }[];
-        };
-
-        expect(persisted.skills).toHaveLength(2);
-        expect(persisted.skills[0]).toEqual({
-          commit: FETCHED_COMMIT,
-          files: hashFileSet(FIRST_SKILL.remoteFiles),
-          importedAt: SAMPLE_IMPORTED_AT,
-          name: FIRST_SKILL.name,
-          path: FIRST_SKILL.path,
-          repo: SAMPLE_NORMALIZED_REPO,
-          updatedAt: UPDATED_AT,
-        });
-        expect(persisted.skills[1]).toEqual({
-          commit: SECOND_SKILL.originalCommit,
-          files: hashFileSet(SECOND_SKILL.localFiles),
-          importedAt: SAMPLE_IMPORTED_AT,
-          name: SECOND_SKILL.name,
-          path: SECOND_SKILL.path,
-          repo: SAMPLE_NORMALIZED_REPO,
-          updatedAt: SAMPLE_IMPORTED_AT,
-        });
-
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              DEFAULT_SKILLS_SOURCE_ROOT,
-              FIRST_SKILL.name,
-              'SKILL.md',
-            ),
-          }),
-        ).toBe(FIRST_SKILL.remoteFiles['SKILL.md']);
-        expect(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: path.join(
-              DEFAULT_SKILLS_SOURCE_ROOT,
-              SECOND_SKILL.name,
-              'SKILL.md',
-            ),
-          }),
-        ).toBe(SECOND_SKILL.localFiles['SKILL.md']);
       });
 
-      it('prints "No managed skills to update." and exits cleanly when the lockfile has no entries', async () => {
-        storeMockTextFile({
-          handle: mockFileSystem,
-          filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          content: JSON.stringify({ version: 1, skills: [] }),
-        });
-        const env = createTestEnv({ mockFileSystem });
+      Then(
+        'only one save happened: note-taker shows the new commit and review-helper is still on the old commit',
+        () => {
+          expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+          const persisted = JSON.parse(mockFileSystem.lockfileWrites[0]) as {
+            skills: {
+              name: string;
+              commit: string;
+              files: Record<string, string>;
+            }[];
+          };
+          expect(persisted.skills[0].commit).toBe(FETCHED_COMMIT);
+          expect(persisted.skills[1].commit).toBe(SECOND_SKILL.originalCommit);
+        },
+      );
 
+      And(
+        'temporary download folders from the remote copies are cleaned up',
+        () => {
+          assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'If the first skill cannot be fetched from the repository, update-all stops and does not save progress',
+    ({ Given, When, Then }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'both skills are clean but the downloaded copy for note-taker is incomplete (missing SKILL.md)',
+        () => {
+          arrangeTwoSkillsHappyPath(mockFileSystem);
+          configureMockGitClient({
+            mockedGit,
+            fetchedCommit: FETCHED_COMMIT,
+            checkoutImplementation: async (repoRoot) => {
+              if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+                return;
+              }
+              seedRemoteSkillCheckout({
+                handle: mockFileSystem,
+                checkoutDir: repoRoot,
+                skillPath: FIRST_SKILL.path,
+                files: { 'rules.md': '# incomplete remote\n' },
+              });
+              seedRemoteSkillCheckout({
+                handle: mockFileSystem,
+                checkoutDir: repoRoot,
+                skillPath: SECOND_SKILL.path,
+                files: SECOND_SKILL.remoteFiles,
+              });
+            },
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see that the skill could not be fetched, nothing is saved for this run, and temporary download folders are removed',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Failed to fetch skill from ${SAMPLE_NORMALIZED_REPO}\n`,
+          ]);
+          expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+          assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if replacing a skill folder fails, and cleans up the download',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'note-taker is clean and removing the skill folder fails during install (simulated)',
+        () => {
+          arrangeSingleSkillHappyPath(mockFileSystem);
+          mockFailRemove({
+            handle: mockFileSystem,
+            absolutePath: firstSkillDir,
+            message: 'remove staging failed (test)',
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error that the skill files could not be installed into the skill folder',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not install skill files into: ${firstSkillDir}\n`,
+          ]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+        assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if a new subfolder under the skill cannot be listed after install',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'note-taker is clean, the update adds a nested file under sub/, and listing that subfolder fails afterward (simulated)',
+        () => {
+          arrangeSingleSkillHappyPath(mockFileSystem);
+          configureMockGitClient({
+            mockedGit,
+            fetchedCommit: FETCHED_COMMIT,
+            checkoutImplementation: async (repoRoot) => {
+              if (!isAgentsSkillCloneCheckoutDir(repoRoot)) {
+                return;
+              }
+              seedRemoteSkillCheckout({
+                handle: mockFileSystem,
+                checkoutDir: repoRoot,
+                skillPath: FIRST_SKILL.path,
+                files: FIRST_REMOTE_WITH_SUB,
+              });
+            },
+          });
+          mockFailReadDirectory({
+            handle: mockFileSystem,
+            absolutePath: firstSkillSubDir,
+            message: 'read subdir failed (test)',
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error that the nested folder under the skill could not be scanned',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not scan skill directory: ${firstSkillSubDir}\n`,
+          ]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+        assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if a file added by the update cannot be read while recording what was installed',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'note-taker is clean and reading rules.md fails while the tool records installed files (simulated)',
+        () => {
+          arrangeSingleSkillHappyPath(mockFileSystem);
+          mockFailReadFileBytes({
+            handle: mockFileSystem,
+            absolutePath: firstSkillRulesPath,
+            message: 'read rules failed (test)',
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error that rules.md could not be read under the skill folder',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not read file while hashing skill content: ${firstSkillRulesPath}\n`,
+          ]);
+        },
+      );
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+        assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if the skills lockfile cannot be written after a successful install',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'note-taker is clean and saving the skills lockfile fails (simulated)',
+        () => {
+          arrangeSingleSkillHappyPath(mockFileSystem);
+          mockFailWriteFile({
+            handle: mockFileSystem,
+            absolutePath: DEFAULT_SKILLS_LOCKFILE_PATH,
+            message: 'write lockfile failed (test)',
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then(
+        'I see an error saying the skills lockfile could not be written',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not write the skills lockfile: ${DEFAULT_SKILLS_LOCKFILE_PATH}\n`,
+          ]);
+        },
+      );
+
+      And(
+        'the skills lockfile on disk is not updated and temporary download folders are removed',
+        () => {
+          expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+          assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'After a successful update-all, temporary folders used to download remote skills are removed',
+    ({ Given, When, Then }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('two managed skills are clean', () => {
+        arrangeTwoSkillsHappyPath(mockFileSystem);
+      });
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
         await runCLI({
           argv: ['skills', 'update-all'],
           ...env.cliOptions,
         });
-
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-        expect(env.effectStderrMessages).toEqual([]);
-
-        expect(env.effectStdoutMessages).toEqual([
-          'No managed skills to update.\n',
-        ]);
-
-        expect(mockFileSystem.lockfileWrites).toEqual([]);
       });
 
-      // priority: med
-      it.todo(
-        'cleans up every temporary remote-snapshot directory after a successful run',
+      Then(
+        'there are no leftover temporary folders from the remote downloads',
+        () => {
+          assertNoAgentsSkillCheckoutDirs(mockFileSystem);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'Update-all leaves locally edited skills alone, updates the rest, and shows both the good news and the warning',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+      let skipped: Record<string, string>;
+
+      Given(
+        'note-taker has local edits relative to the lockfile and review-helper is clean',
+        () => {
+          const r = arrangeOneSkippedOneUpdated(mockFileSystem);
+          skipped = r.skippedSkillOnDiskFiles;
+        },
       );
 
-      // priority: low
-      it.todo('updates a single-entry lockfile and reports a count of 1');
-
-      // priority: low
-      it.todo(
-        'keeps stderr empty when every managed skill updates successfully',
-      );
-    });
-
-    describe('iteration order', () => {
-      // priority: low
-      it.todo(
-        'iterates managed skills in lockfile order and preserves that order in the stdout summary',
-      );
-    });
-
-    describe('no-op updates', () => {
-      // priority: med
-      it.todo(
-        'proceeds with the update for skills whose local directory is missing entirely (detectLocalSkillEdits returns not-modified)',
-      );
-    });
-
-    describe('local edits without --force', () => {
-      it('skips managed skills with local edits and continues updating the remaining ones', async () => {
-        // Arrange: one skill with local edits (must be skipped) and one
-        // clean skill (must be updated).
-        const { skippedSkillOnDiskFiles } = arrangeOneSkippedOneUpdated();
-        const env = createTestEnv({ mockFileSystem });
-
-        // Act
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
         await runCLI({
           argv: ['skills', 'update-all'],
           ...env.cliOptions,
         });
+      });
 
-        // Assert: `FIRST_SKILL`'s on-disk directory still holds the user's
-        // edit verbatim — a skip must never overwrite local content.
+      Then('the skipped skill directory is left untouched', () => {
         expect(
           readMockTextFile({
             handle: mockFileSystem,
-            filePath: path.join(
-              DEFAULT_SKILLS_SOURCE_ROOT,
-              FIRST_SKILL.name,
-              'SKILL.md',
-            ),
+            filePath: path.join(firstSkillDir, 'SKILL.md'),
           }),
-        ).toBe(skippedSkillOnDiskFiles['SKILL.md']);
+        ).toBe(skipped['SKILL.md']);
+      });
 
-        // Assert: `SECOND_SKILL`'s directory was fully replaced with the
-        // remote snapshot (every remote file present with the remote
-        // bytes), proving the loop continued past the skipped skill.
-        for (const [relativeFilePath, content] of Object.entries(
-          SECOND_SKILL.remoteFiles,
-        )) {
-          expect(
+      And(
+        'I see which skill was updated and a warning about the skipped skill with a hint to use --force',
+        () => {
+          expect(env.effectStdoutMessages).toEqual([
+            [
+              'Updated 1 managed skills:',
+              `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
+              '',
+            ].join('\n'),
+          ]);
+          expect(env.effectStderrMessages).toEqual([
+            [
+              'Skipped 1 managed skills due to local edits. Re-run with --force to overwrite local changes:',
+              `- ${FIRST_SKILL.name} local edits detected in SKILL.md`,
+              '',
+            ].join('\n'),
+          ]);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    'Only skills that actually updated get a new entry on disk; skipped skills keep their previous record',
+    ({ Given, When, Then }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given('one skill is skipped for local edits and one updates', () => {
+        arrangeOneSkippedOneUpdated(mockFileSystem);
+      });
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        });
+      });
+
+      Then(
+        'the saved skills list keeps the skipped skill unchanged and refreshes the one that updated',
+        () => {
+          expect(mockFileSystem.lockfileWrites).toHaveLength(1);
+          const saved = JSON.parse(
             readMockTextFile({
               handle: mockFileSystem,
-              filePath: path.join(
-                DEFAULT_SKILLS_SOURCE_ROOT,
-                SECOND_SKILL.name,
-                relativeFilePath,
-              ),
+              filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
             }),
-          ).toBe(content);
-        }
-      });
-
-      it('reports updated skills on stdout and skipped skills on stderr in the same invocation', async () => {
-        // Arrange: one skill with local edits (must be skipped) and one
-        // clean skill (must be updated).
-        arrangeOneSkippedOneUpdated();
-        const env = createTestEnv({ mockFileSystem });
-
-        // Act
-        await runCLI({
-          argv: ['skills', 'update-all'],
-          ...env.cliOptions,
-        });
-
-        // Assert: Effect stdout has one `logInfo` payload naming only the updated
-        // skill.
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
-
-        expect(env.effectStdoutMessages).toEqual([
-          [
-            'Updated 1 managed skills:',
-            `- ${SECOND_SKILL.name} repo=${SAMPLE_NORMALIZED_REPO} path=${SECOND_SKILL.path} ref=HEAD commit=${FETCHED_COMMIT.slice(0, 7)}`,
-            '',
-          ].join('\n'),
-        ]);
-
-        // Assert: Effect stderr has one combined `logWarn` payload (single
-        // "Skipped N…" preamble followed by one "- <name> local edits
-        // detected in <files>" line per skipped skill) naming only the
-        // skipped skill.
-        expect(env.effectStderrMessages).toEqual([
-          [
-            'Skipped 1 managed skills due to local edits. Re-run with --force to overwrite local changes:',
-            `- ${FIRST_SKILL.name} local edits detected in SKILL.md`,
-            '',
-          ].join('\n'),
-        ]);
-      });
-
-      it('saves the lockfile containing refreshed entries for updated skills and unchanged entries for skipped skills', async () => {
-        // Arrange: one skill with local edits (must be skipped) and one
-        // clean skill (must be updated).
-        arrangeOneSkippedOneUpdated();
-        const env = createTestEnv({ mockFileSystem });
-
-        // Act
-        await runCLI({
-          argv: ['skills', 'update-all'],
-          ...env.cliOptions,
-        });
-
-        // Assert: only the skill that was updated triggers a lockfile write.
-        expect(mockFileSystem.lockfileWrites).toHaveLength(1);
-
-        // Assert: the saved lockfile preserves `FIRST_SKILL`'s entry
-        // byte-identically (original commit, original hashes, original
-        // `importedAt`/`updatedAt`) while `SECOND_SKILL`'s entry is
-        // refreshed with the fetched commit, new remote-file hashes, and a
-        // new `updatedAt`.
-        const savedLockfile = JSON.parse(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          }),
-        ) as unknown;
-        expect(savedLockfile).toEqual({
-          version: 1,
-          skills: [
+          ) as { skills: Record<string, unknown>[] };
+          expect(saved.skills).toEqual([
             {
               commit: FIRST_SKILL.originalCommit,
               files: hashFileSet(FIRST_SKILL.localFiles),
@@ -712,100 +1270,233 @@ describe('dry-ai skills update-all', () => {
               repo: SAMPLE_NORMALIZED_REPO,
               updatedAt: UPDATED_AT,
             },
-          ],
-        });
-      });
+          ]);
+        },
+      );
+    },
+  );
 
-      it('prints "No managed skills were updated." on stdout when every skill was skipped due to local edits', async () => {
-        arrangeBothSkillsSkippedDueToLocalEdits();
-        const env = createTestEnv({ mockFileSystem });
+  f.Scenario(
+    'When every skill has local edits and I do not pass --force, update-all updates nothing and warns about each skip',
+    ({ Given, When, Then }) => {
+      let env: ReturnType<typeof createTestEnv>;
 
+      Given(
+        'every managed skill has local edits relative to the lockfile',
+        () => {
+          arrangeBothSkillsSkippedDueToLocalEdits(mockFileSystem);
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
         await runCLI({
           argv: ['skills', 'update-all'],
           ...env.cliOptions,
         });
+      });
 
-        expect(env.cmderStdoutMessages).toEqual([]);
-        expect(env.cmderStderrMessages).toEqual([]);
+      Then(
+        'I see that no skills were updated and a warning listing every skipped skill',
+        () => {
+          expect(env.effectStdoutMessages).toEqual([
+            'No managed skills were updated.\n',
+          ]);
+          expect(env.effectStderrMessages).toEqual([
+            [
+              'Skipped 2 managed skills due to local edits. Re-run with --force to overwrite local changes:',
+              `- ${FIRST_SKILL.name} local edits detected in SKILL.md`,
+              `- ${SECOND_SKILL.name} local edits detected in SKILL.md`,
+              '',
+            ].join('\n'),
+          ]);
+          expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+        },
+      );
+    },
+  );
 
-        expect(env.effectStdoutMessages).toEqual([
-          'No managed skills were updated.\n',
-        ]);
-        expect(env.effectStderrMessages).toEqual([
-          [
-            'Skipped 2 managed skills due to local edits. Re-run with --force to overwrite local changes:',
-            `- ${FIRST_SKILL.name} local edits detected in SKILL.md`,
-            `- ${SECOND_SKILL.name} local edits detected in SKILL.md`,
-            '',
-          ].join('\n'),
-        ]);
+  f.Scenario(
+    'Passing --force makes update-all overwrite local edits on every managed skill',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
 
-        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
-        const savedLockfile = JSON.parse(
-          readMockTextFile({
-            handle: mockFileSystem,
-            filePath: DEFAULT_SKILLS_LOCKFILE_PATH,
-          }),
-        ) as unknown;
-        expect(savedLockfile).toEqual({
-          version: 1,
-          skills: [
-            {
-              commit: FIRST_SKILL.originalCommit,
-              files: hashFileSet(FIRST_SKILL.localFiles),
-              importedAt: SAMPLE_IMPORTED_AT,
-              name: FIRST_SKILL.name,
-              path: FIRST_SKILL.path,
-              repo: SAMPLE_NORMALIZED_REPO,
-              updatedAt: SAMPLE_IMPORTED_AT,
-            },
-            {
-              commit: SECOND_SKILL.originalCommit,
-              files: hashFileSet(SECOND_SKILL.localFiles),
-              importedAt: SAMPLE_IMPORTED_AT,
-              name: SECOND_SKILL.name,
-              path: SECOND_SKILL.path,
-              repo: SAMPLE_NORMALIZED_REPO,
-              updatedAt: SAMPLE_IMPORTED_AT,
-            },
-          ],
+      Given(
+        'both skills have local edits that would otherwise be skipped',
+        () => {
+          arrangeBothSkillsSkippedDueToLocalEdits(mockFileSystem);
+        },
+      );
+
+      When('I run `dry-ai skills update-all --force`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all', '--force'],
+          ...env.cliOptions,
         });
       });
-    });
 
-    describe('local edits with --force', () => {
-      // priority: med
-      it.todo(
-        'overwrites local edits on every managed skill when --force is passed',
+      Then('both directories match their remote snapshots', () => {
+        for (const [rel, content] of Object.entries(FIRST_SKILL.remoteFiles)) {
+          expect(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(firstSkillDir, rel),
+            }),
+          ).toBe(content);
+        }
+        for (const [rel, content] of Object.entries(SECOND_SKILL.remoteFiles)) {
+          expect(
+            readMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(secondSkillDir, rel),
+            }),
+          ).toBe(content);
+        }
+      });
+
+      And(
+        'the skills lockfile is saved twice and I see no skip warnings',
+        () => {
+          expect(env.effectStderrMessages).toEqual([]);
+          expect(mockFileSystem.lockfileWrites).toHaveLength(2);
+        },
       );
-    });
-  });
+    },
+  );
 
-  describe('sad paths', () => {
-    // priority: low
-    it.todo(
-      'rejects "dry-ai skills update-all" invoked with an unknown flag (e.g. --bogus) with a commander.unknownOption error',
-    );
+  f.Scenario(
+    'Update-all stops with an error if it cannot tell whether a skill folder exists while checking for local edits',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
 
-    // priority: med
-    it.todo(
-      'cleans up temporary remote-snapshot directories even when one skill update throws mid-loop',
-    );
+      Given(
+        'two skills are clean but checking whether the note-taker folder exists fails (simulated)',
+        () => {
+          arrangeTwoSkillsHappyPath(mockFileSystem);
+          mockFailExists({
+            handle: mockFileSystem,
+            absolutePath: firstSkillDir,
+            message: 'exists failed (test)',
+          });
+        },
+      );
 
-    // priority: low
-    it.todo(
-      'continues updating subsequent skills after a non-fatal warning on one skill',
-    );
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
 
-    // priority: med
-    it.todo(
-      'propagates a fatal error from one skill update and stops processing subsequent skills',
-    );
+      Then(
+        'I see an error that the tool could not tell whether the skill path exists',
+        () => {
+          expect(env.effectStderrMessages).toEqual([
+            `Could not check whether path exists: ${firstSkillDir}\n`,
+          ]);
+        },
+      );
 
-    // priority: low
-    // TODO(cli-user-message): when implemented, assert InvalidSkillsLockfile, SkillsLockfileWriteError, and related lockfile I/O user lines (present-error.ts).
-    it.todo(
-      'throws the "Invalid skills lockfile" error when the existing lockfile fails schema validation (version mismatch, duplicate skill name, or malformed entries)',
-    );
-  });
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    'Update-all stops with an error if it cannot list a skill folder while checking for local edits',
+    ({ Given, When, Then, And }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      Given(
+        'two skills are clean but listing the note-taker folder fails while comparing to the lockfile (simulated)',
+        () => {
+          arrangeTwoSkillsHappyPath(mockFileSystem);
+          mockFailReadDirectory({
+            handle: mockFileSystem,
+            absolutePath: firstSkillDir,
+            message: 'read dir failed (test)',
+          });
+        },
+      );
+
+      When('I run `dry-ai skills update-all`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await runCLI({
+          argv: ['skills', 'update-all'],
+          ...env.cliOptions,
+        }).catch(() => undefined);
+      });
+
+      Then('I see an error that the skill folder could not be scanned', () => {
+        expect(env.effectStderrMessages).toEqual([
+          `Could not scan skill directory: ${firstSkillDir}\n`,
+        ]);
+      });
+
+      And('the skills lockfile on disk is not updated', () => {
+        expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+      });
+    },
+  );
+
+  f.Scenario(
+    '`dry-ai skills update-all` rejects a flag the command does not define',
+    ({ When, Then }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      When('I run update-all with `--bogus`', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await expect(
+          runCLI({
+            argv: ['skills', 'update-all', '--bogus'],
+            ...env.cliOptions,
+            exitOverride: true,
+          }),
+        ).rejects.toMatchObject({
+          code: 'commander.unknownOption',
+        });
+      });
+
+      Then(
+        'the command stops before changing any skills or the skills lockfile',
+        () => {
+          expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+          expect(env.effectStdoutMessages).toEqual([]);
+          expect(env.effectStderrMessages).toEqual([]);
+        },
+      );
+    },
+  );
+
+  f.Scenario(
+    '`dry-ai skills update-all` rejects extra words after the command name',
+    ({ When, Then }) => {
+      let env: ReturnType<typeof createTestEnv>;
+
+      When('I pass a stray positional after update-all', async () => {
+        env = createTestEnv({ mockFileSystem });
+        await expect(
+          runCLI({
+            argv: ['skills', 'update-all', 'extra'],
+            ...env.cliOptions,
+            exitOverride: true,
+          }),
+        ).rejects.toMatchObject({
+          code: 'commander.excessArguments',
+        });
+      });
+
+      Then(
+        'the command stops before changing any skills or the skills lockfile',
+        () => {
+          expect(mockFileSystem.lockfileWrites).toHaveLength(0);
+          expect(env.effectStdoutMessages).toEqual([]);
+          expect(env.effectStderrMessages).toEqual([]);
+        },
+      );
+    },
+  );
 });
