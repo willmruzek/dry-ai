@@ -22,9 +22,13 @@ import {
   type TestEnv,
   deleteMockTextFile,
   mockFailCopyDest,
+  mockFailExists,
   mockFailMakeDirectory,
+  mockFailReadDirectory,
+  mockFailReadFileBytes,
   mockFailReadFileString,
   mockFailRemove,
+  mockFailStat,
   mockFailWriteFile,
   normalizeMockPath,
   readMockTextFile,
@@ -3599,11 +3603,197 @@ defineFeature('dry-ai sync', (f) => {
   f.Rule(
     'Filesystem failures fail the run without silent partial success',
     (r) => {
-      // TODO(cli-user-message): add runCLI scenario + assert EnsureDirError (Could not create directory: …).
-      // TODO(cli-user-message): add runCLI scenario + assert PathExistsCheckError (Could not check whether path exists: …).
-      // TODO(cli-user-message): add runCLI scenario + assert ReadDirectoryError (Could not read directory: …).
-      // TODO(cli-user-message): add runCLI scenario + assert SyncStatPathError (Could not inspect path while syncing: …).
-      // TODO(cli-user-message): add runCLI scenario + assert SkillDirectoryWalkError (Could not scan skill directory: …).
+      r.RuleScenario(
+        'Surface ensureDir failures when ensuring agent target roots',
+        ({ Given, When, Then }) => {
+          const failingTargetRoot = normalizeMockPath(
+            path.join(VIRTUAL_HOME_DIR, '.copilot', 'prompts'),
+          );
+          let env: TestEnv;
+          Given(
+            'agent output roots are set up so creating the Copilot prompts tree fails',
+            () => {
+              resetDryAiSyncTestFixtures();
+              mockFailMakeDirectory({
+                handle: mockFileSystem,
+                absolutePath: failingTargetRoot,
+                message: 'mkdir target root failed (test)',
+              });
+            },
+          );
+          When('I run `dry-ai sync`', async () => {
+            env = createTestEnv({ mockFileSystem });
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then(
+            'dry-ai fails before manifest IO with a directory creation error for that target root',
+            () => {
+              expect(env.effectStderrMessages).toEqual([
+                `Could not create directory: ${failingTargetRoot}\n`,
+              ]);
+            },
+          );
+        },
+      );
+      r.RuleScenario(
+        'Surface path-exists check failures while probing sync-manifest.json',
+        ({ Given, When, Then }) => {
+          const manifestPath = normalizeMockPath(
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+          );
+          let env: TestEnv;
+          Given(
+            'the mock filesystem refuses path-exists checks for the manifest file',
+            () => {
+              resetDryAiSyncTestFixtures();
+              mockFailExists({
+                handle: mockFileSystem,
+                absolutePath: manifestPath,
+                message: 'exists check failed (test)',
+              });
+            },
+          );
+          When('I run `dry-ai sync`', async () => {
+            env = createTestEnv({ mockFileSystem });
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then(
+            'dry-ai fails while checking whether the manifest path exists',
+            () => {
+              expect(env.effectStderrMessages).toEqual([
+                `Could not check whether path exists: ${manifestPath}\n`,
+              ]);
+            },
+          );
+        },
+      );
+      r.RuleScenario(
+        'Surface readDirectory failures while listing local skills',
+        ({ Given, When, Then }) => {
+          const skillsRoot = normalizeMockPath(
+            path.join(DEFAULT_CONFIG_ROOT, 'skills'),
+          );
+          let env: TestEnv;
+          Given('the skills directory cannot be listed (simulated)', () => {
+            resetDryAiSyncTestFixtures();
+            mockFailReadDirectory({
+              handle: mockFileSystem,
+              absolutePath: skillsRoot,
+              message: 'read skills dir failed (test)',
+            });
+          });
+          When('I run `dry-ai sync`', async () => {
+            env = createTestEnv({ mockFileSystem });
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then('dry-ai fails while reading the skills directory', () => {
+            expect(env.effectStderrMessages).toEqual([
+              `Could not read directory: ${skillsRoot}\n`,
+            ]);
+          });
+        },
+      );
+      r.RuleScenario(
+        'Surface stat failures while classifying a skill folder entry',
+        ({ Given, When, Then }) => {
+          const statEntryPath = normalizeMockPath(
+            path.join(DEFAULT_CONFIG_ROOT, 'skills', 'stat-fail'),
+          );
+          let env: TestEnv;
+          Given('a skill folder entry cannot be stat-d (simulated)', () => {
+            resetDryAiSyncTestFixtures();
+            storeMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                DEFAULT_CONFIG_ROOT,
+                'skills',
+                'stat-fail',
+                'SKILL.md',
+              ),
+              content: '# Stat fail skill\n',
+            });
+            mockFailStat({
+              handle: mockFileSystem,
+              absolutePath: statEntryPath,
+              message: 'stat failed (test)',
+            });
+          });
+          When('I run `dry-ai sync`', async () => {
+            env = createTestEnv({ mockFileSystem });
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then('dry-ai fails while inspecting that path during sync', () => {
+            expect(env.effectStderrMessages).toEqual([
+              `Could not inspect path while syncing: ${statEntryPath}\n`,
+            ]);
+          });
+        },
+      );
+      r.RuleScenario(
+        'Surface skill directory walk failures while hashing source files',
+        ({ Given, When, Then }) => {
+          const nestedDir = normalizeMockPath(
+            path.join(DEFAULT_CONFIG_ROOT, 'skills', 'walk-fail', 'nested'),
+          );
+          let env: TestEnv;
+          Given(
+            'a nested path under a skill refuses readDirectory during the walk',
+            () => {
+              resetDryAiSyncTestFixtures();
+              storeMockTextFile({
+                handle: mockFileSystem,
+                filePath: path.join(
+                  DEFAULT_CONFIG_ROOT,
+                  'skills',
+                  'walk-fail',
+                  'SKILL.md',
+                ),
+                content: '# Walk fail\n',
+              });
+              storeMockTextFile({
+                handle: mockFileSystem,
+                filePath: path.join(
+                  DEFAULT_CONFIG_ROOT,
+                  'skills',
+                  'walk-fail',
+                  'nested',
+                  'extra.md',
+                ),
+                content: 'x\n',
+              });
+              mockFailReadDirectory({
+                handle: mockFileSystem,
+                absolutePath: nestedDir,
+                message: 'walk read dir failed (test)',
+              });
+            },
+          );
+          When('I run `dry-ai sync`', async () => {
+            env = createTestEnv({ mockFileSystem });
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then('dry-ai fails while scanning the skill directory tree', () => {
+            expect(env.effectStderrMessages).toEqual([
+              `Could not scan skill directory: ${nestedDir}\n`,
+            ]);
+          });
+        },
+      );
       r.RuleScenario(
         'Surface read errors for discovered files',
         ({ Given, When, Then }) => {
@@ -3801,6 +3991,197 @@ defineFeature('dry-ai sync', (f) => {
               );
             },
           );
+        },
+      );
+      r.RuleScenario(
+        'Surface write failures when persisting sync-manifest.json',
+        ({ Given, When, Then }) => {
+          const manifestPath = normalizeMockPath(
+            path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+          );
+          let env: TestEnv;
+          Given(
+            'I have one valid command source and the manifest path refuses writes',
+            () => {
+              resetDryAiSyncTestFixtures();
+              storeMockTextFile({
+                handle: mockFileSystem,
+                filePath: path.join(
+                  DEFAULT_CONFIG_ROOT,
+                  'commands',
+                  'solo-manifest-write-fail.md',
+                ),
+                content: [
+                  '---',
+                  'name: solo-manifest-write-fail',
+                  'description: Solo command',
+                  '---',
+                  '',
+                  'Body',
+                  '',
+                ].join('\n'),
+              });
+              mockFailWriteFile({
+                handle: mockFileSystem,
+                absolutePath: manifestPath,
+                message: 'manifest write failed (test)',
+              });
+            },
+          );
+          When('I run `dry-ai sync`', async () => {
+            env = createTestEnv({ mockFileSystem });
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then(
+            'dry-ai fails when writing the manifest after applying changes',
+            () => {
+              expect(env.effectStderrMessages[0]).toBe(
+                `Could not write file: ${manifestPath}\n`,
+              );
+            },
+          );
+        },
+      );
+      r.RuleScenario(
+        'Surface removePath failures when deleting stale managed outputs',
+        ({ Given, When, Then }) => {
+          const staleOutputPath = normalizeMockPath(
+            getBasicCommandOutputPath('copilot'),
+          );
+          let env: TestEnv;
+          Given(
+            'I synced the basic trio then deleted the command source only',
+            async () => {
+              resetDryAiSyncTestFixtures();
+              arrangeBasicSources();
+              env = createTestEnv({ mockFileSystem });
+              await runCLI({ argv: ['sync'], ...env.cliOptions });
+              removeMockPath({
+                handle: mockFileSystem,
+                targetPath: path.join(
+                  DEFAULT_CONFIG_ROOT,
+                  'commands',
+                  'my-cmd.md',
+                ),
+              });
+              mockFailRemove({
+                handle: mockFileSystem,
+                absolutePath: staleOutputPath,
+                message: 'remove stale failed (test)',
+              });
+            },
+          );
+          When('I run `dry-ai sync` again', async () => {
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then(
+            'dry-ai fails while removing a former managed output path',
+            () => {
+              expect(env.effectStderrMessages).toEqual([
+                `Could not remove path: ${staleOutputPath}\n`,
+              ]);
+            },
+          );
+        },
+      );
+      r.RuleScenario(
+        'Surface glob failures while discovering markdown sources',
+        ({ Given, When, Then }) => {
+          let env: TestEnv;
+          Given('I have a command file under the config commands root', () => {
+            resetDryAiSyncTestFixtures();
+            storeMockTextFile({
+              handle: mockFileSystem,
+              filePath: path.join(
+                DEFAULT_CONFIG_ROOT,
+                'commands',
+                'glob-fail.md',
+              ),
+              content: [
+                '---',
+                'name: glob-fail',
+                'description: Glob fail',
+                '---',
+                '',
+                'Body',
+                '',
+              ].join('\n'),
+            });
+          });
+          When(
+            'I run `dry-ai sync` after glob is rigged to reject once',
+            async () => {
+              env = createTestEnv({ mockFileSystem });
+              mockedGlob.mockImplementationOnce(() =>
+                Promise.reject(new Error('simulated glob failure')),
+              );
+              await runCLI({
+                argv: ['sync'],
+                ...env.cliOptions,
+              }).catch(() => undefined);
+            },
+          );
+          Then('dry-ai fails while globbing command sources', () => {
+            const rootDir = normalizeMockPath(
+              path.join(DEFAULT_CONFIG_ROOT, 'commands'),
+            );
+            expect(env.effectStderrMessages[0]).toBe(
+              `Glob markdown files under ${rootDir}\n`,
+            );
+          });
+        },
+      );
+      r.RuleScenario(
+        'Surface read failures while hashing skill file contents',
+        ({ Given, When, Then }) => {
+          const skillMd = normalizeMockPath(
+            path.join(
+              DEFAULT_CONFIG_ROOT,
+              'skills',
+              'hash-read-fail',
+              'SKILL.md',
+            ),
+          );
+          let env: TestEnv;
+          Given(
+            'a skill SKILL.md cannot be read during content hashing (simulated)',
+            () => {
+              resetDryAiSyncTestFixtures();
+              storeMockTextFile({
+                handle: mockFileSystem,
+                filePath: path.join(
+                  DEFAULT_CONFIG_ROOT,
+                  'skills',
+                  'hash-read-fail',
+                  'SKILL.md',
+                ),
+                content: '# Hash read fail\n',
+              });
+              mockFailReadFileBytes({
+                handle: mockFileSystem,
+                absolutePath: skillMd,
+                message: 'hash read failed (test)',
+              });
+            },
+          );
+          When('I run `dry-ai sync`', async () => {
+            env = createTestEnv({ mockFileSystem });
+            await runCLI({
+              argv: ['sync'],
+              ...env.cliOptions,
+            }).catch(() => undefined);
+          });
+          Then('dry-ai fails while reading bytes for the skill hash', () => {
+            expect(env.effectStderrMessages[0]).toBe(
+              `Could not read file while hashing skill content: ${skillMd}\n`,
+            );
+          });
         },
       );
       r.RuleScenario(
