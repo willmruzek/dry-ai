@@ -1,4 +1,3 @@
-import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
 import { runCliEffect } from '../../cli/run-effect.js';
@@ -9,27 +8,14 @@ import {
   formatManagedSkillSummary,
   listLocalSkillDirectories,
   loadSkillsLockfile,
-  type LoadSkillsLockfileError,
 } from '../../lib/skills.js';
-import type {
-  EnsureSkillsSourceRootError,
-  ListSkillSubdirectoriesError,
-} from '../../lib/sync.js';
 
 /**
  * Effect program: ensure skills root, load lockfile and local directories, log
  * listing output. Composes with `Effect.runPromise` or `Effect.provide` in
  * tests without involving Commander.
  */
-function skillsListEffect(options: {
-  env: CommandEnv;
-}): Effect.Effect<
-  void,
-  | LoadSkillsLockfileError
-  | EnsureSkillsSourceRootError
-  | ListSkillSubdirectoriesError,
-  FileSystem
-> {
+function skillsListEffect(options: { env: CommandEnv }) {
   const { env } = options;
 
   return Effect.gen(function* () {

@@ -1,10 +1,8 @@
-import type { FileSystem } from '@effect/platform/FileSystem';
 import { Effect } from 'effect';
 
 import { runCliEffect } from '../../cli/run-effect.js';
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
-  type LoadSkillsLockfileError,
   findManagedSkill,
   formatManagedSkillSummary,
   loadSkillsLockfile,
@@ -13,11 +11,6 @@ import {
   removeManagedSkillDirectory,
   saveSkillsLockfile,
 } from '../../lib/skills.js';
-import type {
-  RemoveManagedSkillDirectoryError,
-  SkillsLockfileEncodeError,
-  SkillsLockfileWriteError,
-} from '../../lib/sync.js';
 
 type SkillsRemoveInput = {
   skillName: string;
@@ -33,20 +26,13 @@ type SkillsRemoveInput = {
 export function skillsRemoveEffect(options: {
   env: CommandEnv;
   input: SkillsRemoveInput;
-}): Effect.Effect<
-  void,
-  | LoadSkillsLockfileError
-  | ManagedSkillNotFoundError
-  | SkillsLockfileEncodeError
-  | SkillsLockfileWriteError
-  | RemoveManagedSkillDirectoryError,
-  FileSystem
-> {
+}) {
   const { env, input } = options;
   const { skillName } = input;
 
   return Effect.gen(function* () {
     const lockfile = yield* loadSkillsLockfile(env);
+
     const managedSkill = findManagedSkill(lockfile, { name: skillName });
 
     if (!managedSkill) {

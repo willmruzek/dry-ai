@@ -1,9 +1,7 @@
-import type { FileSystem } from '@effect/platform/FileSystem';
 import { Data, Effect } from 'effect';
 
 import { runCliEffect } from '../../cli/run-effect.js';
 import type { CommandEnv } from '../../lib/command-env.js';
-import type { PathExistsCheckError } from '../../lib/fs.js';
 import {
   cleanupRemoteRepoCheckout,
   cloneRemoteRepo,
@@ -15,8 +13,6 @@ import {
   findManagedSkill,
   formatManagedSkillSummary,
   getManagedSkillDirectory,
-  type GitRemoteOperationError,
-  type LoadSkillsLockfileError,
   loadSkillsLockfile,
   normalizeImportedSkillPath,
   normalizeRemoteRepo,
@@ -29,22 +25,7 @@ import {
   timestampNow,
   upsertManagedSkill,
   removeManagedSkillDirectory,
-  type RemoteSkillCheckoutEscapeError,
-  type RemoteSkillDirectoryInvalid,
-  type RemoteSkillDirectoryResolveError,
-  type RemoteSkillImportPathInvalidError,
 } from '../../lib/skills.js';
-import type {
-  EnsureSkillsSourceRootError,
-  GitCheckoutTempDirectoryError,
-  RemoteSkillValidationFsError,
-  ReplaceManagedSkillOutputError,
-  SkillContentHashReadError,
-  SkillDirectoryWalkError,
-  SkillsLockfileEncodeError,
-  SkillsLockfileExistsCheckError,
-  SkillsLockfileWriteError,
-} from '../../lib/sync.js';
 
 /**
  * Error representing invalid `skills add` arguments or import preconditions
@@ -85,26 +66,6 @@ export class SkillsAddLockfilePersistAfterInstallError extends Data.TaggedError(
     return `Failed to persist skills lockfile after installing to ${this.targetDir} (installed files removal was attempted)`;
   }
 }
-
-export type SkillsAddEffectError =
-  | EnsureSkillsSourceRootError
-  | GitCheckoutTempDirectoryError
-  | GitRemoteOperationError
-  | LoadSkillsLockfileError
-  | PathExistsCheckError
-  | RemoteSkillCheckoutEscapeError
-  | RemoteSkillDirectoryInvalid
-  | RemoteSkillDirectoryResolveError
-  | RemoteSkillImportPathInvalidError
-  | RemoteSkillValidationFsError
-  | ReplaceManagedSkillOutputError
-  | SkillContentHashReadError
-  | SkillDirectoryWalkError
-  | SkillsAddValidationError
-  | SkillsAddLockfilePersistAfterInstallError
-  | SkillsLockfileEncodeError
-  | SkillsLockfileExistsCheckError
-  | SkillsLockfileWriteError;
 
 /**
  * Normalizes and de-duplicates requested skill names while preserving their input order.
@@ -178,7 +139,7 @@ type SkillsAddInput = {
 export function skillsAddEffect(options: {
   env: CommandEnv;
   input: SkillsAddInput;
-}): Effect.Effect<void, SkillsAddEffectError, FileSystem> {
+}) {
   const { env, input } = options;
   const { context } = env;
 

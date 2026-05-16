@@ -184,12 +184,6 @@ export class GitRemoteOperationError extends Data.TaggedError(
   }
 }
 
-/** Errors produced by {@link loadSkillsLockfile} (I/O or invalid JSON/schema). */
-export type LoadSkillsLockfileError =
-  | InvalidSkillsLockfile
-  | SkillsLockfileExistsCheckError
-  | SkillsLockfileReadContentsError;
-
 export type ManagedSkill = Schema.Schema.Type<typeof SkillLockEntry>;
 export type SkillsLockfile = Schema.Schema.Type<typeof SkillsLockfile>;
 export type ManagedSkillFiles = Schema.Schema.Type<typeof ManagedSkillFiles>;
@@ -304,9 +298,7 @@ export function pathExistsInFileSystem(
  * @param env - Environment containing `context` with `skillsLockfilePath`.
  * @returns Effect that succeeds with the decoded and lexicographically sorted `SkillsLockfile`, or fails with {@link InvalidSkillsLockfile} when a lockfile exists but fails schema parsing/validation, or with a tagged filesystem error when probing or reading fails.
  */
-export function loadSkillsLockfile(
-  env: SkillsLockfileEnv,
-): Effect.Effect<SkillsLockfile, LoadSkillsLockfileError, FileSystem> {
+export function loadSkillsLockfile(env: SkillsLockfileEnv) {
   const { context } = env;
 
   return Effect.gen(function* () {

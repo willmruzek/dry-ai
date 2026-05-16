@@ -73,8 +73,7 @@ function managedLockfileEntry(skill: {
 }
 
 /**
- * Expected `skills list` summary segment for fixtures above — not imported from
- * production code so this file only *acts* on the app via {@link runCLI}.
+ * Expected managed-skill summary segment for the fixtures above (same shape as CLI list output).
  */
 function expectedManagedSkillSummaryFromFixture(skill: {
   readonly name: string;
