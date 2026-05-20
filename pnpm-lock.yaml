@@ -55,9 +55,6 @@ importers:
       simple-git:
         specifier: ^3.35.2
         version: 3.35.2
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
     devDependencies:
       '@amiceli/vitest-cucumber':
         specifier: ^6.5.0
@@ -3009,12 +3006,6 @@ packages:
       }
     engines: { node: '>=10' }
 
-  zod@4.3.6:
-    resolution:
-      {
-        integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==,
-      }
-
 snapshots:
   '@amiceli/vitest-cucumber@6.5.0(vitest@4.1.4)':
     dependencies:
@@ -4644,5 +4635,3 @@ snapshots:
       yargs-parser: 21.1.1
 
   yocto-queue@0.1.0: {}
-
-  zod@4.3.6: {}
