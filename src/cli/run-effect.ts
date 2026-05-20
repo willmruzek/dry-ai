@@ -43,10 +43,7 @@ export async function runCliEffect<A, E>(
     }),
   );
 
-  const toRun =
-    env.runtime.loggerLayer !== undefined
-      ? instrumented.pipe(Effect.provide(env.runtime.loggerLayer))
-      : instrumented;
+  const toRun = instrumented.pipe(Effect.provide(env.runtime.loggerLayer));
 
   const exit = await Effect.runPromiseExit(toRun);
 

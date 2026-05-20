@@ -12,10 +12,10 @@ export type CLIRuntime = {
   /** Layer providing `@effect/platform` {@link FileSystem} for lockfile and related I/O. */
   fileSystemLayer: Layer<FileSystem>;
   /**
-   * When set (tests), replaces the default Effect logger so `Effect.log*` is
-   * captured alongside Commander output. Omitted in production — default logger is used.
+   * Routes `Effect.log*` through a message-only logger (no logfmt metadata).
+   * Production uses stdout/stderr; tests replace this layer to capture lines.
    */
-  loggerLayer?: Layer<never>;
+  loggerLayer: Layer<never>;
 };
 
 /**

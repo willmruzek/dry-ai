@@ -18,6 +18,7 @@ import {
   resolveRequestedOutputRoot,
   type AgentsContext,
 } from './lib/context.js';
+import { createProductionLoggerLayer } from './lib/logger-layer.js';
 import { NonEmptyTrimmedString } from './lib/schemas.js';
 
 export type { CLIRuntime, CommandEnv } from './lib/command-env.js';
@@ -47,7 +48,7 @@ type ResolvedCLIOptions = {
   version: string;
   stdioWriters: StdioWriters;
   fileSystemLayer: Layer<FileSystem>;
-  loggerLayer?: Layer<never>;
+  loggerLayer: Layer<never>;
 };
 
 /**
@@ -110,9 +111,7 @@ function resolveCLIOptions(options: CLIOptions): ResolvedCLIOptions {
     version: options.version,
     stdioWriters: options.stdioWriters ?? createProductionStdioWriters(),
     fileSystemLayer: options.fileSystemLayer,
-    ...(options.loggerLayer !== undefined
-      ? { loggerLayer: options.loggerLayer }
-      : {}),
+    loggerLayer: options.loggerLayer ?? createProductionLoggerLayer(),
   };
 }
 
@@ -134,9 +133,7 @@ export function createCLI(options: CLIOptions): Command {
   const stdioWriters = resolvedOptions.stdioWriters;
   const runtime: CLIRuntime = {
     fileSystemLayer: resolvedOptions.fileSystemLayer,
-    ...(resolvedOptions.loggerLayer !== undefined
-      ? { loggerLayer: resolvedOptions.loggerLayer }
-      : {}),
+    loggerLayer: resolvedOptions.loggerLayer,
   };
 
   const resolveEnv = (): CommandEnv => {

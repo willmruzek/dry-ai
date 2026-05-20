@@ -10,7 +10,7 @@ import {
   type FileSystem,
   type MakeTempDirectoryOptions,
 } from '@effect/platform/FileSystem';
-import { Effect, Logger } from 'effect';
+import { Effect } from 'effect';
 import type { Layer } from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Ref from 'effect/Ref';
@@ -20,6 +20,7 @@ import { vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 
 import { type CLIOptions, type StdioWriters } from '../src/cli.js';
+import { createMessageOnlyLoggerLayer } from '../src/lib/logger-layer.js';
 
 enableMapSet();
 
@@ -193,16 +194,6 @@ export function createTestStdioWriters(): TestStdioWriters {
   };
 }
 
-function formatTestEffectLogMessage(message: unknown): string {
-  if (Array.isArray(message)) {
-    return message
-      .map((part) => (typeof part === 'string' ? part : String(part)))
-      .join(' ');
-  }
-
-  return typeof message === 'string' ? message : String(message);
-}
-
 /**
  * Test-only Effect logger: plain message + newline; captured in dedicated
  * buffers separate from Commander {@link StdioWriters}.
@@ -213,22 +204,14 @@ export function createTestEffectLoggerLayer(options: {
 }): Layer<never> {
   const { effectStdoutMessages, effectStderrMessages } = options;
 
-  const logger = Logger.make<unknown, void>((opts) => {
-    const line = `${formatTestEffectLogMessage(opts.message)}\n`;
-
-    switch (opts.logLevel._tag) {
-      case 'Fatal':
-      case 'Error':
-      case 'Warning':
-        effectStderrMessages.push(line);
-        break;
-      default:
-        effectStdoutMessages.push(line);
-        break;
-    }
+  return createMessageOnlyLoggerLayer({
+    writeOut: (line) => {
+      effectStdoutMessages.push(line);
+    },
+    writeErr: (line) => {
+      effectStderrMessages.push(line);
+    },
   });
-
-  return Logger.replace(Logger.defaultLogger, logger);
 }
 
 function mockPathExistsSnapshot(
