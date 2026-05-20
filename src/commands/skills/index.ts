@@ -1,13 +1,13 @@
 import { Command } from 'commander';
 import dedent from 'dedent';
-import { z } from 'zod';
+import { Schema } from 'effect';
 
 import type { CommandEnv } from '../../lib/command-env.js';
 import {
-  nonEmptyOptionStringSchema,
   parseOptionsObject,
   parseOptionValue,
 } from '../../lib/command-options.js';
+import { NonEmptyTrimmedString } from '../../lib/schemas.js';
 
 import { runSkillsAddCommand } from './add.js';
 import { runSkillsListCommand } from './list.js';
@@ -15,20 +15,23 @@ import { runSkillsRemoveCommand } from './remove.js';
 import { runSkillsUpdateAllCommand } from './update-all.js';
 import { runSkillsUpdateCommand } from './update.js';
 
-const skillsImportOptionsSchema = z.object({
-  skill: z.array(z.string()).optional(),
-  as: nonEmptyOptionStringSchema.optional(),
-  pin: z.boolean().optional().default(false),
-  path: nonEmptyOptionStringSchema.optional(),
-  ref: nonEmptyOptionStringSchema.optional(),
-});
-type SkillsImportOptions = z.output<typeof skillsImportOptionsSchema>;
-
-const skillsUpdateOptionsSchema = z.object({
-  force: z.boolean().optional().default(false),
+const SkillsImportOptionsSchema = Schema.Struct({
+  skill: Schema.optionalWith(Schema.Array(Schema.String), {
+    default: () => [],
+  }),
+  as: Schema.optional(NonEmptyTrimmedString),
+  pin: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  path: Schema.optional(NonEmptyTrimmedString),
+  ref: Schema.optional(NonEmptyTrimmedString),
 });
 
-type SkillsUpdateOptions = z.output<typeof skillsUpdateOptionsSchema>;
+type SkillsImportOptions = Schema.Schema.Type<typeof SkillsImportOptionsSchema>;
+
+const SkillsUpdateOptionsSchema = Schema.Struct({
+  force: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+});
+
+type SkillsUpdateOptions = Schema.Schema.Type<typeof SkillsUpdateOptionsSchema>;
 
 /**
  * Registers the managed skills command tree on the parent CLI program.
@@ -82,7 +85,7 @@ export function addSkillsCommand(input: {
       '--path <repoPath>',
       'Resolve each --skill from a different repository subdirectory; use . for the repository root instead of the default skills/ directory',
       parseOptionValue({
-        schema: nonEmptyOptionStringSchema,
+        schema: NonEmptyTrimmedString,
         optionLabel: '--path',
       }),
     )
@@ -90,7 +93,7 @@ export function addSkillsCommand(input: {
       '--as <name>',
       'Store the imported skill under a different local managed name',
       parseOptionValue({
-        schema: nonEmptyOptionStringSchema,
+        schema: NonEmptyTrimmedString,
         optionLabel: '--as',
       }),
     )
@@ -102,13 +105,13 @@ export function addSkillsCommand(input: {
       '--ref <gitRef>',
       'Fetch a specific git ref instead of the remote default',
       parseOptionValue({
-        schema: nonEmptyOptionStringSchema,
+        schema: NonEmptyTrimmedString,
         optionLabel: '--ref',
       }),
     )
     .action(async (repo: string, options) => {
       const parsedOptions: SkillsImportOptions = parseOptionsObject({
-        schema: skillsImportOptionsSchema,
+        schema: SkillsImportOptionsSchema,
         options,
         optionsLabel: 'skills add options',
       });
@@ -116,7 +119,7 @@ export function addSkillsCommand(input: {
       await runSkillsAddCommand(resolveEnv(), {
         repo,
         repoPath: parsedOptions.path,
-        skillNames: parsedOptions.skill ?? [],
+        skillNames: parsedOptions.skill,
         asName: parsedOptions.as,
         pin: parsedOptions.pin,
         ref: parsedOptions.ref,
@@ -139,7 +142,7 @@ export function addSkillsCommand(input: {
     )
     .action(async (skillName: string, options) => {
       const parsedOptions: SkillsUpdateOptions = parseOptionsObject({
-        schema: skillsUpdateOptionsSchema,
+        schema: SkillsUpdateOptionsSchema,
         options,
         optionsLabel: 'skills update options',
       });
@@ -159,7 +162,7 @@ export function addSkillsCommand(input: {
     )
     .action(async (options) => {
       const parsedOptions: SkillsUpdateOptions = parseOptionsObject({
-        schema: skillsUpdateOptionsSchema,
+        schema: SkillsUpdateOptionsSchema,
         options,
         optionsLabel: 'skills update-all options',
       });

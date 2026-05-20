@@ -3,9 +3,9 @@ import path from 'node:path';
 
 import { defineFeature } from '@amiceli/vitest-cucumber';
 import { CommanderError } from 'commander';
+import * as Schema from 'effect/Schema';
 import { glob } from 'glob';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 
 import { runCLI, type CLIOptions } from '../../../src/cli.js';
 import type { SyncAgent } from '../../../src/lib/agents.js';
@@ -199,6 +199,27 @@ function clearCapturedOutput(
  * Expected per-target `outputPath` for `arrangeBasicSources()` (my-cmd, my-rule, my-skill).
  * Test fixture for the two-agent layout.
  */
+/** On-disk `sync-manifest.json` version the CLI is expected to write in these tests. */
+const EXPECTED_SYNC_MANIFEST_VERSION = 2 as const;
+
+const TestSyncManifestEntrySchema = Schema.Struct({
+  agent: Schema.String,
+  kind: Schema.Literal('command', 'rule', 'skill'),
+  name: Schema.String.pipe(Schema.minLength(1)),
+  outputPath: Schema.String.pipe(Schema.minLength(1)),
+});
+
+const TestSyncManifestSchema = Schema.Struct({
+  version: Schema.Literal(EXPECTED_SYNC_MANIFEST_VERSION),
+  outputs: Schema.Array(TestSyncManifestEntrySchema),
+});
+
+const TestSyncManifestJson = Schema.parseJson(TestSyncManifestSchema);
+const decodeTestSyncManifestJson =
+  Schema.decodeUnknownSync(TestSyncManifestJson);
+
+type TestSyncManifest = typeof TestSyncManifestSchema.Type;
+
 type ManifestTrioRow = {
   agent: 'copilot' | 'cursor';
   kind: 'command' | 'rule' | 'skill';
@@ -278,20 +299,9 @@ function buildExpectedTrioProductFilePaths(outputRoot: string): string[] {
   ];
 }
 
-/** Fixture `sync-manifest.json` shape; `version` must match the CLI’s on-disk schema. */
-const MOCK_SYNC_MANIFEST_VERSION = 2 as const;
-
-const mockSyncManifestSchema = z.object({
-  version: z.literal(MOCK_SYNC_MANIFEST_VERSION),
-  outputs: z.array(
-    z.object({
-      agent: z.enum(['copilot', 'cursor']),
-      kind: z.enum(['command', 'rule', 'skill']),
-      name: z.string().min(1),
-      outputPath: z.string().min(1),
-    }),
-  ),
-});
+function parseTestSyncManifestJson(raw: string): TestSyncManifest {
+  return decodeTestSyncManifestJson(raw);
+}
 
 function compareManifestEntryTuples(
   left: { agent: string; kind: string; name: string; outputPath: string },
@@ -311,7 +321,7 @@ function assertMockSyncManifestMatchesExpectedRows(
 ): void {
   const manifestPath = path.join(configRoot, 'sync-manifest.json');
   const raw = readMockTextFile({ handle: state, filePath: manifestPath });
-  const { outputs } = mockSyncManifestSchema.parse(JSON.parse(raw));
+  const { outputs } = parseTestSyncManifestJson(raw);
 
   const normalizedExpected = expectedRows.map((row) => ({
     ...row,
@@ -533,14 +543,12 @@ function arrangeMixedConfigSources(): void {
   }
 }
 
-function readSyncManifest(): z.infer<typeof mockSyncManifestSchema> {
-  return mockSyncManifestSchema.parse(
-    JSON.parse(
-      readMockTextFile({
-        handle: mockFileSystem,
-        filePath: path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
-      }),
-    ),
+function readSyncManifest(): TestSyncManifest {
+  return parseTestSyncManifestJson(
+    readMockTextFile({
+      handle: mockFileSystem,
+      filePath: path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+    }),
   );
 }
 
@@ -2357,8 +2365,8 @@ defineFeature('dry-ai sync', (f) => {
               handle: mockFileSystem,
               filePath: path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
             });
-            const parsed = mockSyncManifestSchema.parse(JSON.parse(raw));
-            expect(parsed.version).toBe(MOCK_SYNC_MANIFEST_VERSION);
+            const parsed = parseTestSyncManifestJson(raw);
+            expect(parsed.version).toBe(EXPECTED_SYNC_MANIFEST_VERSION);
             assertMockSyncManifestMatchesTrio(
               mockFileSystem,
               DEFAULT_CONFIG_ROOT,
@@ -3200,16 +3208,11 @@ defineFeature('dry-ai sync', (f) => {
                 ),
               ),
             ).toBe(false);
-            const manifest = mockSyncManifestSchema.parse(
-              JSON.parse(
-                readMockTextFile({
-                  handle: mockFileSystem,
-                  filePath: path.join(
-                    DEFAULT_CONFIG_ROOT,
-                    'sync-manifest.json',
-                  ),
-                }),
-              ),
+            const manifest = parseTestSyncManifestJson(
+              readMockTextFile({
+                handle: mockFileSystem,
+                filePath: path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
+              }),
             );
             expect(manifest.outputs).toEqual([]);
           },
@@ -3563,7 +3566,7 @@ defineFeature('dry-ai sync', (f) => {
                 handle: mockFileSystem,
                 filePath: path.join(DEFAULT_CONFIG_ROOT, 'sync-manifest.json'),
                 content: JSON.stringify({
-                  version: MOCK_SYNC_MANIFEST_VERSION,
+                  version: EXPECTED_SYNC_MANIFEST_VERSION,
                   outputs: [
                     {
                       agent: 'retired-agent',

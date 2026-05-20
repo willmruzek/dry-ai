@@ -10,7 +10,6 @@ import * as Either from 'effect/Either';
 import type { ParseError } from 'effect/ParseResult';
 import * as Schema from 'effect/Schema';
 import { glob } from 'glob';
-import { z } from 'zod';
 
 import {
   buildCommandArtifactSpecsByAgent,
@@ -21,6 +20,7 @@ import {
   isSyncAgent,
   listTargetRootPaths,
   SYNC_AGENTS,
+  SyncAgentSchema,
   SYNC_ITEM_KINDS,
   type ArtifactSpec,
   type OwnershipKey,
@@ -31,10 +31,10 @@ import {
 } from './agents.js';
 import type { CommandEnv } from './command-env.js';
 import {
-  commandFrontmatterSchema,
+  CommandFrontmatterSchema,
   parseMdWithFrontmatter,
   renderMarkdown,
-  ruleFrontmatterSchema,
+  RuleFrontmatterSchema,
   validateFrontmatter,
 } from './frontmatter.js';
 import {
@@ -53,6 +53,7 @@ import {
   type CopyDirectoryContentsError,
   type CopyDirectoryEntryError,
 } from './fs.js';
+import { NonEmptyTrimmedString } from './schemas.js';
 import { computeDirectoryHashes, pathExistsInFileSystem } from './skills.js';
 
 /** Skills: ensure `~/.config/.../skills` (or configured skills root) exists. */
@@ -309,23 +310,16 @@ type SyncChangeType = SyncAppliedChangeType | 'removed';
 
 const chalk = new Chalk({ level: 3 });
 
-const syncAgentSchema = z.custom<SyncAgent>(
-  (value) => typeof value === 'string' && isSyncAgent(value),
-  {
-    message: 'Expected one configured sync agent.',
-  },
-);
-
-const syncManifestEntrySchema = z.object({
-  agent: syncAgentSchema,
-  kind: z.enum(SYNC_ITEM_KINDS),
-  name: z.string().min(1),
-  outputPath: z.string().min(1),
+export const SyncManifestEntrySchema = Schema.Struct({
+  agent: SyncAgentSchema,
+  kind: Schema.Literal(...SYNC_ITEM_KINDS),
+  name: NonEmptyTrimmedString,
+  outputPath: NonEmptyTrimmedString,
 });
 
-const syncManifestSchema = z.object({
-  version: z.literal(SYNC_MANIFEST_VERSION),
-  outputs: z.array(syncManifestEntrySchema),
+export const SyncManifestSchema = Schema.Struct({
+  version: Schema.Literal(SYNC_MANIFEST_VERSION),
+  outputs: Schema.Array(SyncManifestEntrySchema),
 });
 
 type DesiredSyncSpec = {
@@ -394,28 +388,13 @@ type SyncApplyResult = {
   removedEntries: SyncManifestEntry[];
 };
 
-type SyncManifestEntry = z.output<typeof syncManifestEntrySchema>;
-type SyncManifest = z.output<typeof syncManifestSchema>;
+export type SyncManifestEntry = typeof SyncManifestEntrySchema.Type;
+export type SyncManifest = typeof SyncManifestSchema.Type;
 
 /** Encodes manifest for `sync-manifest.json` (2-space indent; Effect Schema JSON path, not raw `JSON.stringify`). */
-const SYNC_MANIFEST_FOR_FILE = Schema.parseJson(
-  Schema.Struct({
-    version: Schema.Literal(SYNC_MANIFEST_VERSION),
-    outputs: Schema.Array(
-      Schema.Struct({
-        agent: Schema.String,
-        kind: Schema.Union(
-          Schema.Literal('command'),
-          Schema.Literal('rule'),
-          Schema.Literal('skill'),
-        ),
-        name: Schema.String,
-        outputPath: Schema.String,
-      }),
-    ),
-  }),
-  { space: 2 },
-);
+const SYNC_MANIFEST_FOR_FILE = Schema.parseJson(SyncManifestSchema, {
+  space: 2,
+});
 
 function encodeSyncManifestJsonLines(manifest: SyncManifest): string {
   return `${Either.getOrThrow(
@@ -563,10 +542,11 @@ export function loadSyncManifest(
 
     const parsedManifest: unknown = parsedEither.right;
 
-    const strictResult = syncManifestSchema.safeParse(parsedManifest);
+    const strictResult =
+      Schema.decodeUnknownEither(SyncManifestSchema)(parsedManifest);
 
-    if (strictResult.success) {
-      return strictResult.data;
+    if (Either.isRight(strictResult)) {
+      return strictResult.right;
     }
 
     const unregisteredAgent = findUnregisteredManifestAgent(parsedManifest);
@@ -601,7 +581,9 @@ export function saveSyncManifest(
 /**
  * Creates a normalized sync manifest with deterministic output ordering.
  */
-export function createSyncManifest(entries: SyncManifestEntry[]): SyncManifest {
+export function createSyncManifest(
+  entries: readonly SyncManifestEntry[],
+): SyncManifest {
   const entriesByOutputPath = new Map<string, SyncManifestEntry>();
 
   for (const entry of entries) {
@@ -921,7 +903,7 @@ function buildCommandSyncSpecs(
       const commandMetadata = yield* validateFrontmatter({
         filePath,
         metadata,
-        schema: commandFrontmatterSchema,
+        schema: CommandFrontmatterSchema,
       });
 
       if (!commandMetadata) {
@@ -979,7 +961,7 @@ function buildRuleSyncSpecs(
       const ruleMetadata = yield* validateFrontmatter({
         filePath,
         metadata,
-        schema: ruleFrontmatterSchema,
+        schema: RuleFrontmatterSchema,
       });
 
       if (!ruleMetadata) {
@@ -1252,7 +1234,7 @@ export function collectManifestEntriesFromApplied(
  * Partitions previous manifest entries into removed and preserved entries.
  */
 function partitionManifestEntries(
-  manifestEntries: SyncManifestEntry[],
+  manifestEntries: readonly SyncManifestEntry[],
   input: {
     desiredOutputPaths: ReadonlySet<string>;
     skippedOwnershipKeys: ReadonlySet<OwnershipKey>;

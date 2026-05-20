@@ -7,10 +7,9 @@ import { runSyncCommand } from './commands/sync.js';
 import { describeSupportedAgents } from './lib/agents.js';
 import type { CLIRuntime, CommandEnv } from './lib/command-env.js';
 import {
-  nonEmptyOptionStringSchema,
   parseOptionValue,
   parseOptionsObject,
-  rootOptionsSchema,
+  RootOptionsSchema,
   type RootOptions,
 } from './lib/command-options.js';
 import {
@@ -19,6 +18,7 @@ import {
   resolveRequestedOutputRoot,
   type AgentsContext,
 } from './lib/context.js';
+import { NonEmptyTrimmedString } from './lib/schemas.js';
 
 export type { CLIRuntime, CommandEnv } from './lib/command-env.js';
 export type { RootOptions } from './lib/command-options.js';
@@ -55,7 +55,7 @@ type ResolvedCLIOptions = {
  */
 function getRootOptions(program: Command): RootOptions {
   return parseOptionsObject({
-    schema: rootOptionsSchema,
+    schema: RootOptionsSchema,
     options: program.opts(),
     optionsLabel: 'root options',
   });
@@ -179,7 +179,7 @@ export function createCLI(options: CLIOptions): Command {
       '--config-root <path>',
       'Read configs from a different root instead of ~/.config/dry-ai',
       parseOptionValue({
-        schema: nonEmptyOptionStringSchema,
+        schema: NonEmptyTrimmedString,
         optionLabel: '--config-root',
       }),
     )
@@ -187,7 +187,7 @@ export function createCLI(options: CLIOptions): Command {
       '--output-root <path>',
       'Write generated output under a different root instead of the default home directory',
       parseOptionValue({
-        schema: nonEmptyOptionStringSchema,
+        schema: NonEmptyTrimmedString,
         optionLabel: '--output-root',
       }),
     )

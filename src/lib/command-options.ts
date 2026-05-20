@@ -1,16 +1,26 @@
 import { InvalidArgumentError } from 'commander';
-import { z } from 'zod';
+import * as Either from 'effect/Either';
+import * as ParseResult from 'effect/ParseResult';
+import * as Schema from 'effect/Schema';
+import type { ParseOptions } from 'effect/SchemaAST';
 
-export const nonEmptyOptionStringSchema = z.string().trim().min(1);
+import { NonEmptyTrimmedString } from './schemas.js';
 
-export const rootOptionsSchema = z.object({
-  test: z.boolean().optional().default(false),
-  debug: z.boolean().optional().default(false),
-  configRoot: nonEmptyOptionStringSchema.optional(),
-  outputRoot: nonEmptyOptionStringSchema.optional(),
+const effectParseOptions = {
+  errors: 'all',
+} as const satisfies ParseOptions;
+
+/**
+ * Effect Schema for top-level CLI options (decoded shape).
+ */
+export const RootOptionsSchema = Schema.Struct({
+  test: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  debug: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  configRoot: Schema.optional(NonEmptyTrimmedString),
+  outputRoot: Schema.optional(NonEmptyTrimmedString),
 });
 
-export type RootOptions = z.output<typeof rootOptionsSchema>;
+export type RootOptions = typeof RootOptionsSchema.Type;
 
 /**
  * Whether CLI failure diagnostics are enabled (`--debug` or `DRY_AI_DEBUG`).
@@ -39,59 +49,67 @@ export function wasRequestedOutputRootUsed(rootOptions: RootOptions): boolean {
   return rootOptions.test || rootOptions.outputRoot !== undefined;
 }
 
+function formatEffectParseIssues(issue: ParseResult.ParseIssue): string {
+  return ParseResult.ArrayFormatter.formatIssueSync(issue)
+    .map((item) => {
+      const issuePath = item.path.length > 0 ? `${item.path.join('.')}: ` : '';
+      return `${issuePath}${item.message}`;
+    })
+    .join('; ');
+}
+
 /**
- * Parses a value with a Zod schema, throwing a Commander InvalidArgumentError on failure.
+ * Parses a value with an Effect Schema, throwing a Commander InvalidArgumentError on failure.
  */
-function parseWithSchema<TSchema extends z.ZodTypeAny>({
+function parseWithEffectSchema<A, I>({
   schema,
   value,
   label,
 }: {
-  schema: TSchema;
+  schema: Schema.Schema<A, I, never>;
   value: unknown;
   label: string;
-}): z.output<TSchema> {
-  const result = schema.safeParse(value);
+}): A {
+  const result = Schema.decodeUnknownEither(schema)(value, effectParseOptions);
 
-  if (result.success) {
-    return result.data;
+  if (Either.isRight(result)) {
+    return result.right;
   }
 
-  const issues = result.error.issues
-    .map((issue) => {
-      const issuePath =
-        issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
-      return `${issuePath}${issue.message}`;
-    })
-    .join('; ');
-
-  throw new InvalidArgumentError(`${label}: ${issues}`);
+  throw new InvalidArgumentError(
+    `${label}: ${formatEffectParseIssues(result.left.issue)}`,
+  );
 }
 
 /**
- * Returns a Commander option parser function that validates the raw string value with the given Zod schema.
+ * Returns a Commander option parser that validates the raw string with an Effect Schema.
  */
-export function parseOptionValue<TSchema extends z.ZodTypeAny>({
+export function parseOptionValue<A, I>({
   schema,
   optionLabel,
 }: {
-  schema: TSchema;
+  schema: Schema.Schema<A, I, never>;
   optionLabel: string;
-}): (value: z.input<TSchema>) => z.output<TSchema> {
-  return (value) => parseWithSchema({ schema, value, label: optionLabel });
+}): (value: I) => A {
+  return (value) =>
+    parseWithEffectSchema({ schema, value, label: optionLabel });
 }
 
 /**
- * Parses a Commander options object with a Zod schema.
+ * Parses a Commander options object with an Effect Schema.
  */
-export function parseOptionsObject<TSchema extends z.ZodTypeAny>({
+export function parseOptionsObject<A, I>({
   schema,
   options,
   optionsLabel,
 }: {
-  schema: TSchema;
+  schema: Schema.Schema<A, I, never>;
   options: unknown;
   optionsLabel: string;
-}): z.output<TSchema> {
-  return parseWithSchema({ schema, value: options, label: optionsLabel });
+}): A {
+  return parseWithEffectSchema({
+    schema,
+    value: options,
+    label: optionsLabel,
+  });
 }

@@ -1,6 +1,8 @@
 import path from 'node:path';
 
-import { Effect } from 'effect';
+import { Effect, Schema } from 'effect';
+import * as Either from 'effect/Either';
+import * as ParseResult from 'effect/ParseResult';
 
 import { AGENT_DEFINITIONS } from './agent-definitions.js';
 import {
@@ -46,7 +48,32 @@ function collectSyncAgents(): SyncAgent[] {
   return agents;
 }
 
-export const SYNC_AGENTS = collectSyncAgents();
+/**
+ * `Schema.Literal` needs a non-empty tuple; registry must list at least one agent.
+ */
+function toNonEmptySyncAgents(
+  agents: readonly SyncAgent[],
+): [SyncAgent, ...SyncAgent[]] {
+  const [first, ...rest] = agents;
+  if (first === undefined) {
+    throw new Error('At least one sync agent must be registered.');
+  }
+  return [first, ...rest];
+}
+
+export const SYNC_AGENTS: readonly SyncAgent[] =
+  toNonEmptySyncAgents(collectSyncAgents());
+
+/**
+ * Validates manifest/config agent ids against {@link AGENT_DEFINITIONS} keys.
+ *
+ * Uses {@link Schema.Literal} from the registry (not a brand) so decoded type
+ * stays `SyncAgent` — same closed union as `keyof typeof AGENT_DEFINITIONS`.
+ */
+export const SyncAgentSchema = Schema.Literal(...SYNC_AGENTS).annotations({
+  identifier: 'SyncAgent',
+  message: () => 'Expected one configured sync agent.',
+});
 
 export type OwnershipKey = string;
 
@@ -305,15 +332,18 @@ export function buildCommandArtifactSpecsByAgent(input: {
     for (const agent of SYNC_AGENTS) {
       const { frontmatterSectionSchema } = AGENT_DEFINITIONS[agent].command;
 
-      const result = frontmatterSectionSchema.safeParse(
+      const decodeResult = Schema.decodeUnknownEither(frontmatterSectionSchema)(
         agentSpecificValues.get(agent),
+        { errors: 'all' },
       );
 
-      if (!result.success) {
+      if (Either.isLeft(decodeResult)) {
         yield* Effect.logWarning(
           `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
             {
-              issues: result.error.issues,
+              issues: ParseResult.ArrayFormatter.formatIssueSync(
+                decodeResult.left.issue,
+              ),
               pathPrefix: `agents.${agent}`,
             },
           )}`,
@@ -328,7 +358,7 @@ export function buildCommandArtifactSpecsByAgent(input: {
             description: input.frontmatter.description,
             sourceFileStem: path.basename(input.filePath, '.md'),
             body: input.body,
-            ...(result.data ?? {}),
+            ...(decodeResult.right ?? {}),
           },
           targetRoots: input.targetRoots,
         }),
@@ -376,15 +406,18 @@ export function buildRuleArtifactSpecsByAgent(input: {
       const { frontmatterSectionSchema, buildArtifactSpec } =
         AGENT_DEFINITIONS[agent].rule;
 
-      const result = frontmatterSectionSchema.safeParse(
+      const decodeResult = Schema.decodeUnknownEither(frontmatterSectionSchema)(
         sectionValues.get(agent),
+        { errors: 'all' },
       );
 
-      if (!result.success) {
+      if (Either.isLeft(decodeResult)) {
         yield* Effect.logWarning(
           `Skipping ${getAgentLabel(agent)} for ${input.filePath}: ${formatValidationIssues(
             {
-              issues: result.error.issues,
+              issues: ParseResult.ArrayFormatter.formatIssueSync(
+                decodeResult.left.issue,
+              ),
               pathPrefix: `agents.${agent}`,
             },
           )}`,
@@ -396,7 +429,7 @@ export function buildRuleArtifactSpecsByAgent(input: {
         buildArtifactSpec({
           input: {
             ...baseSource,
-            ...(result.data ?? {}),
+            ...(decodeResult.right ?? {}),
           },
           targetRoots: input.targetRoots,
         }),

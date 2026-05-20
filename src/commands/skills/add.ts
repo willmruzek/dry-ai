@@ -70,7 +70,7 @@ export class SkillsAddLockfilePersistAfterInstallError extends Data.TaggedError(
 /**
  * Normalizes and de-duplicates requested skill names while preserving their input order.
  */
-function normalizeRequestedSkillNames(skillNames: string[]): string[] {
+function normalizeRequestedSkillNames(skillNames: readonly string[]): string[] {
   const uniqueSkillNames: string[] = [];
   const seenSkillNames = new Set<string>();
 
@@ -124,7 +124,7 @@ function resolveRequestedImportPath(input: {
 type SkillsAddInput = {
   repo: string;
   repoPath: string | undefined;
-  skillNames: string[];
+  skillNames: readonly string[];
   asName: string | undefined;
   pin: boolean;
   ref: string | undefined;

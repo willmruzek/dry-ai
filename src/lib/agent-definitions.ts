@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { z } from 'zod';
+import { Schema } from 'effect';
 
 import { defineAgent } from './agent-definition-helpers.js';
 import type {
@@ -14,14 +14,27 @@ import { compactObject } from './object-helpers.js';
 
 type ConfiguredTargetRoots = Record<string, Record<string, string>>;
 
+const agentFrontmatterRecord = Schema.Record({
+  key: Schema.String,
+  value: Schema.Unknown,
+});
+
 /**
  * Per-agent `agents.<id>` blocks: accept any YAML object keys without dry-ai
  * policy validation; reject non-objects when the section is present.
  */
-export const looseAgentFrontmatterRecordSchema = z.preprocess(
-  (val) => (val === null ? undefined : val),
-  z.union([z.record(z.string(), z.unknown()), z.undefined()]),
+export const LooseAgentFrontmatterRecord = Schema.transform(
+  Schema.NullishOr(agentFrontmatterRecord),
+  Schema.UndefinedOr(agentFrontmatterRecord),
+  {
+    strict: false,
+    decode: (value) => (value === null ? undefined : value),
+    encode: (value) => value,
+  },
 );
+
+export type LooseAgentFrontmatterRecord =
+  typeof LooseAgentFrontmatterRecord.Type;
 
 function metadataFromCommandInput(
   input: AgentCmdSource & Record<string, unknown>,
@@ -63,7 +76,7 @@ export const AGENT_DEFINITIONS = {
     },
 
     command: {
-      frontmatterSectionSchema: looseAgentFrontmatterRecordSchema,
+      frontmatterSectionSchema: LooseAgentFrontmatterRecord,
 
       ownershipKey: {
         prefix: 'copilot:prompt-path:',
@@ -95,7 +108,7 @@ export const AGENT_DEFINITIONS = {
     },
 
     rule: {
-      frontmatterSectionSchema: looseAgentFrontmatterRecordSchema,
+      frontmatterSectionSchema: LooseAgentFrontmatterRecord,
 
       ownershipKey: {
         prefix: 'copilot:instruction-path:',
@@ -157,7 +170,7 @@ export const AGENT_DEFINITIONS = {
     },
 
     command: {
-      frontmatterSectionSchema: looseAgentFrontmatterRecordSchema,
+      frontmatterSectionSchema: LooseAgentFrontmatterRecord,
 
       ownershipKey: {
         prefix: 'cursor:skill-name:',
@@ -189,7 +202,7 @@ export const AGENT_DEFINITIONS = {
     },
 
     rule: {
-      frontmatterSectionSchema: looseAgentFrontmatterRecordSchema,
+      frontmatterSectionSchema: LooseAgentFrontmatterRecord,
 
       ownershipKey: {
         prefix: 'cursor:rule-path:',
